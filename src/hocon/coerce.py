@@ -20,6 +20,7 @@ __all__ = [
     "coerce_number",
     "parse_bytes",
     "parse_duration",
+    "parse_period",
 ]
 
 DECIMAL_NUMBER_RE = re.compile(r"-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
@@ -136,6 +137,52 @@ def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float
         return math.nan
     ms = num * mult
     return ms / divisor
+
+
+# S20 — Period format. Values are bounded to i32 like Lightbend
+# (`Integer.parseInt`) and rs.hocon's `Period { i32, i32, i32 }`, so a period
+# that would overflow there is invalid here too, not silently widened.
+_I32_MIN = -(2**31)
+_I32_MAX = 2**31 - 1
+
+
+def parse_period(value: str) -> tuple[int, int, int] | None:
+    """Parse a HOCON period string into a ``(years, months, days)`` tuple.
+
+    Accepts ``[ws] integer [ws] [unit] [ws]``; a bare number is taken as days
+    (S20.1, HOCON.md L1321). Unit names are case-sensitive lowercase (the
+    S19.8 duration rule applies to periods too, HOCON.md L1304). Period is
+    integer-only per Lightbend ``Integer.parseInt`` — fractional strings like
+    ``"7.5"`` return None (up03), unlike duration/bytes which accept them.
+    """
+    trimmed = _trim_hocon_ws(value)
+    if not trimmed:
+        return None
+    i = 0
+    while i < len(trimmed) and (("0" <= trimmed[i] <= "9") or trimmed[i] in "+-"):
+        i += 1
+    num_str = trimmed[:i]
+    unit = _trim_hocon_ws(trimmed[i:])
+    if not num_str:
+        return None
+    try:
+        n = int(num_str)
+    except ValueError:
+        return None
+    if not _I32_MIN <= n <= _I32_MAX:
+        return None
+    if unit == "" or unit in ("d", "day", "days"):
+        return (0, 0, n)
+    if unit in ("w", "week", "weeks"):
+        days = n * 7
+        if not _I32_MIN <= days <= _I32_MAX:
+            return None
+        return (0, 0, days)
+    if unit in ("m", "mo", "month", "months"):
+        return (0, n, 0)
+    if unit in ("y", "year", "years"):
+        return (n, 0, 0)
+    return None
 
 
 ByteUnit = str  # 'B' | 'KB' | 'KiB' | 'MB' | 'MiB' | 'GB' | 'GiB' | 'TB' | 'TiB'
