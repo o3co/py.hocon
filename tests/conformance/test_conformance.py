@@ -70,7 +70,9 @@ def _discover() -> list[tuple[str, Path, Any]]:
         for f in files:
             if not f.endswith("-expected.json") or f.endswith("-expected-error.json"):
                 continue
-            rel = os.path.relpath(os.path.join(root, f), _EXPECTED)
+            # Posix-normalized so the group-prefix holdouts below match on
+            # Windows too (os.walk yields backslash separators there).
+            rel = Path(root, f).relative_to(_EXPECTED).as_posix()
             base = rel[: -len("-expected.json")]
             # empty-file group is a documented divergence — held out (see docstring).
             if base.startswith("empty-file/"):
