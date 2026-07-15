@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    # Least-privilege: only the publish job needs write scope (contents for
+    # the GitHub Release, id-token for PyPI Trusted Publishing). Workflow-level
+    # `permissions: {}` denies by default so future jobs added here don't
+    # inherit write access without an explicit declaration.
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set version from tag
+        # Idempotent: skip the rewrite if pyproject.toml is already at the
+        # tag's version, so a release-prep PR that pre-bumped the manifest
+        # doesn't break the publish (same convention as the siblings).
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/v}"
+          CURRENT=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          if [ "$TAG_VERSION" != "$CURRENT" ]; then
+            sed -i "s/^version = \"$CURRENT\"/version = \"$TAG_VERSION\"/" pyproject.toml
+          else
+            echo "pyproject.toml already at $CURRENT — skipping bump"
+          fi
+
+      - name: Fetch conformance corpus
+        run: make testdata
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . --group dev
+
+      - name: Type check
+        run: mypy
+
+      - name: Test
+        run: python -m pytest
+
+      - name: Build distributions
+        run: |
+          python -m pip install build
+          python -m build
+
+      - name: Extract CHANGELOG section for this tag
+        # Pulls the section between `## [VERSION]` and the next `## [`
+        # from CHANGELOG.md so the GitHub Release body matches what's
+        # already committed and reviewed.
+        #
+        # Uses `index($0, str) == 1` (prefix match) rather than awk regex
+        # so SemVer build metadata (`+...`) and other regex metacharacters
+        # in version strings can't break or overmatch the section header.
+        #
+        # Runs BEFORE the PyPI upload (and the GitHub Release step below)
+        # so that a missing/incorrect CHANGELOG heading fails the run
+        # without first publishing — PyPI doesn't allow re-uploading the
+        # same version, so an irreversible upload followed by a failed
+        # release step would leave a half-shipped tag.
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          awk -v ver="$VERSION" '
+            index($0, "## [" ver "]") == 1 { flag=1; next }
+            flag && index($0, "## [") == 1 { flag=0 }
+            flag
+          ' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "::error::No CHANGELOG section found for v${VERSION}; aborting release so an empty body doesn't ship"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        # Runs before the PyPI upload so a Release-creation failure doesn't
+        # leave a PyPI artifact published without a GitHub Release entry
+        # (PyPI forbids re-uploading the same version, so a retry would fail
+        # at the upload step and never reach this step again).
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body_path: /tmp/release-notes.md
+          fail_on_unmatched_files: false
+          make_latest: true
+
+      - name: Publish to PyPI
+        # Trusted Publishing (OIDC) — no API token. Requires this repo +
+        # workflow file to be registered as a trusted publisher for the
+        # `py.hocon` project on PyPI before the first release.
+        uses: pypa/gh-action-pypi-publish@release/v1
