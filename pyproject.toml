@@ -52,3 +52,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+# SIM102/SIM103 would collapse the guard-chain predicates that mirror ts.hocon's
+# structure 1:1 (lexer/coerce whitespace tables, parser scalar-type detection);
+# keeping the ported shape is worth more than the one-liner form here.
+ignore = ["SIM102", "SIM103"]
