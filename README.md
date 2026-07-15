@@ -18,7 +18,7 @@ See [Spec Compliance](#spec-compliance) for the current conformance rate.
 > **Library stance** — py.hocon is a HOCON config loader. Its purpose is reading
 > `.conf` config files and providing typed access via the `Config` API
 > (`get_string`, `get_number`, `get_boolean`, `get_duration`, `get_bytes`,
-> `to_object`). It is not a low-level parser API — internal types under
+> `get_period`, `to_object`). It is not a low-level parser API — internal types under
 > `hocon._internal` may change between minor versions.
 >
 > **Cross-language conformance** — This implementation is tested against shared
@@ -98,7 +98,8 @@ making it a strong fit for anything beyond flat key-value config.
 - `include` directives: `include "file.conf"`, `include file("...")`,
   `include package("id", "file")`, and `include required(...)` wrappers
 - Triple-quoted strings (`"""..."""`)
-- Duration and byte-size parsing (`get_duration()`, `get_bytes()`)
+- Duration, period, and byte-size parsing (`get_duration()`, `get_period()`,
+  `get_bytes()`)
 - Environment-variable substitution (`${HOME}`) and env-var list expansion
   (`${NAME[]}` → `NAME_0`, `NAME_1`, …)
 - Numerically-keyed object → array conversion
@@ -148,6 +149,7 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `get_boolean(path)` | `bool` | missing, wrong type, or unresolved |
 | `get_duration(path, unit=None)` | `float` | missing, wrong type, or invalid duration |
 | `get_bytes(path, unit=None)` | `float` | missing, wrong type, or invalid byte size |
+| `get_period(path)` | `Period` | missing, wrong type, or invalid period |
 | `get_config(path)` | `Config` | missing, not an object, or unresolved |
 | `get_list(path)` | `list` | missing, not an array, or unresolved |
 | `get_value(path)` | `HoconValue \| None` | subtree unresolved |
@@ -283,18 +285,23 @@ description = """
 path = /usr/local/bin
 ```
 
-### Duration and Byte Sizes
+### Durations, Periods, and Byte Sizes
 
 ```python
+from hocon import Period
+
 c = hocon.parse("""
     timeout   = "30s"
     cache-ttl = "5m"
+    retention = "2w"
     max-size  = "512MiB"
 """)
 
 c.get_duration("timeout")         # 30000.0 (ms)
 c.get_duration("timeout", "s")    # 30.0
 c.get_duration("cache-ttl", "m")  # 5.0
+
+c.get_period("retention")         # Period(years=0, months=0, days=14)
 
 c.get_bytes("max-size")           # 536870912 (bytes)
 c.get_bytes("max-size", "MiB")    # 512.0
@@ -306,6 +313,14 @@ lowercase (HOCON spec S19.8). Byte units are more case-tolerant: the canonical
 forms plus lowercase aliases (`kb`, `kib`, …), any-case long forms (`megabytes`),
 and single-letter powers-of-two in both cases (`K`/`k`, per Lightbend, S21.4).
 Supported byte units: `B`, `KB`/`KiB`, `MB`/`MiB`, `GB`/`GiB`, `TB`/`TiB`.
+
+`get_period` (spec S20.1–S20.4) returns a `Period(years, months, days)` value —
+a frozen dataclass mirroring rs.hocon's `Period` struct. Supported units:
+`d`/`day`/`days` (default for bare numbers), `w`/`week`/`weeks` (folded into
+days), `m`/`mo`/`month`/`months`, `y`/`year`/`years` — lowercase only, like
+durations. Periods are **integer-only** (Lightbend `Integer.parseInt`):
+fractional values such as `"7.5"` raise `ConfigError`, unlike `get_duration` /
+`get_bytes` which accept them. Negative periods are permitted.
 
 ## Performance
 

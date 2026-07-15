@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Config.get_period` + `Period(years, months, days)` frozen dataclass —
+  S20.1–S20.4 period accessor at rs.hocon parity (ts / go remain ➖ here):
+  integer-only per Lightbend `Integer.parseInt` (fractional rejected, up03),
+  bare numbers default to days (HOCON.md L1321), lowercase-only units
+  (`d`/`day`/`days`, `w`/`week`/`weeks` folded into days, `m`/`mo`/`month`/
+  `months`, `y`/`year`/`years`), negative periods permitted, i32-bounded.
 - Initial parser implementation, ported from `@o3co/ts.hocon` with the same
   3-stage pipeline (Lexer → Parser → Resolver):
   - **Lexer** — full HOCON whitespace set, quoted / triple-quoted / unquoted

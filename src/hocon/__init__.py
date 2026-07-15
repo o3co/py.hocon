@@ -8,7 +8,7 @@ rs.hocon's snake_case accessor naming.
 
 from __future__ import annotations
 
-from .config import Config
+from .config import Config, Period
 from .errors import (
     ConfigError,
     NotResolvedError,
@@ -47,6 +47,7 @@ __all__ = [
     "NotResolvedError",
     "PackageLookupError",
     "ParseError",
+    "Period",
     "ResolveError",
     "ScalarValueType",
     "__version__",

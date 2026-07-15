@@ -18,16 +18,21 @@ fixtures (`test01`, `test03`) reference JVM system properties
 `${?java.version}` / `${?user.home}`, which resolve only inside a JVM — every
 non-JVM parser caps at 14/16.
 
-## Per-impl out-of-scope (➖)
+## Per-impl notes
 
-Expected beyond the 17 globally out-of-scope items:
-
-- **S1.1** — Python `str` is pre-decoded Unicode at the I/O boundary; byte-level
-  UTF-8 handling happens outside the parser (same rationale as ts.hocon).
-- **S23.5, S23.6** — `.properties` multi-line + Unicode escapes (documented
-  simplification, shared with the siblings).
-- URL / classpath includes (S14a.2 etc.) — unsupported by design across all
-  siblings.
+- **S1.1 ➖** — beyond the 17 globally out-of-scope items: Python `str` is
+  pre-decoded Unicode at the I/O boundary; byte-level UTF-8 handling happens
+  outside the parser (same rationale as ts.hocon).
+- **S20.1–S20.4 ✅** — `get_period` / `Period(years, months, days)` implemented
+  to rs.hocon's behaviour (integer-only per Lightbend `Integer.parseInt`, bare
+  numbers default to days, lowercase-only units, negative permitted). ts / go
+  remain ➖ here; rs.hocon is the reference. Tests: `tests/test_period.py`
+  (mirrors rs `parse_period` unit tests + units-default up01–up05 scenarios).
+- **S23.5, S23.6, S14a.2 (URL / classpath includes) ➖** — inside the 17
+  globally out-of-scope items (see xx.hocon `docs/compliance-matrix.md`
+  §Globally out-of-scope); listed here only because users ask about them:
+  `.properties` multi-line + Unicode escapes are a documented simplification,
+  and URL / classpath includes are unsupported by design across all siblings.
 
 > Item-level S-rows are added as the compliance matrix is reconciled. This file
 > mirrors the canonical S-rows only — it must not introduce items that do not

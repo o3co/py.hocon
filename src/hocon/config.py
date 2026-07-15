@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 from typing import Any, cast
 
 from ._internal.resolver.resolver import (
@@ -36,12 +37,28 @@ from .coerce import (
     coerce_number,
     parse_bytes,
     parse_duration,
+    parse_period,
 )
 from .errors import ConfigError, NotResolvedError
 from .numeric_array import numeric_object_to_array
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue, ScalarValueType
 
-__all__ = ["Config"]
+__all__ = ["Config", "Period"]
+
+
+@dataclass(frozen=True)
+class Period:
+    """A calendar period with year, month, and day components.
+
+    Returned by :meth:`Config.get_period`. All fields are plain ``int``s;
+    negative periods are permitted (matches Lightbend behaviour). New fields
+    (e.g. weeks, hours) may be added in a future minor version — mirrors
+    rs.hocon's ``#[non_exhaustive]`` ``Period`` struct.
+    """
+
+    years: int
+    months: int
+    days: int
 
 
 class Config:
@@ -166,6 +183,20 @@ class Config:
         if result < 0:
             raise ConfigError(f"byte size must be non-negative at {path}: {v.raw!r}", path)
         return result
+
+    def get_period(self, path: str) -> Period:
+        """Calendar :class:`Period` at ``path`` (S20.1–S20.4). Accepts
+        ``"7d"`` / ``"2w"`` / ``"3m"`` / ``"1y"`` style strings or a bare
+        integer, which is taken as days (HOCON.md L1321). Period is
+        integer-only (Lightbend ``Integer.parseInt``): fractional values
+        raise, unlike :meth:`get_duration` / :meth:`get_bytes`."""
+        v = self._require_scalar(path)
+        if v.value_type != "string" and v.value_type != "number":
+            raise ConfigError(f"expected period at {path}, got {v.value_type}", path)
+        parsed = parse_period(v.raw)
+        if parsed is None:
+            raise ConfigError(f"invalid period at {path}: {v.raw!r}", path)
+        return Period(*parsed)
 
     def get_config(self, path: str) -> Config:
         v = self._lookup_node(path)
