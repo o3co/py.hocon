@@ -1,4 +1,4 @@
-"""Scaffold smoke tests: public surface exists and the error hierarchy holds."""
+"""Smoke tests: public surface, error hierarchy, and basic parse/resolve."""
 
 import pytest
 
@@ -22,8 +22,8 @@ def test_public_surface() -> None:
 
 
 def test_error_hierarchy() -> None:
-    # ParseError / ResolveError and ConfigError are intentionally separate
-    # trees (parity with ts.hocon src/errors.ts).
+    # ParseError / ResolveError and ConfigError are intentionally separate trees
+    # (parity with ts.hocon src/errors.ts).
     assert issubclass(PackageLookupError, ResolveError)
     assert issubclass(NotResolvedError, ConfigError)
     assert not issubclass(ParseError, ConfigError)
@@ -43,10 +43,53 @@ def test_error_fields() -> None:
     assert "resolve()" in str(nerr)
 
 
-def test_parse_not_implemented_yet() -> None:
-    with pytest.raises(NotImplementedError):
-        hocon.parse("a = 1")
-    with pytest.raises(NotImplementedError):
-        hocon.parse_string("a = 1")
-    with pytest.raises(NotImplementedError):
-        hocon.parse_file("app.conf")
+def test_parse_scalars_and_nesting() -> None:
+    cfg = hocon.parse('a = 1\nb = "two"\nc { d = true, e = null }')
+    assert cfg.get_int("a") == 1
+    assert cfg.get_string("b") == "two"
+    assert cfg.get_boolean("c.d") is True
+    assert cfg.get("c.e") is None
+    assert cfg.to_object() == {"a": 1, "b": "two", "c": {"d": True, "e": None}}
+
+
+def test_substitution() -> None:
+    cfg = hocon.parse('a = 1\nb = ${a}\nc = ${a}px')
+    assert cfg.get_int("b") == 1
+    assert cfg.get_string("c") == "1px"
+
+
+def test_object_merge_and_arrays() -> None:
+    cfg = hocon.parse("a { x = 1 }\na { y = 2 }\nlist = [1, 2, 3]")
+    assert cfg.to_object() == {"a": {"x": 1, "y": 2}, "list": [1, 2, 3]}
+
+
+def test_self_append() -> None:
+    cfg = hocon.parse("a = [1]\na += 2\na += 3")
+    assert cfg.get_list("a") == [1, 2, 3]
+
+
+def test_duration_and_bytes() -> None:
+    cfg = hocon.parse("t = 5s\nsize = 1K")
+    assert cfg.get_duration("t") == 5000.0
+    assert cfg.get_bytes("size") == 1024
+
+
+def test_from_map_roundtrip() -> None:
+    cfg = hocon.from_map({"a": 1, "b": [True, None, "x"], "c": {"d": 2.5}})
+    assert cfg.to_object() == {"a": 1, "b": [True, None, "x"], "c": {"d": 2.5}}
+
+
+def test_empty_input_rejected() -> None:
+    with pytest.raises(ParseError):
+        hocon.parse("   \n # comment only \n")
+
+
+def test_missing_path_raises() -> None:
+    cfg = hocon.parse("a = 1")
+    with pytest.raises(ConfigError):
+        cfg.get_string("nope")
+
+
+def test_circular_substitution_raises() -> None:
+    with pytest.raises(ResolveError):
+        hocon.parse("a = ${b}\nb = ${a}")

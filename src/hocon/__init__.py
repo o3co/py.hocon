@@ -17,17 +17,50 @@ from .errors import (
     ResolveError,
 )
 from .parse import parse, parse_file, parse_string
+from .value import (
+    HoconArray,
+    HoconObject,
+    HoconScalar,
+    HoconValue,
+    ScalarValueType,
+    as_array,
+    as_boolean,
+    as_number,
+    as_object,
+    as_string,
+    is_array,
+    is_null,
+    is_object,
+    is_scalar,
+)
+from .value_factory import empty, from_map
 
 __version__ = "0.0.0"
 
 __all__ = [
     "Config",
     "ConfigError",
+    "HoconArray",
+    "HoconObject",
+    "HoconScalar",
+    "HoconValue",
     "NotResolvedError",
     "PackageLookupError",
     "ParseError",
     "ResolveError",
+    "ScalarValueType",
     "__version__",
+    "as_array",
+    "as_boolean",
+    "as_number",
+    "as_object",
+    "as_string",
+    "empty",
+    "from_map",
+    "is_array",
+    "is_null",
+    "is_object",
+    "is_scalar",
     "parse",
     "parse_file",
     "parse_string",
