@@ -5,7 +5,7 @@ TESTDATA_REPO := o3co/xx.hocon
 TESTDATA_REF  := main
 TESTDATA_DIR  := tests/conformance/testdata
 
-.PHONY: setup test lint typecheck check testdata clean
+.PHONY: setup test lint typecheck check bench testdata clean
 
 # Bootstrap the dev venv (idempotent).
 setup:
@@ -17,12 +17,15 @@ test:
 	$(VENV)/bin/python -m pytest
 
 lint:
-	$(VENV)/bin/ruff check src tests
+	$(VENV)/bin/ruff check src tests benchmarks
 
 typecheck:
 	$(VENV)/bin/mypy
 
 check: lint typecheck test
+
+bench:
+	$(VENV)/bin/python benchmarks/bench.py
 
 # Sync the conformance corpus (fixtures + Lightbend-generated expected JSON)
 # from o3co/xx.hocon. Skips the download when the pinned sha is current.
