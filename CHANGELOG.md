@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `tools/hocon_json.py` — differential-harness adapter registering py.hocon in
+  xx.hocon's cross-impl driver (`generate/DifferentialDriver.java`). Parses +
+  resolves a `.conf` and emits canonical JSON to stdout (via the oracle-aligned
+  `_render_json_for_test` renderer, mirroring ts.hocon), or a single-line
+  `{"__error__":{type,message}}` record + exit 3 on failure. `tests/test_hocon_json_adapter.py`
+  runs it over the whole spec-corpus and asserts equality with the
+  Lightbend-generated expected JSON (an in-repo oracle differential), plus
+  CLI-contract and process-env-resolution checks. `ruff` now also lints `tools`.
 - Conformance-corpus expansion — five new fixture harnesses closing the gap to
   the sibling test surface (full suite: 306 passed / 1 skipped / 4 xfailed):
   - `tests/conformance/test_error_fixtures.py` — 38 error fixtures
