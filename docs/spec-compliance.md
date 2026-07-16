@@ -44,9 +44,11 @@ Status legend follows the shared convention: ✅ test passes / ⚠️ partial /
 
 ## Item-level matrix
 
-Snapshot: 2026-07-16 (post S20 implementation). 🤷 rows are behavior ported
-from ts.hocon (with rs-gap fixes) not yet pinned by a py-side test or consumed
-fixture; they burn down as the conformance-fixture expansion lands.
+Snapshot: 2026-07-16 (post conformance-expansion — error-fixture,
+units-default, deferred-resolution, properties-conflict and include-package
+harnesses landed; suite: 306 passed / 1 skipped / 4 xfailed). 🤷 rows are
+behavior ported from ts.hocon (with rs-gap fixes) not yet pinned by a py-side
+test or consumed fixture; they burn down as further expansion waves land.
 
 In this matrix ⚠️ means **coverage-partial** — a named py test/fixture pins a
 strict subset of the item's surface, with the remainder pending — not a known
@@ -57,10 +59,34 @@ Citation shorthand used on `tests:` lines:
 
 - `corpus: <group>/<ids>` — fixtures under `tests/conformance/testdata/hocon/`
   executed by `tests/conformance/test_conformance.py::test_fixture` (parse +
-  resolve + full-tree compare against Lightbend expected JSON). Only non-error
-  fixtures with `-expected.json` sidecars are consumed; error fixtures
-  (`.error` / `-expected-error.json`), `units-default`, `include-package`,
-  `properties-conflict`, and `deferred-resolution` are **not yet consumed**.
+  resolve + full-tree compare against Lightbend expected JSON). The corpus
+  runner consumes non-error fixtures with `-expected.json` sidecars; the groups
+  it holds out are consumed by the dedicated harnesses below (`error:`,
+  `units:`, `dr:`, `pc:`, `ipk:`). Still unconsumed: equiv-only fixtures
+  without shared expected sidecars (e.g. equiv01/unquoted.conf,
+  equiv05/triple-quotes.conf) and items siblings pin only via per-impl unit
+  tests.
+- `error: <group>/<ids>` — must-error fixtures (`.error` /
+  `-expected-error.json` sidecars plus the E5/E9 per-impl overrides ce05,
+  ir03, ir04) executed by `tests/conformance/test_error_fixtures.py`
+  (38 fixtures asserted to raise; error class pinned per family —
+  `ResolveError` for concat-errors / env-var-list / self-ref-lookback,
+  `ParseError` for include-reservation, any `ConfigError` subclass elsewhere).
+- `units: <ids>` — units-default fixtures (ud01–ud08 / ub01–ub06 / un01–un03)
+  driven through `get_duration` / `get_bytes` by `tests/test_units_default.py`
+  (port of rs.hocon `tests/units_default_test.rs`; the up01–up05 period
+  scenarios live in `tests/test_period.py`).
+- `dr: <ids>` — E12 deferred-resolution scenario YAMLs (dr01–dr30, 31
+  scenarios + corpus guard + 2 programmatic companions) run by
+  `tests/test_deferred_resolution_fixtures.py` (parse → `with_fallback` →
+  `resolve` lifecycle).
+- `pc: <ids>` / `ipk: <ids>` — properties-conflict `.properties` fixtures
+  driven through the include loader by
+  `tests/test_properties_conflict_fixtures.py`, and E11 include-package
+  fixtures driven with an in-memory registry resolver by
+  `tests/test_include_package_fixtures.py` (ipk03 is skipped as per-impl N/A —
+  py.hocon has no registration API to collide on; E11 decision 3, same
+  exemption as ts.hocon).
 - `smoke: <name>` / `period: <name>` — named tests in `tests/test_smoke.py` /
   `tests/test_period.py`.
 - `(incidental)` — the fixture was not authored for this item, but a violation
@@ -76,17 +102,17 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: subst-tokenize/st10–st14, st19, st20
   status: ✅
 - **S1.2.2** Unknown / invalid escape sequence (e.g. `\q`, `\x`) is rejected — §Unchanged from JSON (L118)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by subst-tokenize/st-err01, st-err02 (error fixtures, not yet consumed)
+  tests: error: subst-tokenize/st-err01 (`\x`), st-err02 (`\q`)
+  status: ✅
 - **S1.2.3** Malformed `\uXXXX` (short / non-hex) is rejected — §Unchanged from JSON (L118)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by subst-tokenize/st-err03, st-err04 (error fixtures, not yet consumed)
+  tests: error: subst-tokenize/st-err03 (short), st-err04 (non-hex)
+  status: ✅
 - **S1.2.4** Unescaped control char / raw newline in quoted string is rejected — §Unchanged from JSON (L118)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by subst-tokenize/st-err07 (error fixture, not yet consumed)
+  tests: error: subst-tokenize/st-err07 (raw newline in quoted string)
+  status: ✅
 - **S1.2.5** Unterminated quoted string is rejected — §Unchanged from JSON (L118)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by subst-tokenize/st-err06 (error fixture, not yet consumed)
+  tests: error: subst-tokenize/st-err06
+  status: ✅
 - **S1.2.6** Unpaired UTF-16 surrogate codepoint in `\uXXXX` escape — §Unchanged from JSON (L118)
   out-of-scope: intentional language-natural divergence. Java (Lightbend reference) silently accepts unpaired surrogates because Java strings are 16-bit code-unit sequences; Rust `char` and Go `rune` cannot represent them and reject. xx.hocon conformance fixtures cannot cover this case. Each implementation follows its language's string-type constraints.
   tests: —
@@ -213,7 +239,7 @@ Citation shorthand used on `tests:` lines:
   status: ✅
 - **S8.6** Unquoted string cannot begin with `0-9` or `-` — §Unquoted strings (L270)
   tests: corpus: unquoted-starts/us01–us14, us16–us30 (29 consumed fixtures — E8 Lightbend-aligned value-position reading); key-hyphen-position/kh01–kh08 (E13 — S8.6 not enforced on key path segments)
-  status: ✅ — post-E8 amendment, mirroring rs: value-start `-foo` accepted as unquoted, digit-leading runs coerced at the value layer. Known cross-impl gap us15 (`1e+x`, Lightbend value-parser error) is an error fixture the py corpus does not yet consume — unverified in py (rs tracks it as a `#[should_panic]` tripwire).
+  status: ✅ — post-E8 amendment, mirroring rs: value-start `-foo` accepted as unquoted, digit-leading runs coerced at the value layer. Known cross-impl gap us15 (`1e+x`, Lightbend value-parser error): the `+`-reservation mid-unquoted-run is enforced by NO sibling — py consumes the fixture as a strict-xfail tripwire (error: unquoted-starts/us15, `xfail(strict=True)`), mirroring ts.hocon#73 `it.fails` and rs.hocon's `#[should_panic]`; an XPASS fails the run the moment the gap closes.
 - **S8.7** No escape sequences in unquoted strings — §Unquoted strings (L253)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via lexer unit tests
@@ -251,8 +277,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: numeric-obj-array/na03c (`${obj1} ${obj2}` → merged object, no array conversion)
   status: ✅
 - **S10.4** Mixing arrays + objects in concat is an error — §Array and object concatenation (L385)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); only the success-boundary fixtures concat-errors/ce09, ce15 are consumed — the error assertions (ce01, ce02, ce07, ce08, ce10, ce11, ce14) are `.error` fixtures the corpus runner does not yet consume
+  tests: error: concat-errors/ce01, ce02, ce07, ce08, ce10, ce11, ce14 (`ResolveError` pinned); corpus: concat-errors/ce09, ce15 (success boundary)
+  status: ✅
 - **S10.5** Inner whitespace between simple values preserved — §String value concatenation (L332)
   tests: corpus: unquoted-parens/up01 (`hello (world)`), up03
   status: ✅
@@ -278,8 +304,8 @@ Citation shorthand used on `tests:` lines:
   tests: smoke: test_parse_scalars_and_nesting; corpus: subst-tokenize/st01 (`a=${v}` stays a number)
   status: ✅
 - **S10.13** Array/object appearing in string concat is an error — §String value concatenation (L373)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by concat-errors/ce03, ce04, ce06, ce12, ce13 (error fixtures, not yet consumed)
+  tests: error: concat-errors/ce03, ce04, ce06, ce12, ce13, ce05 (E5 per-impl override — Lightbend silently accepts `a = { b: 1 } x`, o3co strict-spec posture rejects) — `ResolveError` pinned
+  status: ✅
 - **S10.14** Whitespace around obj/array substitutions is ignored — §Concatenation with whitespace (L440)
   tests: corpus: self-ref-lookback/sr07, sr08; env-var-list/ev06–ev08; numeric-obj-array/na03a–na03c
   status: ✅
@@ -296,8 +322,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: numeric-obj-array/na03c (`${obj1} ${obj2}` → object merge)
   status: ✅
 - **S10.19** Mixing a substitution-resolved object with a literal array (or vice versa) is an error — §Array and object concatenation (L385-389)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by concat-errors/ce07, ce08 (error fixtures, not yet consumed)
+  tests: error: concat-errors/ce07 (`${obj}` + array), ce08 (`${arr}` + object), ce12, ce13 (resolved array/object in string concat) — `ResolveError` pinned
+  status: ✅
 
 ### S11. Path expressions
 
@@ -320,8 +346,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: test02 (`"" : { "" : { "" : 42 } }` + `${""."".""}`); subst-tokenize/st09
   status: ✅
 - **S11.7** `a..b` and paths starting/ending with `.` are errors — §Path expressions (L517)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by subst-tokenize/st-err09–st-err11 (error fixtures, not yet consumed)
+  tests: error: subst-tokenize/st-err08 (`${}` empty path), st-err09 (`${.foo}`), st-err10 (`${foo.}`), st-err11 (`${foo..bar}`); error: path-expr-whitespace/pw06 (trailing dot in key path, `a b. = 1`)
+  status: ✅
 - **S11.8** Path expression always stringifies (single `true` → `"true"`) — §Path expressions (L504)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
@@ -347,8 +373,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: path-expr-whitespace/pw04 (`a b.c d = 1`); key-hyphen-position/kh01, kh05
   status: ✅
 - **S12.5** `include` may NOT begin a path expression in a key — §Paths as keys (L570)
-  tests: corpus: include-reservation/ir05–ir09, ir11, ir14 (success-boundary side: quoted `"include"` key, non-initial `include`, value-position `include`, substitution path `${include}`)
-  status: ⚠️ — the boundary (reservation must not over-trigger) is pinned by the 7 consumed fixtures; the rejection side (ir01, ir02, ir10, ir12, ir13 `.error` fixtures + E9 overrides ir03/ir04) is not yet consumed
+  tests: corpus: include-reservation/ir05–ir09, ir11, ir14 (success-boundary side: quoted `"include"` key, non-initial `include`, value-position `include`, substitution path `${include}`); error: include-reservation/ir01, ir02, ir10, ir12, ir13 + ir03/ir04 (E9 per-impl overrides — Lightbend silently accepts `include.foo = 1`, o3co rejects) — `ParseError` pinned
+  status: ✅
 
 ### S13. Substitutions
 
@@ -380,8 +406,8 @@ Citation shorthand used on `tests:` lines:
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests + the Lightbend `ProbeS13_9` canon (tree keeps explicit null)
 - **S13.10** Required substitution undefined → error — §Substitutions (L627)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by cycle / test13-reference-bad-substitutions error fixtures (not yet consumed)
+  tests: error: test13-reference-bad-substitutions (root fixture)
+  status: ✅
 - **S13.11** Optional undefined in field value → field not created — §Substitutions (L632)
   tests: corpus: subst-tokenize/st15 (`x=${?missing}` → `{}`); include-env-fallback/iev01 (unset env optional leaves prior default intact)
   status: ✅
@@ -395,8 +421,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: concat-errors/ce15 (`[1] ${?missing}` → `[1]`); self-ref-lookback/sr07
   status: ✅
 - **S13.15** `foo : ${?bar}${?baz}` skipped only when BOTH undefined — §Substitutions (L640)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by unit tests + E12 dr28 (deferred-resolution, not yet consumed)
+  tests: dr: dr28 (`a = ${?x}${?y}`, both undefined → field omitted, expected tree `{}`)
+  status: ✅
 - **S13.16** Substitutions only in field values / array elements — §Substitutions (L644)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
@@ -407,8 +433,8 @@ Citation shorthand used on `tests:` lines:
   tests: smoke: test_substitution (`${a}px` → `"1px"`)
   status: ✅
 - **S13.19** Unterminated `${...}` (missing closing `}`) is rejected — §Substitutions syntax requires closing `}` (L579)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by subst-tokenize/st-err05 (error fixture, not yet consumed)
+  tests: error: subst-tokenize/st-err05
+  status: ✅
 
 #### S13a. Self-referential substitutions
 
@@ -416,20 +442,20 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: self-ref-lookback/sr06 (`a = "x"` then `a = ${a}foo` → `"xfoo"`)
   status: ✅
 - **S13a.2** Self-ref to overridden field works in merge — §Self-Referential (L748)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); the sibling pin (Lightbend test13 override) requires an API-level `with_fallback` merge, which the corpus tree-compare does not perform
+  tests: dr: dr04 (`a = ${?a} extra` + fallback `a = base` → `"base extra"`), dr05 (required form `a = ${a} extra` + fallback prior → succeeds)
+  status: ✅ — the API-level `with_fallback` merge the corpus tree-compare could not perform is now driven by the E12 scenario harness
 - **S13a.3** Self-ref before any prior value → undefined → error — §Self-Referential (L767)
-  tests: — (empirical rs-parity check only; no py pin test yet)
-  status: ✅ — mirrors rs.hocon: same error class as rs (`ResolveError` raised); message classification detail (undefined-vs-cycle wording, the point ts documents as ⚠️) pending. The sibling pin fixture test13-reference-bad-substitutions is an error fixture the corpus does not yet consume.
+  tests: error: self-ref-lookback/sr05 (`a = ${a}foo`, no prior — `ResolveError` pinned); dr: dr06 (required self-ref, no fallback prior — Lightbend-faithful `CycleError` category, mapped to `ResolveError` per the fixture's per-impl allowance)
+  status: ✅ — mirrors rs.hocon: same error class as rs (`ResolveError`); the message-classification detail (undefined-vs-cycle wording, the point ts documents as ⚠️) remains a cross-impl presentation difference, not a behavior gap
 - **S13a.4** Optional self-ref `${?foo}` disappears silently — §Self-Referential (L776)
   tests: corpus: self-ref-lookback/sr01, sr07 (`${?a}` with no prior vanishes from concat / array concat)
   status: ✅
 - **S13a.5** Substitution hidden by later non-object → no error — §Self-Referential (L780)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by unit tests + E12 dr22/dr23 (deferred-resolution, not yet consumed)
+  tests: dr: dr22 (same-source: `foo = ${nonexist}` overridden by `foo = 42` → no error), dr23 (across layers: receiver `foo = 42` hides fallback `foo = ${nonexist}`)
+  status: ✅
 - **S13a.6** Cycle inside object `a : { b : ${a} }` → error — §Self-Referential (L688)
   tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by the cycle error fixture (not yet consumed)
+  status: 🤷 — ported, pending dedicated test (conformance expansion); the root `cycle` error fixture is now consumed by the error harness but exercises a circular *include* (`include "cycle.conf"`), not the in-object substitution cycle, so it does not pin this row
 - **S13a.7** Cycle inside array `a : [${a}]` → error — §Self-Referential (L689)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); error case
@@ -449,7 +475,7 @@ Citation shorthand used on `tests:` lines:
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); siblings cite Lightbend test06 here, but that association is indirect (test06 exercises delayed merge, not the L791 `foo : ${foo.a}` shape) — a direct py pin test is preferred over inheriting it
 - **S13a.13** `a = ${?a}foo` resolves to `"foo"` (look-back undefined) — §Self-Referential (L841)
-  tests: corpus: self-ref-lookback/sr01–sr04, sr06–sr16 (15 consumed fixtures; sr05 is the required-form `.error` fixture, not yet consumed)
+  tests: corpus: self-ref-lookback/sr01–sr04, sr06–sr16 (15 consumed fixtures; the required-form error fixture sr05 is consumed by the error harness — see S13a.3)
   status: ✅
 - **S13a.14** Mutually-referring object fields (`bar.a = ${foo.d}; foo.c = ${bar.b}`) resolve lazily without false cycle — §Self-Referential (L825-834)
   tests: corpus: self-ref-lookback/sr11 (mutual object refs + later override, no false cycle)
@@ -476,14 +502,14 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: env-var-list/ev02 (gap stops the scan), ev10 (empty string ≠ absent)
   status: ✅
 - **S13c.3** `${X[]}` no elements → required error — §List values from env (L910)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by env-var-list/ev03 (error fixture, not yet consumed)
+  tests: error: env-var-list/ev03 (required `${X[]}` with zero indexed env vars — `ResolveError` pinned)
+  status: ✅
 - **S13c.4** `${?X[]}` no elements → undefined / removed — §List values from env (L912)
   tests: corpus: env-var-list/ev04, ev13
   status: ✅
 - **S13c.5** `[]` suffix supported only for env vars (not config / sys props) — §List values from env (L902)
-  tests: corpus: env-var-list/ev12b (optional form does NOT fall back to the bare scalar env var), ev05 + ev12c (config-defined wins, E6)
-  status: ✅ — required-form suppression (ev12a) is an error fixture, not yet consumed
+  tests: corpus: env-var-list/ev12b (optional form does NOT fall back to the bare scalar env var), ev05 + ev12c (config-defined wins, E6); error: env-var-list/ev12a (required form: `[]` suffix suppresses the scalar env-var fallback → `ResolveError` pinned)
+  status: ✅
 
 ### S14. Includes
 
@@ -504,8 +530,8 @@ Citation shorthand used on `tests:` lines:
   tests: —
   status: ➖
 - **S14a.5** `include required(...)` — §Include syntax (L930)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); no consumed fixture uses `required(...)`
+  tests: ipk: ipk05 (`include required(package(...))` registry miss → `PackageLookupError`, E11 decision 7)
+  status: ⚠️ — the `required(package(...))` miss path is pinned; `required(file(...))` and the heuristic `required("...")` forms (the S14d.2 side) remain unpinned
 - **S14a.6** Unquoted `include` at non-start-of-key is literal — §Include syntax (L962)
   tests: corpus: include-reservation/ir07 (`foo.include = 1`), ir08 (`a = include` value position)
   status: ✅
@@ -675,16 +701,16 @@ Citation shorthand used on `tests:` lines:
 
 - **S18.1** Number value taken as default unit — §Units format (L1279)
   tests: period: test_period_bare_number_scalar (`p = 7` → 7 days)
-  status: ⚠️ — pinned for the period family only; duration/bytes bare-number defaults are pending (units-default ud/ub fixtures not yet consumed)
+  status: ⚠️ — pinned for the period family only (number-typed scalar). The units-default group is now consumed, but its duration/bytes fixtures (units: ud01, ub01) carry quoted strings — those pin the string-no-unit path under S18.4; the *number-typed* duration/bytes value path (`t = 500` unquoted) remains unpinned because the fixture group has no such case
 - **S18.2** String parsed as: optional ws + number + ws + unit + ws — §Units format (L1281-1294)
-  tests: period: test_period_leading_trailing_ws, test_period_units (spaced forms); smoke: test_duration_and_bytes (`5s`, `1K` no-space forms)
-  status: ⚠️ — grammar pinned for period (incl. whitespace variants); duration/bytes are pinned only in the no-space form
+  tests: period: test_period_leading_trailing_ws, test_period_units (spaced forms); units: ud02–ud04 (leading / trailing / both outer ws), ud08 (ws between number and unit), ub02 (ws-padded bytes); smoke: test_duration_and_bytes (`5s`, `1K` no-space forms)
+  status: ✅ — grammar pinned across the period, duration and bytes families in both spaced and no-space forms
 - **S18.3** Unit name letters-only (Unicode L* / `isLetter`) — §Units format (L1287)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via s18_3-style unit tests
 - **S18.4** String with no unit → interpreted with default unit — §Units format (L1290)
-  tests: period: test_period_bare_integer_string (up01 scenario), test_period_leading_trailing_ws (up02 scenario)
-  status: ⚠️ — pinned for period ("7" → 7 days); duration (ud01–ud08) and bytes (ub01–ub06, un01–un03) scenarios are pending (units-default fixtures not yet consumed)
+  tests: period: test_period_bare_integer_string (up01 scenario), test_period_leading_trailing_ws (up02 scenario); units: ud01–ud06 (duration: bare / ws / fractional / negative no-unit strings → ms default), ub01–ub04 (bytes: bare / ws / fractional-truncated / negative no-unit strings → byte default)
+  status: ✅ — ud06 caveat: py returns signed −500 ms for `"-500"` (Lightbend `java.time.Duration` / go.hocon-faithful); rs pins `Err` only because `std::time::Duration` is unsigned (rs-side constraint, documented in rs's CHANGELOG) — the literal rs expectation is kept as a strict-xfail tripwire in `tests/test_units_default.py`, not a py violation
 
 ### S19. Duration format
 
@@ -695,8 +721,8 @@ Citation shorthand used on `tests:` lines:
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion)
 - **S19.3** `ms` / `milli` / `millis` / `millisecond` / `milliseconds` — §Duration format (L1309)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: units: ud07 (`500ms`, no-space), ud08 (`500 ms`, spaced)
+  status: ✅ — pinned via the `ms` short form in both grammar positions, the same representative pin rs.hocon cites for its ✅ (`"500 ms"`); the `milli`/`millis`/`millisecond`/`milliseconds` long forms are not separately exercised
 - **S19.4** `s` / `second` / `seconds` — §Duration format (L1310)
   tests: smoke: test_duration_and_bytes (`5s` → 5000.0 ms)
   status: ⚠️ — only the `s` short form is pinned; `second`/`seconds` long forms pending
@@ -710,8 +736,8 @@ Citation shorthand used on `tests:` lines:
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion)
 - **S19.8** Duration unit names are case sensitive (lowercase only) — §Duration format (L1304)
-  tests: period: test_period_uppercase_unit_rejected (`7D`, `7 Days`, `1Y`, `3 Months` rejected)
-  status: ⚠️ — the L1304 lowercase-only rule is pinned on the period accessor; the duration-side rejection (`"5 MS"`, `"100 Seconds"`) is pending a dedicated test
+  tests: period: test_period_uppercase_unit_rejected (`7D`, `7 Days`, `1Y`, `3 Months` rejected); units: ud07, ud08 (positive guard: lowercase `ms` keeps parsing)
+  status: ⚠️ — the L1304 lowercase-only rule is pinned on the period accessor, and the lowercase-accepted side of the duration path is now guarded by ud07/ud08; the duration-side uppercase *rejection* (`"5 MS"`, `"100 Seconds"`) is still unpinned
 
 ### S20. Period format
 
@@ -735,8 +761,8 @@ per-impl here (no period accessor); rs is the reference sibling.
 ### S21. Size in bytes format
 
 - **S21.1** `B` / `b` / `byte` / `bytes` — §Size in bytes format (L1361)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: units: ub01–ub03 (bare / ws-padded / fractional no-unit strings → byte counts via the default unit), ub04 (accessor invariant: negative byte size rejected at `get_bytes`, positive-only per Lightbend)
+  status: ⚠️ — the bytes-as-base-unit interpretation and the positive-only accessor invariant are pinned; the literal `B`/`b`/`byte`/`bytes` unit spellings are not exercised by any consumed fixture (rs pins them via its `"100 B"` per-impl unit test)
 - **S21.2** Powers of 10 (kB, MB, GB, TB, PB, EB, ZB, YB + long forms) — §Size in bytes format (L1365)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion)
@@ -744,38 +770,38 @@ per-impl here (no period accessor); rs is the reference sibling.
   tests: smoke: test_duration_and_bytes (`1K` → 1024)
   status: ⚠️ — only the `K` entry of the powers-of-2 table is pinned; `Ki`/`KiB` and the higher prefixes are pending
 - **S21.4** Single-letter abbreviations → powers of 2 (java -Xmx convention) — §Size in bytes format (L1385)
-  tests: smoke: test_duration_and_bytes (`1K` → 1024, binary not decimal)
-  status: ⚠️ — the binary rule is pinned for `K` only; M/G/T/P/E and fractional single-letter cases pend a bsl-style accessor test (the consumed byte-single-letter/bsl01–bsl09 fixtures pin the parse side only — their expected JSON carries the raw strings, `get_bytes` conversion is accessor-level)
+  tests: smoke: test_duration_and_bytes (`1K` → 1024, binary not decimal); units: ub05 (`1024K` → 1_048_576 — Lightbend binary ground truth, NOT SI-decimal 1_024_000)
+  status: ⚠️ — the binary rule is pinned for `K` only (now at accessor level via ub05 in addition to smoke); M/G/T/P/E and fractional single-letter cases pend a bsl-style accessor test (the consumed byte-single-letter/bsl01–bsl09 fixtures pin the parse side only — their expected JSON carries the raw strings, `get_bytes` conversion is accessor-level)
 - **S21.5** Fractional values supported (`0.5M`) — §Units format (L1281-1294) + §Size in bytes (L1335-1342)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); bsl09 (`0.5K`) is consumed parse-side only
+  tests: units: ub03 (`"1024.5"` → 1024 — fractional accepted, truncated toward zero per Lightbend `BigDecimal.toBigInteger`, NOT rounded), ud05 (duration side: `"500.5"` → 500.5 ms / 500_500_000 ns)
+  status: ⚠️ — fractional acceptance and the truncation rule are pinned at accessor level; the fractional-times-multiplier form (`0.5M`/`0.5K` → 512·…) remains accessor-unpinned (bsl09 `0.5K` is consumed parse-side only; rs pins it via its fractional-binary unit tests)
 
 ### S22. Config object merging API
 
 - **S22.1** `merge(A, B)` semantics = duplicate-key behavior — §Config object merging (L1402)
-  tests: —
-  status: 🤷 — ported (`Config.with_fallback` exists), pending dedicated test (conformance expansion)
+  tests: dr: dr01–dr03 (`with_fallback` layering incl. the go.hocon#99 lifecycle: parse → fallback layers → resolve), dr21 (transitive `a→b→c` substitution across three layers), dr29 (+ programmatic companion `test_dr29_empty_config_edges_programmatic`: empty-config edges)
+  status: ✅
 - **S22.2** Intermediate non-object hides earlier object across files — §Config object merging (L1406)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); E12 deferred-resolution scenarios (dr01–dr30) would pin this, not yet consumed
+  tests: dr: dr10 (scalar in fallback1 blocks fallback2's object from merging into the receiver object), dr30 (receiver scalar blocks fallback object — barrier in the receiver itself)
+  status: ✅
 - **S22.3** Setting key to null clears earlier object value — §Config object merging (L1436)
   tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  status: 🤷 — ported, pending dedicated test (conformance expansion); the consumed E12 deferred-resolution corpus (dr01–dr30) carries no null-over-object scenario, so this row stays unpinned
 
 ### S23. Java properties mapping
 
 - **S23.1** Split key on `.` preserving empty strings — §Java properties (L1450)
-  tests: —
-  status: 🤷 — ported (`_internal/properties/properties.py`), pending dedicated test (conformance expansion)
+  tests: pc: pc01, pc02 (shallow `a.b` split), pc03, pc04 (deep `a.b.c` split into nested objects)
+  status: ⚠️ — dotted-key splitting into nested objects is pinned via the properties-conflict fixtures; the empty-segment edge (`a..b` → preserved empty-string element) is not exercised by any consumed fixture
 - **S23.2** Empty path elements (leading/trailing) preserved — §Java properties (L1456)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion)
 - **S23.3** Properties values are always strings — §Java properties (L1471)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: pc: pc01–pc04 (all four expected trees carry string-typed leaves end-to-end; the harness `_norm` distinguishes str from num)
+  status: ⚠️ — pinned only for the plain-word values the pc fixtures carry; the discriminating case (a numeric-looking value like `port=8080` staying the string `"8080"`) is pending a dedicated fixture
 - **S23.4** Object wins over string on conflicting key — §Java properties (L1485)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by properties-conflict/pc01–pc04, which the corpus runner does not consume (direct `.properties` fixtures, no `.conf` mapping)
+  tests: pc: pc01–pc04 (object wins over string on the conflicting key in both input orders, shallow `a`/`a.b` and deep `a.b`/`a.b.c`)
+  status: ✅
 - **S23.5** Multi-line values (backslash continuation) — §Note on Java properties similarity (L1587)
   out-of-scope: declared in each implementation's README — the `.properties` reader supports only basic `key=value` syntax to avoid pulling a full Java properties parser into a non-JVM library.
   tests: —
@@ -821,8 +847,12 @@ per-impl here (no period accessor); rs is the reference sibling.
 
 ---
 
-Status tally (209 items): ✅ 82 · ⚠️ 14 · ❌ 0 · 🤷 95 · ➖ 18.
-Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 209` = **42.6%**;
-in-scope `(✅ + ⚠️·0.5) / (209 − 18)` = **46.6%**. The 🤷 mass (ported but
+Status tally (209 items): ✅ 103 · ⚠️ 16 · ❌ 0 · 🤷 72 · ➖ 18.
+Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 209` = **53.1%**;
+in-scope `(✅ + ⚠️·0.5) / (209 − 18)` = **58.1%**. The 🤷 mass (ported but
 unpinned) is the burn-down list for the conformance-fixture expansion; it
-contributes 0 by policy until pinned.
+contributes 0 by policy until pinned. The first expansion wave (error-fixture,
+units-default, deferred-resolution, properties-conflict and include-package
+harnesses) burned 🤷 from 95 to 72; the remainder is dominated by items
+siblings pin via per-impl unit tests and by equiv-only fixtures the shared
+corpus does not sidecar.
