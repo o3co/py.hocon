@@ -8,6 +8,8 @@ rs.hocon's snake_case accessor naming.
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 from .config import Config, Period
 from .errors import (
     ConfigError,
@@ -35,7 +37,14 @@ from .value import (
 )
 from .value_factory import empty, from_map
 
-__version__ = "0.0.0"
+# Derived from the installed distribution metadata (dist name `hocon-parser`,
+# import name `hocon`) rather than hardcoded, so it tracks the tag-injected
+# release version automatically. Falls back to "0.0.0" when running from an
+# uninstalled source tree (e.g. PYTHONPATH=src).
+try:
+    __version__ = version("hocon-parser")
+except PackageNotFoundError:  # pragma: no cover — uninstalled source tree
+    __version__ = "0.0.0"
 
 __all__ = [
     "Config",

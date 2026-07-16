@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `hocon.__version__` is now derived from the installed distribution metadata
+  (`importlib.metadata.version("hocon-parser")`) instead of a hardcoded
+  `"0.0.0"`, so it tracks the tag-injected release version. Falls back to
+  `"0.0.0"` only when run from an uninstalled source tree.
+
+### Changed
+
+- README badges: added PyPI version / Python versions / CI / Codecov badges
+  (matching the sibling implementations); the Python badge is now driven by the
+  package's `requires-python`.
+
 ## [1.8.0] - 2026-07-16
 
 Initial published release. The version is aligned to the sibling o3co
