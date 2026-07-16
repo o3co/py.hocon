@@ -141,11 +141,14 @@ def test_cli_usage_error() -> None:
     assert "usage:" in r.stderr
 
 
-def test_cli_success_exit_zero() -> None:
-    conf = next(c for _, c, _ in _SPEC)
+def test_cli_success_exit_zero(tmp_path: Path) -> None:
+    # Hermetic .conf (no corpus / env coupling) so this asserts only the
+    # exit-0 + valid-JSON CLI contract.
+    conf = tmp_path / "ok.conf"
+    conf.write_text('a = 1\nb = "two"\n', encoding="utf-8")
     r = _run([str(conf)])
-    assert r.returncode == 0
-    json.loads(r.stdout)  # valid JSON
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {"a": 1, "b": "two"}
 
 
 def test_cli_parse_error_record() -> None:

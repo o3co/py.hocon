@@ -45,7 +45,10 @@ def main(argv: list[str]) -> int:
         return 0
     except Exception as exc:  # noqa: BLE001 — adapter must never crash; all errors → record
         record = {"__error__": {"type": type(exc).__name__, "message": str(exc)}}
-        sys.stdout.write(json.dumps(record) + "\n")
+        # Minified single-line record (no spaces), matching the sibling adapters
+        # and the success renderer. The driver parses this rather than diffing
+        # text, so it's a consistency guard, not a correctness fix.
+        sys.stdout.write(json.dumps(record, separators=(",", ":")) + "\n")
         return EXIT_ERROR
 
 
