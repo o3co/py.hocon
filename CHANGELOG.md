@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-16
+
+Initial published release. The version is aligned to the sibling o3co
+implementations (go.hocon / rs.hocon / ts.hocon, all at 1.8.0), which move in
+lockstep — py.hocon enters that lockstep at parity rather than starting a
+separate 0.x line. Distributed on PyPI as `hocon-parser` (imported as `hocon`).
+
 ### Added
 
 - `tools/hocon_json.py` — differential-harness adapter registering py.hocon in
