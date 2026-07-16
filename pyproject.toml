@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "py.hocon"
+name = "hocon-parser"
 # Snapshot version; the release workflow sets the real version from the git tag
 # (same convention as the sibling implementations).
 version = "0.0.0"
