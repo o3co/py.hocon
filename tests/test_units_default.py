@@ -54,8 +54,12 @@ pytestmark = pytest.mark.skipif(
 
 
 def _load(name: str) -> Config:
-    """Load a units-default fixture (mirrors rs.hocon's ``load`` helper)."""
-    return hocon.parse_file(str(_FIXTURES / name))
+    """Load a units-default fixture (mirrors rs.hocon's ``load`` helper).
+
+    ``env={}`` keeps the parse deterministic: ``parse_file`` otherwise captures
+    ``dict(os.environ)`` by default, and CI results must not depend on ambient
+    environment (same convention as ``tests/conformance/test_conformance.py``)."""
+    return hocon.parse_file(str(_FIXTURES / name), env={})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

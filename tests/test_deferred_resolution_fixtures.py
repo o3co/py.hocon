@@ -305,10 +305,15 @@ def _build_source(spec: dict[str, Any]) -> Config:
         po = spec.get("parseOptions") or {}
         origin = po.get("originDescription") or spec.get("originDescription")
         # Runner contract: default resolveSubstitutions=false unless set true.
+        # env={} keeps the harness deterministic — parse() otherwise captures
+        # dict(os.environ), which _effective_resolve_opts carries into the later
+        # resolve step, so ambient environment could leak into CI results. No
+        # fixture sets useSystemEnvironment=true, so an empty env is correct.
         return hocon.parse(
             spec["parseString"],
             resolve_substitutions=bool(po.get("resolveSubstitutions", False)),
             origin_description=origin,
+            env={},
         )
     if "fromMap" in spec:
         return hocon.from_map(spec["fromMap"], spec.get("originDescription"))
