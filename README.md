@@ -1,7 +1,10 @@
 # py.hocon — HOCON Parser for Python
 
+[![PyPI](https://img.shields.io/pypi/v/hocon-parser.svg)](https://pypi.org/project/hocon-parser/)
+[![Python](https://img.shields.io/pypi/pyversions/hocon-parser.svg)](https://pypi.org/project/hocon-parser/)
+[![CI](https://github.com/o3co/py.hocon/actions/workflows/test.yml/badge.svg)](https://github.com/o3co/py.hocon/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/o3co/py.hocon/branch/main/graph/badge.svg)](https://codecov.io/gh/o3co/py.hocon)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
 [![Spec conformance](https://img.shields.io/badge/spec%20corpus-134%2F134-brightgreen.svg)](docs/spec-compliance.md)
 
 A [Lightbend HOCON specification](https://github.com/lightbend/config/blob/main/HOCON.md)
