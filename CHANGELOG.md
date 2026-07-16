@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Conformance-corpus expansion — five new fixture harnesses closing the gap to
+  the sibling test surface (full suite: 306 passed / 1 skipped / 4 xfailed):
+  - `tests/conformance/test_error_fixtures.py` — 38 error fixtures
+    (`-expected-error.json` + `.error` sidecars: subst-tokenize st-err,
+    concat-errors, include-reservation, env-var-list, self-ref-lookback sr05,
+    path-expr-whitespace pw06, …) with ts-parity error-class pinning; us15 is
+    a strict-xfail tripwire for the `+`-reservation gap shared by all siblings
+    (ts#73 / rs `#[should_panic]`).
+  - `tests/test_units_default.py` — units-default ud/ub/un accessor fixtures
+    at rs parity. Known cross-impl note: negative durations stay signed
+    (Lightbend/go-faithful; rs rejects only because `std::time::Duration` is
+    unsigned) — pinned both ways (passing signed test + strict-xfail rs
+    tripwire on ud06).
+  - `tests/test_deferred_resolution_fixtures.py` — all 31 E12 scenario-YAML
+    fixtures (dr01–dr30 incl. dr11a/b) via a dependency-free purpose-built
+    scenario loader, plus dr19/dr29 programmatic companions; consumes dr12 and
+    dr17, which the sibling YAML runners skip.
+  - `tests/test_properties_conflict_fixtures.py` — pc01–pc04 (S23.4
+    object-wins, input-order independent).
+  - `tests/test_include_package_fixtures.py` — ipk01–ipk14 E11 scenarios via
+    the `package_resolver` kwarg (ipk03 N/A per E11 decision 3, as in ts).
 - `Config.get_period` + `Period(years, months, days)` frozen dataclass —
   S20.1–S20.4 period accessor at rs.hocon parity (ts / go remain ➖ here):
   integer-only per Lightbend `Integer.parseInt` (fractional rejected, up03),
