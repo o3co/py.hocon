@@ -17,7 +17,7 @@ test:
 	$(VENV)/bin/python -m pytest
 
 lint:
-	$(VENV)/bin/ruff check src tests benchmarks
+	$(VENV)/bin/ruff check src tests benchmarks tools
 
 typecheck:
 	$(VENV)/bin/mypy

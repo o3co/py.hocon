@@ -18,7 +18,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e . --group dev
-      - run: ruff check src tests benchmarks
+      - run: ruff check src tests benchmarks tools
 
   typecheck:
     runs-on: ubuntu-latest
