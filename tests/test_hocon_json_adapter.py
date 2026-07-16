@@ -101,6 +101,11 @@ def test_adapter_matches_oracle(base: str, conf: Path, expected: Any, capsys: An
     """Adapter success output equals the Lightbend expected tree (in-process)."""
     sidecar = conf.with_suffix(".env")
     env_backup = dict(os.environ)
+    # Clear ambient env first so the adapter (which reads os.environ by default)
+    # sees ONLY the sidecar vars — matching the conformance harness, which passes
+    # a fresh sidecar-only dict. Overlaying on top of the ambient env would let a
+    # CI-set variable leak into an optional-substitution fixture's resolved tree.
+    os.environ.clear()
     if sidecar.exists():
         for line in sidecar.read_text(encoding="utf-8").splitlines():
             line = line.strip()
