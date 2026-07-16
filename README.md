@@ -35,7 +35,7 @@ See [Spec Compliance](#spec-compliance) for the current conformance rate.
 ### 1. Install
 
 ```sh
-pip install py.hocon
+pip install hocon-parser
 ```
 
 The import name is `hocon`:
