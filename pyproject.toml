@@ -15,7 +15,7 @@ requires-python = ">=3.11"
 authors = [{ name = "1o1 Co. Ltd." }]
 keywords = ["hocon", "config", "configuration", "parser"]
 classifiers = [
-  "Development Status :: 2 - Pre-Alpha",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.11",
