@@ -17,8 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the reference implementation parses it and rejects at the Config boundary
   (`Parseable.forceParsedToObject`, `ConfigException.WrongType`). The parser now
   parses the root array (malformed arrays and trailing content remain
-  `ParseError`s); `parse_file` defaults the error origin to the file path
-  (Lightbend origin parity — also improves `Config` origins on success). Include
+  `ParseError`s); `parse_file` names the file in the array-root diagnostic via
+  an internal S3.5-only origin fallback (deliberately NOT a global
+  `origin_description` default, which would mis-attribute resolver errors
+  originating inside included files to the top-level file). Include
   paths (file + package) raise `ResolveError` "included file has array at file
   root … (HOCON.md L993-994)" naming the **innermost** included source (the AST is
   checked at each parse site, so nested chains cannot accuse an intermediate
