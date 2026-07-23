@@ -65,6 +65,10 @@ _ANY_ERROR: tuple[type[Exception], ...] = (ParseError, ResolveError, ConfigError
 # env-var-list.test.ts / s13a13-self-ref-lookback.test.ts pin ResolveError;
 # include-reservation.test.ts pins ParseError.
 _FAMILY_ERROR: dict[str, tuple[type[Exception], ...]] = {
+    # S3.5/S14b.1: ar01/ar02 are top-level array roots (ConfigError at the
+    # Config boundary); ar03 is the include variant (ResolveError naming the
+    # included file). Never a ParseError — the documents are valid syntax.
+    "array-root": (ConfigError, ResolveError),
     "concat-errors": (ResolveError,),
     "env-var-list": (ResolveError,),
     "include-reservation": (ParseError,),

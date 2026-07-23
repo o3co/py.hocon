@@ -68,6 +68,27 @@ class _Parser:
                 )
 
             return AstObject(all_fields, first.pos)
+        if t.kind == "lbracket":
+            # S3.5 (HOCON.md L989-991): "both JSON and HOCON allow arrays as
+            # root values in a document" — an array-root document is valid
+            # syntax. The object-rooted Config API rejects it AFTER the parse,
+            # at the Config boundary (parse.py) or include-load site
+            # (include_loader.py), matching Lightbend's
+            # Parseable.forceParsedToObject (WrongType, not a syntax error).
+            # Malformed arrays and trailing content remain syntax errors. The
+            # node is re-anchored at the opening `[` so the type error can
+            # point at the bracket.
+            self._advance()
+            arr = self._parse_array()
+            self._skip("newline")
+            remaining = self._peek()
+            if remaining.kind != "eof":
+                raise ParseError(
+                    f"Unexpected token '{remaining.value}' after root array",
+                    remaining.line,
+                    remaining.col,
+                )
+            return AstArray(arr.items, Pos(t.line, t.col))
         return self._parse_object(False)
 
     def _peek(self, offset: int = 0) -> Token:
@@ -497,7 +518,7 @@ class _Parser:
             return parts[0]
         return AstConcat(parts, p)
 
-    def _parse_array(self) -> AstNode:
+    def _parse_array(self) -> AstArray:
         p = self._current_pos()
         items: list[AstNode] = []
 

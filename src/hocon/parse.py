@@ -12,10 +12,12 @@ import os
 from collections.abc import Callable
 
 from ._internal.lexer.lexer import tokenize
+from ._internal.parser.ast import AstArray
 from ._internal.parser.parser import parse_tokens
 from ._internal.resolver.resolver import build_tree, contains_placeholders, resolve
 from ._internal.resolver.types import PackageResolver, ResolveOptions
 from .config import Config
+from .errors import ConfigError
 from .value import HoconObject
 
 __all__ = ["parse", "parse_file", "parse_string"]
@@ -41,6 +43,7 @@ def _build_resolve_context(
     origin_description: str | None,
     resolve_from: _ResolveFrom,
     package_resolver: PackageResolver | None,
+    array_root_origin: str | None = None,
 ) -> tuple[object, ResolveOptions]:
     tokens = tokenize(text)
     # S3.1 — HOCON.md L134-136: a document that does not begin with `[` or `{`
@@ -48,6 +51,19 @@ def _build_resolve_context(
     # comment-only document parses to the empty object. (L130-132 is the JSON
     # baseline, not HOCON-normative — see xx.hocon E10, corrected 2026-07-23.)
     ast = parse_tokens(tokens)
+    # S3.5 — HOCON.md L989-991: an array-root document is valid syntax, but the
+    # object-rooted Config API rejects it at the Config boundary with a TYPE
+    # error, matching Lightbend's Parseable.forceParsedToObject
+    # (ConfigException.WrongType "has type LIST rather than object at file
+    # root"). The message carries the origin + the opening bracket's position.
+    if isinstance(ast, AstArray):
+        origin = origin_description or array_root_origin or "input"
+        raise ConfigError(
+            f"{origin}: {ast.pos.line}:{ast.pos.col}: document has type array "
+            "rather than object at file root (HOCON.md L989-991); "
+            "the Config API requires an object root",
+            "",
+        )
     opts = ResolveOptions(
         env=_get_env(env),
         base_dir=base_dir,
@@ -73,8 +89,47 @@ def parse(
     """Parse HOCON source text. Fully resolves by default; pass
     ``resolve_substitutions=False`` to return an unresolved Config with
     substitution placeholders intact (complete later with ``Config.resolve``)."""
+    return _parse_text(
+        text,
+        base_dir=base_dir,
+        env=env,
+        read_file=read_file,
+        resolve_substitutions=resolve_substitutions,
+        origin_description=origin_description,
+        resolve_from=resolve_from,
+        package_resolver=package_resolver,
+        array_root_origin=None,
+    )
+
+
+def _parse_text(
+    text: str,
+    *,
+    base_dir: str | None,
+    env: dict[str, str] | None,
+    read_file: _ReadFile | None,
+    resolve_substitutions: bool,
+    origin_description: str | None,
+    resolve_from: _ResolveFrom,
+    package_resolver: PackageResolver | None,
+    array_root_origin: str | None,
+) -> Config:
+    """Internal worker behind ``parse`` / ``parse_file``.
+
+    ``array_root_origin`` is a fallback origin used ONLY by the S3.5
+    array-at-file-root diagnostic — ``parse_file`` passes its path here so
+    that error names the file, without globally re-attributing resolver
+    errors (which may originate inside included files) to the top-level file.
+    """
     ast, opts = _build_resolve_context(
-        text, base_dir, env, read_file, origin_description, resolve_from, package_resolver
+        text,
+        base_dir,
+        env,
+        read_file,
+        origin_description,
+        resolve_from,
+        package_resolver,
+        array_root_origin,
     )
     if resolve_substitutions:
         value = resolve(ast, opts)  # type: ignore[arg-type]
@@ -111,7 +166,7 @@ def parse_file(
     resolved_path = os.path.abspath(path)
     reader = read_file or _default_read_file_sync
     text = reader(resolved_path)
-    return parse(
+    return _parse_text(
         text,
         base_dir=base_dir if base_dir is not None else os.path.dirname(resolved_path),
         env=env,
@@ -120,4 +175,9 @@ def parse_file(
         origin_description=origin_description,
         resolve_from=resolve_from,
         package_resolver=package_resolver,
+        # S3.5-only origin fallback: the array-at-file-root diagnostic names
+        # this file. Deliberately NOT a global origin_description default -
+        # that would mis-attribute resolver errors originating inside
+        # included files to the top-level file (Codex review, py.hocon).
+        array_root_origin=resolved_path,
     )

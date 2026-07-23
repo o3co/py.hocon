@@ -54,6 +54,10 @@ class PackageLookupError(ResolveError):
 
 
 class ConfigError(Exception):
+    """Type-mismatch / access error at the Config boundary: raised by value
+    accessors, and by ``parse`` / ``parse_file`` for an array-root document
+    (S3.5 — the Lightbend ``WrongType`` analog; ``path`` is empty there)."""
+
     def __init__(self, message: str, path: str) -> None:
         super().__init__(message)
         self.path = path

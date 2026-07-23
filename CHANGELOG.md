@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Array-root document rejected with a type error (S3.5,
+  [xx.hocon#64](https://github.com/o3co/xx.hocon/pull/64)).** `hocon.parse("[1,2]")`
+  now raises `ConfigError` ("document has type array rather than object at file
+  root", HOCON.md L989-991, with origin + bracket position) instead of `ParseError`
+  "expected key, got lbracket". An array-root document is syntactically valid HOCON;
+  the reference implementation parses it and rejects at the Config boundary
+  (`Parseable.forceParsedToObject`, `ConfigException.WrongType`). The parser now
+  parses the root array (malformed arrays and trailing content remain
+  `ParseError`s); `parse_file` names the file in the array-root diagnostic via
+  an internal S3.5-only origin fallback (deliberately NOT a global
+  `origin_description` default, which would mis-attribute resolver errors
+  originating inside included files to the top-level file). Include
+  paths (file + package) raise `ResolveError` "included file has array at file
+  root … (HOCON.md L993-994)" naming the **innermost** included source (the AST is
+  checked at each parse site, so nested chains cannot accuse an intermediate
+  file) — this also pins S14b.1 (previously 🤷). Net behavior is unchanged
+  (array-root documents still error) — only the error class, layer, and message
+  change. Pinned by `tests/test_spec_s3_5_array_root.py`; the error-fixture
+  harness auto-discovers the xx.hocon `array-root/ar01–ar03` `.error` sidecars
+  once synced.
+
 - **Empty document parses to `{}` (S3.1 corrected,
   [xx.hocon#62](https://github.com/o3co/xx.hocon/pull/62)).** `hocon.parse("")`
   (and whitespace-only / comment-only / BOM-only input) returns an empty
