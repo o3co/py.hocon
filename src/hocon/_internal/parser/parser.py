@@ -88,7 +88,6 @@ class _Parser:
                     remaining.line,
                     remaining.col,
                 )
-            assert isinstance(arr, AstArray)
             return AstArray(arr.items, Pos(t.line, t.col))
         return self._parse_object(False)
 
@@ -519,7 +518,7 @@ class _Parser:
             return parts[0]
         return AstConcat(parts, p)
 
-    def _parse_array(self) -> AstNode:
+    def _parse_array(self) -> AstArray:
         p = self._current_pos()
         items: list[AstNode] = []
 

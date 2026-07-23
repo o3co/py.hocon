@@ -43,6 +43,7 @@ def _build_resolve_context(
     origin_description: str | None,
     resolve_from: _ResolveFrom,
     package_resolver: PackageResolver | None,
+    array_root_origin: str | None = None,
 ) -> tuple[object, ResolveOptions]:
     tokens = tokenize(text)
     # S3.1 — HOCON.md L134-136: a document that does not begin with `[` or `{`
@@ -56,7 +57,7 @@ def _build_resolve_context(
     # (ConfigException.WrongType "has type LIST rather than object at file
     # root"). The message carries the origin + the opening bracket's position.
     if isinstance(ast, AstArray):
-        origin = origin_description if origin_description is not None else "input"
+        origin = origin_description or array_root_origin or "input"
         raise ConfigError(
             f"{origin}: {ast.pos.line}:{ast.pos.col}: document has type array "
             "rather than object at file root (HOCON.md L989-991); "
@@ -88,8 +89,47 @@ def parse(
     """Parse HOCON source text. Fully resolves by default; pass
     ``resolve_substitutions=False`` to return an unresolved Config with
     substitution placeholders intact (complete later with ``Config.resolve``)."""
+    return _parse_text(
+        text,
+        base_dir=base_dir,
+        env=env,
+        read_file=read_file,
+        resolve_substitutions=resolve_substitutions,
+        origin_description=origin_description,
+        resolve_from=resolve_from,
+        package_resolver=package_resolver,
+        array_root_origin=None,
+    )
+
+
+def _parse_text(
+    text: str,
+    *,
+    base_dir: str | None,
+    env: dict[str, str] | None,
+    read_file: _ReadFile | None,
+    resolve_substitutions: bool,
+    origin_description: str | None,
+    resolve_from: _ResolveFrom,
+    package_resolver: PackageResolver | None,
+    array_root_origin: str | None,
+) -> Config:
+    """Internal worker behind ``parse`` / ``parse_file``.
+
+    ``array_root_origin`` is a fallback origin used ONLY by the S3.5
+    array-at-file-root diagnostic — ``parse_file`` passes its path here so
+    that error names the file, without globally re-attributing resolver
+    errors (which may originate inside included files) to the top-level file.
+    """
     ast, opts = _build_resolve_context(
-        text, base_dir, env, read_file, origin_description, resolve_from, package_resolver
+        text,
+        base_dir,
+        env,
+        read_file,
+        origin_description,
+        resolve_from,
+        package_resolver,
+        array_root_origin,
     )
     if resolve_substitutions:
         value = resolve(ast, opts)  # type: ignore[arg-type]
@@ -126,15 +166,18 @@ def parse_file(
     resolved_path = os.path.abspath(path)
     reader = read_file or _default_read_file_sync
     text = reader(resolved_path)
-    return parse(
+    return _parse_text(
         text,
         base_dir=base_dir if base_dir is not None else os.path.dirname(resolved_path),
         env=env,
         read_file=reader,
         resolve_substitutions=resolve_substitutions,
-        # Default the origin to the file path so diagnostics (e.g. the S3.5
-        # array-at-file-root error) name the file, matching Lightbend origins.
-        origin_description=origin_description if origin_description is not None else resolved_path,
+        origin_description=origin_description,
         resolve_from=resolve_from,
         package_resolver=package_resolver,
+        # S3.5-only origin fallback: the array-at-file-root diagnostic names
+        # this file. Deliberately NOT a global origin_description default -
+        # that would mis-attribute resolver errors originating inside
+        # included files to the top-level file (Codex review, py.hocon).
+        array_root_origin=resolved_path,
     )

@@ -29,7 +29,6 @@ from .utils import (
 __all__ = ["IncludeLoader"]
 
 
-
 def _assert_object_rooted_include(ast: AstNode, source_path: str) -> None:
     """S14b.1 (HOCON.md L993-994): an included file must contain an object, not
     an array. The document itself is valid HOCON syntax (S3.5, L989-991) — the
@@ -44,6 +43,7 @@ def _assert_object_rooted_include(ast: AstNode, source_path: str) -> None:
             ast.pos.line,
             ast.pos.col,
         )
+
 
 def _validate_package_file(file: str, identifier: str) -> None:
     """Validate the file argument of ``package("id", "file")`` per E11 decision 6."""

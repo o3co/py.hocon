@@ -858,9 +858,9 @@ per-impl here (no period accessor); rs is the reference sibling.
 
 ---
 
-Status tally (210 items): ✅ 103 · ⚠️ 16 · ❌ 0 · 🤷 72 · ➖ 18.
-Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 209` = **53.1%**;
-in-scope `(✅ + ⚠️·0.5) / (209 − 18)` = **58.1%**. The 🤷 mass (ported but
+Status tally (210 items): ✅ 105 · ⚠️ 16 · ❌ 0 · 🤷 71 · ➖ 18.
+Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **53.8%**;
+in-scope `(✅ + ⚠️·0.5) / (210 − 18)` = **58.9%**. The 🤷 mass (ported but
 unpinned) is the burn-down list for the conformance-fixture expansion; it
 contributes 0 by policy until pinned. The first expansion wave (error-fixture,
 units-default, deferred-resolution, properties-conflict and include-package

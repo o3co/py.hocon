@@ -248,7 +248,7 @@ from hocon import (
 | `ParseError` | Syntax errors during lexing/parsing (includes line and column) |
 | `ResolveError` | Substitution failures, cyclic references, missing required includes |
 | `PackageLookupError` | `include package(...)` could not be located |
-| `ConfigError` | Missing keys or type mismatches during value access |
+| `ConfigError` | Missing keys or type mismatches during value access; also raised by `parse`/`parse_file` for an array-root document (S3.5) |
 | `NotResolvedError` | Getter called on a path still holding an unresolved substitution |
 
 ## HOCON Examples

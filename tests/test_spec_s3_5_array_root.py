@@ -98,6 +98,22 @@ class TestIncludePaths:
         msg = str(excinfo.value)
         assert "array at file root" in msg, f"must name the condition, got: {msg}"
         assert "arr.conf" in msg, f"must name the included file, got: {msg}"
+        # The promised bracket position rides on the ResolveError attributes.
+        assert (excinfo.value.line, excinfo.value.col) == (1, 1)
+
+    def test_include_internal_errors_not_attributed_to_top_file(self, tmp_path: Path) -> None:
+        # Guard for the S3.5-only origin scoping: a resolve error originating
+        # INSIDE an included file must not be prefixed with the top-level
+        # file's path (parse_file's origin fallback applies only to the
+        # array-at-file-root diagnostic).
+        (tmp_path / "inner.conf").write_text("b = ${MISSING}\n", encoding="utf-8")
+        (tmp_path / "main.conf").write_text('include "inner.conf"\na = 1\n', encoding="utf-8")
+        with pytest.raises(ResolveError) as excinfo:
+            hocon.parse_file(str(tmp_path / "main.conf"))
+        assert "main.conf" not in str(excinfo.value), (
+            f"include-internal resolve errors must not be attributed to the "
+            f"top-level file, got: {excinfo.value}"
+        )
 
     def test_nested_include_names_innermost_file(self, tmp_path: Path) -> None:
         # parent -> mid -> arr: the error must accuse arr.conf, never mid.conf.
