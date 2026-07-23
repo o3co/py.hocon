@@ -139,7 +139,7 @@ Citation shorthand used on `tests:` lines:
 ### S3. Omit root braces
 
 - **S3.1** Empty document (empty / whitespace-only / comment-only / BOM-only file) parses to the empty object `{}` — §Omit root braces (L130-136)
-  tests: tests/conformance/test_conformance.py::test_empty_file_parses_to_empty (empty-file/ef01–ef06, `{}` sidecars normative; group also in the main corpus); smoke: test_empty_input_parses_to_empty; tests/test_include_package_fixtures.py::test_package_whitespace_only_content_contributes_empty; adapter: test_cli_empty_file_emits_empty_object
+  tests: tests/conformance/test_conformance.py::test_empty_file_parses_to_empty (empty-file/ef01–ef06, `{}` sidecars normative; group also in the main corpus); smoke: test_empty_input_parses_to_empty; tests/test_include_package_fixtures.py::test_package_empty_variant_content_contributes_empty; adapter: test_cli_empty_file_emits_empty_object
   status: ✅ — Corrected 2026-07-23 (xx.hocon E10). The item previously read "Empty file is invalid" — a misreading of the L130-132 JSON baseline as HOCON-normative; the L134 brace-omission relaxation makes an empty document the empty object. The ported `assert_non_empty_document` guard is removed (`_internal/parser/empty_check.py` deleted); empty documents parse to `{}` uniformly at top level and on every include path.
 - **S3.2** Root non-object/non-array is invalid (when explicitly enclosed) — §Omit root braces (L131)
   tests: —

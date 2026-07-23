@@ -142,7 +142,8 @@ def _empty_file_fixtures() -> list[Path]:
     "conf", _empty_file_fixtures(), ids=[p.stem for p in _empty_file_fixtures()]
 )
 def test_empty_file_parses_to_empty(conf: Path) -> None:
-    """Corrected S3.1 (xx.hocon E10, revoked 2026-07-23): an empty document
-    parses to ``{}`` per HOCON.md L134-136 — the ``{}`` sidecars are normative;
-    the former reject-posture misread the L130-132 JSON baseline."""
+    """Corrected S3.1 (the prior reject-posture was revoked by xx.hocon E10 on
+    2026-07-23): an empty document parses to ``{}`` per HOCON.md L134-136 — the
+    ``{}`` sidecars are normative; the former reject-posture misread the
+    L130-132 JSON baseline."""
     assert hocon.parse_file(str(conf)).to_object() == {}
