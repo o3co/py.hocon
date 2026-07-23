@@ -86,6 +86,14 @@ def test_empty_input_parses_to_empty() -> None:
     assert hocon.parse("").to_object() == {}
 
 
+def test_block_comment_only_input_is_rejected() -> None:
+    # Boundary of the S3.1 loosening: /* */ block comments are not HOCON
+    # syntax (# and // only), so a block-comment-only document is a syntax
+    # error, NOT an empty document — the empty rule must not mask it.
+    with pytest.raises(ParseError):
+        hocon.parse("/* block comments are not HOCON */\n")
+
+
 def test_missing_path_raises() -> None:
     cfg = hocon.parse("a = 1")
     with pytest.raises(ConfigError):
