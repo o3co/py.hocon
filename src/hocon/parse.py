@@ -12,10 +12,12 @@ import os
 from collections.abc import Callable
 
 from ._internal.lexer.lexer import tokenize
+from ._internal.parser.ast import AstArray
 from ._internal.parser.parser import parse_tokens
 from ._internal.resolver.resolver import build_tree, contains_placeholders, resolve
 from ._internal.resolver.types import PackageResolver, ResolveOptions
 from .config import Config
+from .errors import ConfigError
 from .value import HoconObject
 
 __all__ = ["parse", "parse_file", "parse_string"]
@@ -48,6 +50,19 @@ def _build_resolve_context(
     # comment-only document parses to the empty object. (L130-132 is the JSON
     # baseline, not HOCON-normative — see xx.hocon E10, corrected 2026-07-23.)
     ast = parse_tokens(tokens)
+    # S3.5 — HOCON.md L989-991: an array-root document is valid syntax, but the
+    # object-rooted Config API rejects it at the Config boundary with a TYPE
+    # error, matching Lightbend's Parseable.forceParsedToObject
+    # (ConfigException.WrongType "has type LIST rather than object at file
+    # root"). The message carries the origin + the opening bracket's position.
+    if isinstance(ast, AstArray):
+        origin = origin_description if origin_description is not None else "input"
+        raise ConfigError(
+            f"{origin}: {ast.pos.line}:{ast.pos.col}: document has type array "
+            "rather than object at file root (HOCON.md L989-991); "
+            "the Config API requires an object root",
+            "",
+        )
     opts = ResolveOptions(
         env=_get_env(env),
         base_dir=base_dir,
@@ -117,7 +132,9 @@ def parse_file(
         env=env,
         read_file=reader,
         resolve_substitutions=resolve_substitutions,
-        origin_description=origin_description,
+        # Default the origin to the file path so diagnostics (e.g. the S3.5
+        # array-at-file-root error) name the file, matching Lightbend origins.
+        origin_description=origin_description if origin_description is not None else resolved_path,
         resolve_from=resolve_from,
         package_resolver=package_resolver,
     )

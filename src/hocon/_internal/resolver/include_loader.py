@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 from ...errors import PackageLookupError, ParseError, ResolveError
 from ..lexer.lexer import tokenize
-from ..parser.ast import AstNode
+from ..parser.ast import AstArray, AstNode
 from ..parser.parser import parse_tokens
 from ..properties.properties import properties_to_hocon_value
 from .types import PackageResolver, ResObj, ResolveOptions, make_res_obj
@@ -28,6 +28,22 @@ from .utils import (
 
 __all__ = ["IncludeLoader"]
 
+
+
+def _assert_object_rooted_include(ast: AstNode, source_path: str) -> None:
+    """S14b.1 (HOCON.md L993-994): an included file must contain an object, not
+    an array. The document itself is valid HOCON syntax (S3.5, L989-991) — the
+    rejection is a type constraint at include-load time, naming the included
+    source. Checking the AST at each parse site means nested include chains
+    name the innermost file that actually has the array root."""
+    if isinstance(ast, AstArray):
+        raise ResolveError(
+            "included file has array at file root — an included file must "
+            f"contain an object, not an array (HOCON.md L993-994): {source_path}",
+            source_path,
+            ast.pos.line,
+            ast.pos.col,
+        )
 
 def _validate_package_file(file: str, identifier: str) -> None:
     """Validate the file argument of ``package("id", "file")`` per E11 decision 6."""
@@ -210,6 +226,7 @@ class IncludeLoader:
         # object AST, contributing {} (ipk08 and variants). No emptiness guard.
         tokens = tokenize(content)
         ast = parse_tokens(tokens)
+        _assert_object_rooted_include(ast, resolved_path)
         return self.on_build_res_obj(
             ast,
             dataclasses.replace(
@@ -239,6 +256,7 @@ class IncludeLoader:
         # comment-only document parses to the empty object everywhere — the
         # former #105 include-path carve-out is now simply the rule.
         ast = parse_tokens(tokens)
+        _assert_object_rooted_include(ast, candidate)
         return self.on_build_res_obj(
             ast,
             dataclasses.replace(

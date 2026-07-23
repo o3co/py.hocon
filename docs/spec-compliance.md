@@ -150,6 +150,15 @@ Citation shorthand used on `tests:` lines:
 - **S3.4** Unbalanced trailing `}` without opening `{` is invalid — §Omit root braces (L138)
   tests: — (empirical rs-parity check only; no py pin test yet)
   status: ✅ — mirrors rs.hocon (rs status ✅ via its braced-root stray-brace test; the unbraced-root + stray `}` case ts documents as ❌ [ts#55] behaves identically to rs in py, verified empirically). Dedicated pin test pending (conformance expansion).
+- **S3.5** Array-root document is valid syntax; object-rooted parse API rejects with a type error — §Include semantics: merging (L989-991)
+  tests: tests/test_spec_s3_5_array_root.py (type-error class + position + origin naming + deferred + malformed guards + include / nested-include / package variants); tests/conformance/test_error_fixtures.py auto-discovers ar01–ar03 `.error` sidecars once synced
+  status: ✅ — Added 2026-07-23. `_Parser.parse` parses the root array (re-anchored at the
+  opening `[`; malformed arrays / trailing content stay `ParseError`s);
+  `_build_resolve_context` rejects with `ConfigError` ("document has type array rather
+  than object at file root", origin + bracket position), matching Lightbend's
+  `Parseable.forceParsedToObject` (`WrongType`). `parse_file` defaults the origin to the
+  file path. Include paths check the AST at each parse site, so nested chains name the
+  innermost source. Previously `ParseError` "expected key, got lbracket".
 
 ### S4. Key-value separator
 
@@ -554,8 +563,10 @@ Citation shorthand used on `tests:` lines:
 #### S14b. Include semantics: merging
 
 - **S14b.1** Included root must be an object (array → error) — §Include semantics: merging (L993)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_s3_5_array_root.py (include + nested-include + package variants)
+  status: ✅ — Pinned with S3.5 (2026-07-23): the include loader raises `ResolveError`
+  "included file has array at file root … (HOCON.md L993-994)" naming the innermost
+  included source with the bracket position.
 - **S14b.2** Included keys merge per duplicate-key rules — §Include semantics: merging (L997)
   tests: corpus: file-include (`base` + included `foo` + nested-included `bar` merge into one root); include-env-fallback/iev01
   status: ✅
@@ -847,7 +858,7 @@ per-impl here (no period accessor); rs is the reference sibling.
 
 ---
 
-Status tally (209 items): ✅ 103 · ⚠️ 16 · ❌ 0 · 🤷 72 · ➖ 18.
+Status tally (210 items): ✅ 103 · ⚠️ 16 · ❌ 0 · 🤷 72 · ➖ 18.
 Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 209` = **53.1%**;
 in-scope `(✅ + ⚠️·0.5) / (209 − 18)` = **58.1%**. The 🤷 mass (ported but
 unpinned) is the burn-down list for the conformance-fixture expansion; it
