@@ -17,7 +17,6 @@ from collections.abc import Callable
 from ...errors import PackageLookupError, ParseError, ResolveError
 from ..lexer.lexer import tokenize
 from ..parser.ast import AstNode
-from ..parser.empty_check import assert_non_empty_document, has_content_tokens
 from ..parser.parser import parse_tokens
 from ..properties.properties import properties_to_hocon_value
 from .types import PackageResolver, ResObj, ResolveOptions, make_res_obj
@@ -206,12 +205,10 @@ class IncludeLoader:
         resolved_path = resolver(identifier, file, None, self.opts.base_dir)
 
         content = self.opts.read_file_sync(resolved_path)
-        # Empty content (zero bytes) is valid for package includes (ipk08) → {}.
-        if len(content) == 0:
-            return make_res_obj()
-
+        # S3.1 (corrected, xx.hocon E10): empty / whitespace-only / comment-only
+        # content is a valid empty document — parse_tokens yields an empty
+        # object AST, contributing {} (ipk08 and variants). No emptiness guard.
         tokens = tokenize(content)
-        assert_non_empty_document(tokens, resolved_path)
         ast = parse_tokens(tokens)
         return self.on_build_res_obj(
             ast,
@@ -238,9 +235,9 @@ class IncludeLoader:
             return hocon_value_to_res_obj(properties_to_hocon_value(content))
 
         tokens = tokenize(content)
-        # Lightbend-compat carve-out (#105): empty/comment-only included file → {}.
-        if not has_content_tokens(tokens):
-            return make_res_obj()
+        # S3.1 (corrected, xx.hocon E10): an empty / whitespace-only /
+        # comment-only document parses to the empty object everywhere — the
+        # former #105 include-path carve-out is now simply the rule.
         ast = parse_tokens(tokens)
         return self.on_build_res_obj(
             ast,

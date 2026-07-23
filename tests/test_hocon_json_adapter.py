@@ -79,7 +79,9 @@ def _spec_fixtures() -> list[tuple[str, Path, Any]]:
                 continue
             rel = Path(root, f).relative_to(_EXPECTED).as_posix()
             base = rel[: -len("-expected.json")]
-            if base.startswith("empty-file/") or base in _JVM_SKIP:
+            # empty-file group stays in: an empty document parses to {} per the
+            # corrected S3.1 (xx.hocon E10) and the {} sidecars are normative.
+            if base in _JVM_SKIP:
                 continue
             conf = _CONF / (base + ".conf")
             if not conf.exists():
@@ -151,15 +153,27 @@ def test_cli_success_exit_zero(tmp_path: Path) -> None:
     assert json.loads(r.stdout) == {"a": 1, "b": "two"}
 
 
-def test_cli_parse_error_record() -> None:
-    err_conf = _CONF / "empty-file" / "ef01-empty.conf"
-    if not err_conf.exists():
-        pytest.skip("empty-file fixture not present")
+def test_cli_parse_error_record(tmp_path: Path) -> None:
+    # A genuinely malformed document (block comments are not HOCON syntax).
+    # Note: an *empty* file is NOT an error — it parses to {} per corrected
+    # S3.1 (xx.hocon E10) — so the error-record probe needs real bad input.
+    err_conf = tmp_path / "malformed.conf"
+    err_conf.write_text("/* block comments are not HOCON */\n", encoding="utf-8")
     r = _run([str(err_conf)])
     assert r.returncode == 3
     rec = json.loads(r.stdout)
     assert "__error__" in rec
     assert set(rec["__error__"]) >= {"type", "message"}
+
+
+def test_cli_empty_file_emits_empty_object(tmp_path: Path) -> None:
+    # Corrected S3.1: the adapter emits {} for an empty document, matching the
+    # normative ef01-ef06 sidecars in the differential/bench harnesses.
+    empty_conf = tmp_path / "empty.conf"
+    empty_conf.write_text("", encoding="utf-8")
+    r = _run([str(empty_conf)])
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == {}
 
 
 def test_cli_env_resolves_against_process_env(tmp_path: Path) -> None:

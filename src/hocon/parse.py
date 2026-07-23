@@ -12,7 +12,6 @@ import os
 from collections.abc import Callable
 
 from ._internal.lexer.lexer import tokenize
-from ._internal.parser.empty_check import assert_non_empty_document
 from ._internal.parser.parser import parse_tokens
 from ._internal.resolver.resolver import build_tree, contains_placeholders, resolve
 from ._internal.resolver.types import PackageResolver, ResolveOptions
@@ -44,8 +43,10 @@ def _build_resolve_context(
     package_resolver: PackageResolver | None,
 ) -> tuple[object, ResolveOptions]:
     tokens = tokenize(text)
-    # S3.1 — HOCON.md L130: empty / whitespace-only / comment-only files are invalid.
-    assert_non_empty_document(tokens, "input")
+    # S3.1 — HOCON.md L134-136: a document that does not begin with `[` or `{`
+    # is parsed as if enclosed in `{}`, so an empty / whitespace-only /
+    # comment-only document parses to the empty object. (L130-132 is the JSON
+    # baseline, not HOCON-normative — see xx.hocon E10, corrected 2026-07-23.)
     ast = parse_tokens(tokens)
     opts = ResolveOptions(
         env=_get_env(env),

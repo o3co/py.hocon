@@ -79,9 +79,19 @@ def test_from_map_roundtrip() -> None:
     assert cfg.to_object() == {"a": 1, "b": [True, None, "x"], "c": {"d": 2.5}}
 
 
-def test_empty_input_rejected() -> None:
+def test_empty_input_parses_to_empty() -> None:
+    # Corrected S3.1 (xx.hocon E10): an empty / whitespace-only / comment-only
+    # document parses to {} per HOCON.md L134-136.
+    assert hocon.parse("   \n # comment only \n").to_object() == {}
+    assert hocon.parse("").to_object() == {}
+
+
+def test_block_comment_only_input_is_rejected() -> None:
+    # Boundary of the S3.1 loosening: /* */ block comments are not HOCON
+    # syntax (# and // only), so a block-comment-only document is a syntax
+    # error, NOT an empty document — the empty rule must not mask it.
     with pytest.raises(ParseError):
-        hocon.parse("   \n # comment only \n")
+        hocon.parse("/* block comments are not HOCON */\n")
 
 
 def test_missing_path_raises() -> None:

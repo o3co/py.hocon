@@ -238,3 +238,28 @@ def test_group_complete() -> None:
         f"fixture drift — on disk only: {sorted(on_disk - in_table)}; "
         f"in table only: {sorted(in_table - on_disk)}"
     )
+
+
+@pytest.mark.parametrize(
+    ("label", "content"),
+    [("whitespace-only", "   \n\t\n"), ("comment-only", "# nothing here\n")],
+)
+def test_package_empty_variant_content_contributes_empty(
+    label: str, content: str, tmp_path: Path
+) -> None:
+    """ipk08 variants: whitespace-only / comment-only registered content
+    contributes ``{}`` — same S3.1 rule as zero-byte (an empty document parses
+    to the empty object; corrected 2026-07-23, xx.hocon E10). Regression guard:
+    the package path used to reject non-zero-byte empty documents."""
+    pkg = tmp_path / f"{label}.conf"
+    pkg.write_text(content, encoding="utf-8")
+
+    def resolver(identifier: str, file: str, _including: object, _base: object) -> str:
+        return str(pkg)
+
+    cfg = hocon.parse(
+        'a = 1\ninclude package("my-lib", "ref.conf")',
+        env={},
+        package_resolver=resolver,
+    )
+    assert cfg.to_object() == {"a": 1}, f"{label}: expected {{'a': 1}}"
