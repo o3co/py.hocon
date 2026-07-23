@@ -79,9 +79,11 @@ def test_from_map_roundtrip() -> None:
     assert cfg.to_object() == {"a": 1, "b": [True, None, "x"], "c": {"d": 2.5}}
 
 
-def test_empty_input_rejected() -> None:
-    with pytest.raises(ParseError):
-        hocon.parse("   \n # comment only \n")
+def test_empty_input_parses_to_empty() -> None:
+    # Corrected S3.1 (xx.hocon E10): an empty / whitespace-only / comment-only
+    # document parses to {} per HOCON.md L134-136.
+    assert hocon.parse("   \n # comment only \n").to_object() == {}
+    assert hocon.parse("").to_object() == {}
 
 
 def test_missing_path_raises() -> None:

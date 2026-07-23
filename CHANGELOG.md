@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Empty document parses to `{}` (S3.1 corrected,
+  [xx.hocon#62](https://github.com/o3co/xx.hocon/pull/62)).** `hocon.parse("")`
+  (and whitespace-only / comment-only / BOM-only input) returns an empty
+  `Config` instead of raising `ParseError`. The S3.1 checklist item "Empty file
+  is invalid (HOCON.md L130)" misread the L130-132 *JSON baseline* as
+  HOCON-normative; the L134-136 brace-omission relaxation parses any document
+  not beginning with `[` or `{` as if enclosed in `{}` — an empty document is
+  therefore the empty object. Confirmed by the reference implementation
+  (Lightbend's `"Empty document"` error is `ConfigSyntax.JSON`-only;
+  `ConfigFactory.parseString("")` is a valid empty config in its own test
+  suite). The ported `assert_non_empty_document` guard is removed
+  (`_internal/parser/empty_check.py` deleted), along with the package-include
+  zero-byte special-case and the #105 file-include carve-out — the rule is
+  uniform on every path. The empty-file fixture group (ef01–ef06) joins the
+  conformance and adapter corpora with its `{}` sidecars as normative. Pure
+  loosening — no previously-valid input changes meaning; previously-rejected
+  empty documents now succeed.
+
 - `hocon.__version__` is now derived from the installed distribution metadata
   (`importlib.metadata.version("hocon-parser")`) instead of a hardcoded
   `"0.0.0"`, so it tracks the tag-injected release version. Falls back to

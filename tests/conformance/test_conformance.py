@@ -7,16 +7,18 @@ expected JSON — using the same normalization as the shared ecosystem-bench
 driver (key order ignored, numbers by value, null-valued keys dropped, ``.env``
 sidecars loaded).
 
-Two fixture groups are held outside the pass/fail corpus, matching the
+One fixture group is held outside the pass/fail corpus, matching the
 ecosystem-bench method (see xx.hocon ``docs/ecosystem-conformance.md`` §Method):
 
-- **empty-file (6)** — documented Lightbend-vs-strict divergence (E10). Lightbend
-  accepts an empty/comment-only file as ``{}``; the o3co implementations reject
-  it per spec §L130. ``test_empty_file_rejected`` asserts py.hocon rejects them,
-  matching its siblings.
 - **JVM system-property (test01, test03)** — reference ``${?java.version}`` /
   ``${?user.home}``, which resolve only inside a JVM. Every non-JVM parser
   (go.hocon / rs.hocon / ts.hocon included) caps at 14/16 here; marked xfail.
+
+The **empty-file group (6)** is part of the corpus: an empty document parses to
+``{}`` per HOCON.md §Omit root braces L134-136, so the Lightbend-generated
+``{}`` sidecars are normative as-is (the former E10 reject-posture was revoked
+2026-07-23 — see xx.hocon ``docs/extra-spec-conventions.md`` §E10).
+``test_empty_file_parses_to_empty`` additionally pins the group explicitly.
 
 Error fixtures (``-expected-error.json``) are not part of the corpus either.
 """
@@ -31,7 +33,6 @@ from typing import Any
 import pytest
 
 import hocon
-from hocon import ParseError
 
 _HERE = Path(__file__).parent
 _TESTDATA = _HERE / "testdata"
@@ -74,9 +75,6 @@ def _discover() -> list[tuple[str, Path, Any]]:
             # Windows too (os.walk yields backslash separators there).
             rel = Path(root, f).relative_to(_EXPECTED).as_posix()
             base = rel[: -len("-expected.json")]
-            # empty-file group is a documented divergence — held out (see docstring).
-            if base.startswith("empty-file/"):
-                continue
             conf = _CONF / (base + ".conf")
             if not conf.exists():
                 continue
@@ -143,8 +141,8 @@ def _empty_file_fixtures() -> list[Path]:
 @pytest.mark.parametrize(
     "conf", _empty_file_fixtures(), ids=[p.stem for p in _empty_file_fixtures()]
 )
-def test_empty_file_rejected(conf: Path) -> None:
-    """E10 divergence: py.hocon rejects empty/comment-only files (spec §L130),
-    matching its siblings, where Lightbend would accept them as ``{}``."""
-    with pytest.raises(ParseError):
-        hocon.parse_file(str(conf))
+def test_empty_file_parses_to_empty(conf: Path) -> None:
+    """Corrected S3.1 (xx.hocon E10, revoked 2026-07-23): an empty document
+    parses to ``{}`` per HOCON.md L134-136 — the ``{}`` sidecars are normative;
+    the former reject-posture misread the L130-132 JSON baseline."""
+    assert hocon.parse_file(str(conf)).to_object() == {}
