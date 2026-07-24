@@ -423,6 +423,52 @@ server = ServerConfig(
 )   # fails fast on startup if a field is missing or the wrong type
 ```
 
+## Format adapters
+
+Config files that belong to *other* programs can be mounted as HOCON, so a
+`${...}` in your document can reach into them:
+
+```python
+import hocon
+from hocon.adapters import env
+
+base = env.load(prefix="APP_")               # APP_DB__HOST -> db.host
+cfg = hocon.parse(src, resolve_substitutions=False)
+merged = cfg.with_fallback(base).resolve()
+```
+
+Deferring resolution matters: the plain `parse` resolves as it goes, so a
+`${...}` aimed at the fallback would fail before the fallback is attached.
+
+| Module | Extra needed | Notes |
+| --- | --- | --- |
+| `hocon.adapters.properties` | — | `java.util.Properties`, sharing the `include` syntax layer |
+| `hocon.adapters.env` | — | Bulk-mounts a prefixed namespace; also reads `.env` |
+| `hocon.adapters.jsonc` | — | JSON with comments and trailing commas |
+| `hocon.adapters.toml` | — | via `tomllib`, which Python 3.11 ships |
+| `hocon.adapters.yaml` | `pip install hocon-parser[yaml]` | via `ruamel.yaml` |
+
+Only YAML needs a dependency; the base install stays pure standard library.
+Plain JSON needs no adapter — HOCON is a JSON superset, so `hocon.parse`
+accepts it as it stands.
+
+Foreign data stays data: a `${a.b}` in a mounted value is literal text, never a
+reference, because the file belongs to a program that never agreed to HOCON's
+syntax.
+
+For YAML, scalar resolution belongs to the library, not to this package.
+`ruamel.yaml` reads YAML 1.2, so `no` stays the string `"no"`; PyYAML is YAML
+1.1 and would resolve it to `False` — the Norway problem — which is why it is
+not the default. A caller who wants a different library decodes the text
+themselves and hands the tree over:
+
+```python
+import yaml as pyyaml
+from hocon.adapters.yaml import from_value
+
+cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
+```
+
 ## Known Limitations
 
 - **`include url(...)`** is not supported. Fetching remote configuration is outside

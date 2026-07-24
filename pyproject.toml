@@ -24,6 +24,13 @@ classifiers = [
   "Typing :: Typed",
 ]
 
+[project.optional-dependencies]
+# Format adapters. properties, env, jsonc and toml need nothing beyond the
+# standard library (TOML via tomllib, which 3.11 ships); only YAML needs a
+# dependency, so the base install stays pure stdlib.
+yaml = ["ruamel.yaml>=0.18"]
+adapters = ["ruamel.yaml>=0.18"]
+
 [project.urls]
 Repository = "https://github.com/o3co/py.hocon"
 Issues = "https://github.com/o3co/py.hocon/issues"
