@@ -234,19 +234,24 @@ class _Parser:
                 # exempt (they are the separators handled above). Keep that
                 # equivalence in mind if this is ever rewritten positionally —
                 # the interior-empty property is what must be preserved.
+                # Column of `raw` within the source token: when the separator
+                # dot was sliced off above, the offending dot sits one character
+                # further right than the token start (`"a"..b` reports the second
+                # dot, not the separator).
+                raw_col = t.col + (len(t.value) - len(raw))
                 if ".." in raw:
                     raise ParseError(
                         "path has two adjacent periods '.' — empty key segment not "
                         "allowed (HOCON.md path rules)",
                         t.line,
-                        t.col,
+                        raw_col,
                     )
                 if raw.startswith(".") and not space_concat and post_dot_prefix == "":
                     raise ParseError(
                         "path has a leading period '.' — empty key segment not allowed "
                         "(HOCON.md path rules)",
                         t.line,
-                        t.col,
+                        raw_col,
                     )
                 parts = raw.split(".")
                 # Only the exempt empties reach here: a leading one (E13
