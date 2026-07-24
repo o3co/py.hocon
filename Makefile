@@ -41,6 +41,7 @@ testdata:
 	  exit 1; \
 	fi; \
 	if [ -f .xx-hocon-version ] && [ -d "$(TESTDATA_DIR)/hocon" ] && [ -d "$(TESTDATA_DIR)/expected" ] && \
+	   [ -d "$(TESTDATA_DIR)/format-ingestion" ] && \
 	   [ "$$sha" = "$$(cat .xx-hocon-version)" ]; then \
 	  echo "Conformance corpus up to date ($$sha)"; \
 	  exit 0; \
@@ -49,10 +50,11 @@ testdata:
 	trap 'rm -rf "$$tmpdir"' EXIT INT TERM; \
 	curl -sfL "https://github.com/$(TESTDATA_REPO)/archive/$$sha.tar.gz" -o "$$tmpdir/archive.tar.gz"; \
 	tar xzf "$$tmpdir/archive.tar.gz" -C "$$tmpdir" --strip-components=1; \
-	rm -rf "$(TESTDATA_DIR)/hocon" "$(TESTDATA_DIR)/expected"; \
+	rm -rf "$(TESTDATA_DIR)/hocon" "$(TESTDATA_DIR)/expected" "$(TESTDATA_DIR)/format-ingestion"; \
 	mkdir -p "$(TESTDATA_DIR)"; \
 	cp -R "$$tmpdir/testdata/hocon" "$(TESTDATA_DIR)/hocon"; \
 	cp -R "$$tmpdir/expected/hocon" "$(TESTDATA_DIR)/expected"; \
+	cp -R "$$tmpdir/testdata/format-ingestion" "$(TESTDATA_DIR)/format-ingestion"; \
 	printf '%s\n' "$$sha" > .xx-hocon-version; \
 	echo "Done. Fetched $$sha"
 
