@@ -40,6 +40,10 @@ dev = [
   "pytest>=8",
   "mypy>=1.10",
   "ruff>=0.5",
+  # The yaml adapter's optional dependency. Installed for development and CI so
+  # the optional path is actually exercised rather than skipped — a suite that
+  # silently skips it would report green while the adapter went untested.
+  "ruamel.yaml>=0.18",
 ]
 
 [tool.hatch.build.targets.wheel]

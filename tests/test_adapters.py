@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 import hocon
 from hocon.adapters import AdapterError, env, jsonc, properties, toml, yaml
+
+# The yaml adapter's dependency is an extra, so a checkout installed without it
+# can still run everything else.
+_HAS_RUAMEL = importlib.util.find_spec("ruamel.yaml") is not None
+needs_ruamel = pytest.mark.skipif(not _HAS_RUAMEL, reason="needs `pip install hocon-parser[yaml]`")
 
 
 def test_properties_nests_and_shares_the_include_syntax_layer() -> None:
@@ -122,6 +129,7 @@ def test_toml_refuses_infinity() -> None:
         toml.parse("a = inf")
 
 
+@needs_ruamel
 def test_yaml_maps_scalars_mappings_and_sequences() -> None:
     cfg = yaml.parse("name: svc\nport: 8080\ntags: [a, b]\ndb:\n  host: localhost\n")
     assert cfg.get_string("name") == "svc"
@@ -129,6 +137,7 @@ def test_yaml_maps_scalars_mappings_and_sequences() -> None:
     assert cfg.get_string("db.host") == "localhost"
 
 
+@needs_ruamel
 def test_yaml_keeps_norway_a_string() -> None:
     """The default library reads YAML 1.2, so `no` is not False.
 
@@ -141,6 +150,7 @@ def test_yaml_keeps_norway_a_string() -> None:
     assert cfg.get_boolean("real") is True
 
 
+@needs_ruamel
 def test_yaml_resolves_merge_keys_and_aliases() -> None:
     """F5.2 — no aliases or `<<` may survive into the config."""
     cfg = yaml.parse("d: &d\n  host: h\n  port: 1\np:\n  <<: *d\n  port: 2\ncopy: *d\n")
@@ -150,17 +160,20 @@ def test_yaml_resolves_merge_keys_and_aliases() -> None:
     assert not cfg.has("p.<<")
 
 
+@needs_ruamel
 def test_yaml_refuses_a_multi_document_stream() -> None:
     """F5.7 — decoding one and dropping the rest would be silent loss."""
     with pytest.raises(AdapterError, match="F5.7"):
         yaml.parse("a: 1\n---\nb: 2\n")
 
 
+@needs_ruamel
 def test_yaml_empty_document_is_the_empty_object() -> None:
     """F5.9 — as an empty HOCON document is (S3.1)."""
     assert yaml.parse("").keys() == []
 
 
+@needs_ruamel
 def test_yaml_refuses_nan_and_a_sequence_root() -> None:
     with pytest.raises(AdapterError, match="F0.6"):
         yaml.parse("a: .nan")
@@ -168,6 +181,7 @@ def test_yaml_refuses_nan_and_a_sequence_root() -> None:
         yaml.parse("- 1\n- 2")
 
 
+@needs_ruamel
 def test_yaml_from_value_accepts_an_externally_decoded_tree() -> None:
     """The tree-level entry point: the caller picks the library, the rules stay."""
     cfg = yaml.from_value({"db": {"host": "h", "port": 5432}}, "via-caller")

@@ -8,6 +8,7 @@ See ``tests/conformance/testdata/format-ingestion/manifest.json``.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -31,6 +32,9 @@ def _cases() -> list[dict[str, Any]]:
         return []
     cases: list[dict[str, Any]] = json.loads(_MANIFEST.read_text(encoding="utf-8"))["cases"]
     return cases
+
+
+_HAS_RUAMEL = importlib.util.find_spec("ruamel.yaml") is not None
 
 
 def _ingest(case: dict[str, Any]) -> Config:
@@ -60,6 +64,8 @@ def test_manifest_is_not_empty() -> None:
 
 @pytest.mark.parametrize("case", _CASES, ids=[c["id"] for c in _CASES])
 def test_format_ingestion_fixture(case: dict[str, Any]) -> None:
+    if case["format"] == "yaml" and not _HAS_RUAMEL:
+        pytest.skip("needs `pip install hocon-parser[yaml]`")
     if case["expect"] == "error":
         with pytest.raises(AdapterError) as excinfo:
             _ingest(case)
