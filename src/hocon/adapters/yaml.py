@@ -15,7 +15,7 @@ who wants it decodes with it and hands the tree to :func:`from_value`::
     import yaml as pyyaml
     cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
 
-Needs ``pip install py.hocon[yaml]``.
+Needs ``pip install hocon-parser[yaml]``.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def _loader() -> Any:
         from ruamel.yaml import YAML
     except ModuleNotFoundError:  # pragma: no cover - exercised by packaging, not tests
         raise AdapterError(
-            "yaml: ruamel.yaml is not installed — `pip install py.hocon[yaml]`, "
+            "yaml: ruamel.yaml is not installed — `pip install hocon-parser[yaml]`, "
             "or decode with your own library and call hocon.adapters.yaml.from_value"
         ) from None
     loader = YAML(typ="safe", pure=True)

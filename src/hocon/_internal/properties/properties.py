@@ -167,11 +167,11 @@ def _unicode_escape(s: str, i: int, line_no: int) -> tuple[str, int]:
 def _hex4(s: str, start: int, line_no: int) -> int:
     digits = s[start : start + 4]
     if len(digits) < 4:
-        raise ParseError("truncated \\u escape", line_no, start)
+        raise ParseError("truncated \\u escape", line_no, start + 1)
     try:
         return int(digits, 16)
     except ValueError:
-        raise ParseError(f'invalid \\u escape "{digits}"', line_no, start) from None
+        raise ParseError(f'invalid \\u escape "{digits}"', line_no, start + 1) from None
 
 
 def _set_nested(obj: dict[str, Any], segments: list[str], value: str) -> None:

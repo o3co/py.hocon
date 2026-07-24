@@ -483,8 +483,6 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   re-call `parse()` / `parse_file()` on change.
 - **No streaming parser** — the entire input is loaded into memory. For untrusted
   input, validate size before parsing (see Security Considerations).
-  not support multiline values (backslash continuation), Unicode escapes, or key
-  escaping from the full Java `.properties` specification.
 
 ## Security Considerations
 

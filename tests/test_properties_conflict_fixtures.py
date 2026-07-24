@@ -46,8 +46,8 @@ pytestmark = pytest.mark.skipif(
 
 def _norm(v: Any) -> Any:
     """Canonicalize a JSON value for comparison (local copy of the corpus
-    runner's normalization: key order ignored, numbers by value, null keys
-    dropped)."""
+    runner's normalization: key order ignored, numbers by value, null-valued
+    entries dropped)."""
     if isinstance(v, dict):
         return {k: _norm(x) for k, x in v.items() if x is not None}
     if isinstance(v, list):

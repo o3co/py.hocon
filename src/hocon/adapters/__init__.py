@@ -15,7 +15,7 @@ Deferring resolution matters: the plain parse resolves as it goes, so a
 
 ``properties``, ``env``, ``jsonc`` and ``toml`` need nothing beyond the standard
 library — TOML is read with :mod:`tomllib`, which Python 3.11 ships. ``yaml``
-needs an extra: ``pip install py.hocon[yaml]``.
+needs an extra: ``pip install hocon-parser[yaml]``.
 
 Foreign data stays data: a ``${a.b}`` in an ingested value is literal text,
 never a reference (spec F0.2). Ingestion is AST-level — a document is decoded
