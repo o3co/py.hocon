@@ -78,9 +78,11 @@ def _is_unquoted_subst_char(ch: str) -> bool:
 
 
 def _is_unquoted_start(ch: str) -> bool:
+    # S8.1: the reserved set is `$ " { } [ ] : = , + # ` ^ ? ! @ * & \` (HOCON.md
+    # L245-247). '(' / ')' are deliberately NOT reserved (xx.hocon#34).
     if ch == "" or _is_hocon_whitespace(ch):
         return False
-    if ch in '{}[],:=+#"$?!@*&^\\':
+    if ch in '{}[],:=+#"$?!@*&^`\\':
         return False
     return True
 
@@ -88,7 +90,7 @@ def _is_unquoted_start(ch: str) -> bool:
 def _is_unquoted_continue(ch: str, nxt: str) -> bool:
     if ch == "" or _is_hocon_whitespace(ch):
         return False
-    if ch in '{}[],:=#"$?!@*&^\\':
+    if ch in '{}[],:=#"$?!@*&^`\\':
         return False
     if ch == "+" and nxt == "=":
         return False

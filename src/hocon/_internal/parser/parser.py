@@ -215,7 +215,44 @@ class _Parser:
                     raw = t.value[1:]
                 else:
                     raw = t.value
+                # S11.7: an empty path element must be written as a quoted ""
+                # (`a."".b`); `a..b` and a leading `.` are errors (HOCON.md
+                # L515-519). The substitution path lexer enforces this while
+                # scanning chars (_parse_subst_body: a '.' with no segment
+                # started); key paths are token-driven, so the same rule is
+                # expressed on the token's raw text. Two adjacent dots inside
+                # ONE token can never be filled — anything that could fill them
+                # (whitespace, a quoted segment) would have split the token —
+                # and a leading dot is a separator only while a preceding
+                # segment is still open: `space_concat` (E13 `a .b`) or
+                # `post_dot_prefix` (E13 `a. .b`). A trailing dot is a separator
+                # here; the `trailing_dot` check after the loop rejects it if
+                # the path ends there.
+                # `".." in raw` is equivalent to "`raw.split('.')` has an empty
+                # piece at an interior index": adjacent dots always put an empty
+                # between two separators, and only the first/last pieces are ever
+                # exempt (they are the separators handled above). Keep that
+                # equivalence in mind if this is ever rewritten positionally —
+                # the interior-empty property is what must be preserved.
+                if ".." in raw:
+                    raise ParseError(
+                        "path has two adjacent periods '.' — empty key segment not "
+                        "allowed (HOCON.md path rules)",
+                        t.line,
+                        t.col,
+                    )
+                if raw.startswith(".") and not space_concat and post_dot_prefix == "":
+                    raise ParseError(
+                        "path has a leading period '.' — empty key segment not allowed "
+                        "(HOCON.md path rules)",
+                        t.line,
+                        t.col,
+                    )
                 parts = raw.split(".")
+                # Only the exempt empties reach here: a leading one (E13
+                # separator, guarded above) and a trailing one (dot-continuation,
+                # policed by the `trailing_dot` check after the loop). Genuine
+                # empty segments already raised.
                 filtered = [s for s in parts if len(s) > 0]
                 if space_concat:
                     segments[-1] = f"{segments[-1]}{t.preceding_whitespace}"

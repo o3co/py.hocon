@@ -232,8 +232,8 @@ Citation shorthand used on `tests:` lines:
 ### S8. Unquoted strings
 
 - **S8.1** Forbidden characters rejected (``$ " { } [ ] : = , + # ` ^ ? ! @ * & \``) and whitespace — §Unquoted strings (L245). **Parens `(` / `)` are NOT in this set** and appear as ordinary unquoted content (e.g. `a = hello (world)` → `{"a":"hello (world)"}`). They are contextual tokens only inside include resource syntax — see S14a. Cross-impl pins: `testdata/hocon/unquoted-parens/up01-up06`.
-  tests: corpus: unquoted-parens/up01–up06 (parens-not-forbidden clarification)
-  status: ✅ — mirrors rs.hocon. Empirically verified rs-parity incl. backtick handling (py accepts `` ` `` in unquoted strings exactly like rs; ts documents the same behavior as ⚠️ on its side); a py-side forbidden-set sweep test is pending (conformance expansion).
+  tests: corpus: unquoted-parens/up01–up06 (parens-not-forbidden clarification), unquoted-forbidden/uf04 (backtick inside quotes is content); error: unquoted-forbidden/uf01–uf03 (backtick in value / key / mid-token); `tests/test_issue68_path_empty_segment.py`
+  status: ✅ — the whole forbidden set is rejected outside quotes. `` ` `` was the last member still leaking through (accepted in key and value position); fixed in [xx.hocon#68](https://github.com/o3co/xx.hocon/issues/68). Parens stay unreserved (xx.hocon#34).
 - **S8.2** `//` inside an unquoted string starts a comment — §Unquoted strings (L248)
   tests: corpus: unquoted-starts/us05 (`a = 123// rest of line` → `123`)
   status: ✅
@@ -355,8 +355,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: test02 (`"" : { "" : { "" : 42 } }` + `${""."".""}`); subst-tokenize/st09
   status: ✅
 - **S11.7** `a..b` and paths starting/ending with `.` are errors — §Path expressions (L517)
-  tests: error: subst-tokenize/st-err08 (`${}` empty path), st-err09 (`${.foo}`), st-err10 (`${foo.}`), st-err11 (`${foo..bar}`); error: path-expr-whitespace/pw06 (trailing dot in key path, `a b. = 1`)
-  status: ✅
+  tests: error: subst-tokenize/st-err08 (`${}` empty path), st-err09 (`${.foo}`), st-err10 (`${foo.}`), st-err11 (`${foo..bar}`); error: path-expr-whitespace/pw06 (trailing dot in key path, `a b. = 1`); error: path-empty-segment/pe01–pe06, pe08 (key-position `a..b` / `.a` / `a...c`); `tests/test_issue68_path_empty_segment.py`
+  status: ✅ — the substitution path lexer always enforced this; the key path parser silently dropped empty segments (`a..b: 3` → `{"a":{"b":3}}`) until [xx.hocon#68](https://github.com/o3co/xx.hocon/issues/68).
 - **S11.8** Path expression always stringifies (single `true` → `"true"`) — §Path expressions (L504)
   tests: —
   status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
