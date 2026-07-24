@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Empty path segments rejected in key position (S11.7,
+  [xx.hocon#68](https://github.com/o3co/xx.hocon/issues/68)).** `hocon.parse("a..b: 3")`
+  now raises `ParseError` instead of silently collapsing to `{"a": {"b": 3}}`;
+  likewise `.a: 3` (was `{"a": 3}`), `a...c: 4` (was `{"a": {"c": 4}}`),
+  `a...c."": 4` and the nested form `o { a..b: 3 }`. HOCON.md L515-519 is
+  explicit: an empty path element must always be quoted — `a."".b` is a valid
+  three-element path, but `a..b`, or a path starting/ending with `.`, "is
+  invalid and should generate an error". The **substitution** path lexer already
+  enforced this (`${a..b}` / `${.a}` / `${a.}` all raised "empty segment in
+  path"); only the **key** path parser diverged, because it dropped empty
+  segments while splitting an unquoted token on `.`. It now rejects two adjacent
+  periods inside one token (nothing can intervene without splitting the token,
+  so the empty element is never fillable) and a leading period that is not
+  serving as a separator for an already-open segment. Trailing dots were already
+  rejected, and the E13 path-whitespace forms (`a .b`, `a . b`, `a. .b`,
+  `a b. c`) are unaffected — the whitespace there *is* the segment content, so
+  nothing is empty. `a."".b` (S11.6) remains legal. Pinned by
+  `tests/test_issue68_path_empty_segment.py`; the error-fixture harness
+  auto-discovers the xx.hocon `path-empty-segment/pe01–pe08` sidecars (pe07 is
+  the `a."".b` must-succeed case) once synced.
+
+- **Backtick rejected in unquoted strings (S8.1,
+  [xx.hocon#68](https://github.com/o3co/xx.hocon/issues/68)).** `` a = `t` ``
+  now raises `ParseError` instead of parsing as the string ``` `t` ```, as does
+  a backtick in key position (`` `k` = 1 ``) or mid-token (``a = x`y``).
+  HOCON.md L245-247 lists ``$ " { } [ ] : = , + # ` ^ ? ! @ * & \`` as forbidden
+  outside quotes; every member was already rejected except the backtick, which
+  was missing from the lexer's unquoted start/continue sets (the substitution
+  path scanner had it all along). A backtick **inside** a quoted, triple-quoted
+  or comment context stays ordinary content, and `(` / `)` remain deliberately
+  unreserved (xx.hocon#34) — paren handling is untouched. Pinned by
+  `tests/test_issue68_path_empty_segment.py` and the xx.hocon
+  `unquoted-forbidden/uf01–uf04` fixtures (uf04 is the backtick-in-quotes
+  must-succeed case).
+
 ## [1.9.0] - 2026-07-23
 
 Cross-impl release coordinated to land at v1.9.0 across ts.hocon / go.hocon /
