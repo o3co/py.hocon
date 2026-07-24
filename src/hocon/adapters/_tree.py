@@ -70,8 +70,10 @@ def common_scalar(v: Any, at: str, fmt: str) -> Any:
         return v
     if isinstance(v, (datetime, date, time)):
         # HOCON has no datetime, so ISO text is the honest form — the same
-        # reasoning as F4.2 for TOML dates.
-        return v.isoformat()
+        # reasoning as F4.2 for TOML dates. Python spells UTC as `+00:00`
+        # where Go and JS write `Z`; both are valid RFC 3339, so F4.2 pins
+        # `Z` and the offset is rewritten here.
+        return v.isoformat().replace("+00:00", "Z")
     if isinstance(v, (bytes, bytearray)):
         import base64
 
