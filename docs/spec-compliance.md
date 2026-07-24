@@ -28,11 +28,12 @@ non-JVM parser caps at 14/16.
   numbers default to days, lowercase-only units, negative permitted). ts / go
   remain ➖ here; rs.hocon is the reference. Tests: `tests/test_period.py`
   (mirrors rs `parse_period` unit tests + units-default up01–up05 scenarios).
-- **S23.5, S23.6, S14a.2 (URL / classpath includes) ➖** — inside the 17
-  globally out-of-scope items (see xx.hocon `docs/compliance-matrix.md`
-  §Globally out-of-scope); listed here only because users ask about them:
-  `.properties` multi-line + Unicode escapes are a documented simplification,
-  and URL / classpath includes are unsupported by design across all siblings.
+- **S14a.2 (URL / classpath includes) ➖** — inside the 15 globally
+  out-of-scope items (see xx.hocon `docs/compliance-matrix.md` §Globally
+  out-of-scope); listed here only because users ask about it: URL / classpath
+  includes are unsupported by design across all siblings.
+  (S23.5 / S23.6 left that list on 2026-07-24 — `.properties` continuations and
+  Unicode escapes are now implemented, not a documented simplification.)
 
 > Item-level S-rows are added as the compliance matrix is reconciled. This file
 > mirrors the canonical S-rows only — it must not introduce items that do not
@@ -814,13 +815,11 @@ per-impl here (no period accessor); rs is the reference sibling.
   tests: pc: pc01–pc04 (object wins over string on the conflicting key in both input orders, shallow `a`/`a.b` and deep `a.b`/`a.b.c`)
   status: ✅
 - **S23.5** Multi-line values (backslash continuation) — §Note on Java properties similarity (L1587)
-  out-of-scope: declared in each implementation's README — the `.properties` reader supports only basic `key=value` syntax to avoid pulling a full Java properties parser into a non-JVM library.
-  tests: —
-  status: ➖
+  tests: tests/test_properties_syntax_fixtures.py (ps01, ps03, ps04)
+  status: ✅ — In scope since 2026-07-24 (was ➖). `_internal/properties/properties.py` gained a logical-line pass and an escape pass; the out-of-scope rationale assumed a full Java properties reader was expensive, which it is not.
 - **S23.6** Unicode escapes in `.properties` — §Note on Java properties similarity (L1587)
-  out-of-scope: same rationale as S23.5.
-  tests: —
-  status: ➖
+  tests: tests/test_properties_syntax_fixtures.py (ps02, ps05)
+  status: ✅ — In scope since 2026-07-24 (was ➖). Surrogate pairs are combined; an unpaired surrogate raises. A Python `str` can hold one, but encoding it to UTF-8 raises, so accepting it would only defer the failure to serialization — go.hocon and rs.hocon reject it too, while ts.hocon accepts it (UTF-16 strings, as Java has). See S1.2.6.
 
 ### S24. Conventional config files (JVM)
 
