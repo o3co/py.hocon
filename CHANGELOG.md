@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Integers outside the int64 range were accepted (F0.5).** HOCON integers are
+  int64, but Python's `int` is unbounded and both `json` and `tomllib` decode
+  arbitrary precision, so `jsonc.parse('{"a":9223372036854775808}')` and
+  `hocon.from_map({"a": 2**63})` produced a config no sibling implementation
+  can hold. `from_map` and the shared adapter leaf rule now raise
+  (`ConfigError` / `AdapterError`) outside `[-2^63, 2^63-1]`; `INT64_MIN` /
+  `INT64_MAX` are exported from `hocon.value_factory`. **The core parser is
+  unchanged** — `hocon.parse('{"a":9223372036854775808}')` still accepts, since
+  F0.5 governs ingestion of foreign documents and the literal case is an S-item
+  question.
 - **A leading UTF-8 BOM became part of the first key (F0.9).** A file saved by
   a Windows editor starts with U+FEFF, and `properties.parse_file` /
   `env.parse_dotenv_file` admitted it into the key: `a = 1` produced `"﻿a"`, so
@@ -70,7 +80,12 @@ or raise. A variable name with a literal `.` that was relied on for nesting
 (`APP_FOO.BAR` → `foo.bar`) must be respelled with the separator
 (`APP_FOO__BAR`), or read through a quoted path (`cfg.get_string('"foo.bar"')`);
 and a JSONC document where a block comment sat between two tokens
-(`{"a": 1/*x*/2}`) now raises instead of silently decoding as `12`.
+(`{"a": 1/*x*/2}`) now raises instead of silently decoding as `12`. An ingested
+document carrying an integer beyond int64 (`{"a": 9223372036854775808}`) now
+raises as well — decode it as a string or a float if the value is genuinely
+that large. In the other direction, documents that used to lose data now load
+fully: a key after a CR-terminated JSONC comment, and the first key of a
+BOM-prefixed file, both reappear.
 
 ## [1.10.0] - 2026-07-25
 

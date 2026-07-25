@@ -340,6 +340,21 @@ def test_a_leading_bom_never_becomes_part_of_a_yaml_key(tmp_path: Path) -> None:
     assert yaml.parse_file(str(p)).keys() == ["a"]
 
 
+def test_integers_outside_int64_are_refused(tmp_path: Path) -> None:
+    """F0.5 — HOCON integers are int64. Python's int is unbounded and its JSON
+    and TOML decoders hand back arbitrary precision, so the bound has to be
+    checked or a document no sibling can hold would load here."""
+    with pytest.raises(AdapterError, match="int64"):
+        jsonc.parse('{"a":9223372036854775808}')
+    with pytest.raises(AdapterError, match="int64"):
+        jsonc.parse('{"a":-9223372036854775809}')
+    with pytest.raises(hocon.ConfigError, match="int64"):
+        hocon.from_map({"a": 2**63})
+    # The bounds themselves are fine, and so is a float of any size.
+    assert jsonc.parse('{"a":9223372036854775807}').get_int("a") == 2**63 - 1
+    assert hocon.from_map({"a": -(2**63)}).get_int("a") == -(2**63)
+
+
 def test_used_as_a_substitution_source_under_hocon() -> None:
     """The reason the adapters exist."""
     base = yaml.parse("services:\n  db:\n    image: postgres:16\n")

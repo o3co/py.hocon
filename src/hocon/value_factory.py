@@ -16,6 +16,12 @@ from .value import HoconArray, HoconObject, HoconScalar, HoconValue
 
 __all__ = ["empty", "from_map"]
 
+#: HOCON integers are int64 (spec F0.5), and Python's ``int`` is unbounded, so
+#: the bound has to be checked rather than inherited. Accepting a wider value
+#: would mean handing out a config the sibling implementations cannot hold.
+INT64_MIN = -(2**63)
+INT64_MAX = 2**63 - 1
+
 
 def from_map(values: dict[str, Any], origin_description: str | None = None) -> Config:
     """Construct a resolved Config from a plain ``dict``."""
@@ -43,6 +49,12 @@ def _coerce_value(v: Any, at_path: str) -> HoconValue:
     if isinstance(v, bool):
         return HoconScalar("true" if v else "false", "boolean")
     if isinstance(v, int):
+        if not INT64_MIN <= v <= INT64_MAX:
+            raise ConfigError(
+                f"from_map: {v} is outside the int64 range HOCON integers use "
+                f'(spec F0.5) at path "{at_path}"',
+                at_path,
+            )
         return HoconScalar(str(v), "number")
     if isinstance(v, float):
         if math.isnan(v) or math.isinf(v):
