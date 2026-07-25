@@ -182,6 +182,31 @@ def test_jsonc_comment_removal_separates_tokens() -> None:
         jsonc.parse('{"b": tr/*x*/ue}')
 
 
+def test_jsonc_line_comment_ends_at_a_carriage_return() -> None:
+    """F3.2 — a CR ends a `//` comment, as it does in the dialect this adapter
+    implements (node-jsonc-parser's isLineBreak is LF and CR).
+
+    Scanning for LF alone made the comment swallow the next line; the trailing
+    comma left behind was then stripped as well, so the document stayed valid
+    JSON and the key simply vanished — no error, no diagnostic.
+    """
+    doc = '{\n  "port": 8080, // the port\r  "tlsRequired": true\n}\n'
+    assert jsonc.parse(doc).to_object() == {"port": 8080, "tlsRequired": True}
+    # The same document with the comment removed, as a control.
+    assert jsonc.parse('{\n  "port": 8080,\r  "tlsRequired": true\n}\n').to_object() == {
+        "port": 8080,
+        "tlsRequired": True,
+    }
+
+
+def test_jsonc_line_comment_runs_through_u2028() -> None:
+    """U+2028 / U+2029 are not line breaks in this dialect, so a comment
+    continues through them — matching what VS Code reads, which is the point of
+    implementing someone else's dialect rather than inventing one."""
+    doc = '{\n  "port": 8080, // the port\u2028  "tls": true\n}\n'
+    assert jsonc.parse(doc).to_object() == {"port": 8080}
+
+
 def test_jsonc_refuses_a_non_object_root() -> None:
     """F0.3 — a config root has to be an object."""
     with pytest.raises(AdapterError, match="F0.3"):

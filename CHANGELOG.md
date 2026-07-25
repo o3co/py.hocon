@@ -37,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaced by whitespace — at least one space, with the contained newlines still
   preserved for line numbers — so the surrounding tokens stay separate and the
   malformed document fails the JSON decode as `AdapterError`.
+- **A JSONC `//` comment terminated by CR silently deleted the following key
+  (F3.2).** The scan looked for `\n` only, so a lone CR — a CRLF file whose
+  line endings were split, or a classic-Mac ending — was comment body and the
+  next line was swallowed. With the now-dangling comma stripped behind it the
+  document stayed valid JSON, so `{"port": 8080, // c\r "tlsRequired": true}`
+  loaded as `{"port": 8080}` with no diagnostic at all: the same silent-loss
+  failure F3.2 exists to prevent, and a divergence from the dialect this
+  adapter implements, where CR ends a comment. A `//` comment now ends at LF
+  or CR. U+2028/U+2029 deliberately do **not** end one: `node-jsonc-parser`
+  does not treat them as line breaks either, so a document reads the same here
+  as in the editor that owns the format.
 
 **Migrating from 1.10.0**: input that used to be accepted can now change shape
 or raise. A variable name with a literal `.` that was relied on for nesting
