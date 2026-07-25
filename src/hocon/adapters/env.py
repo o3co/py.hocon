@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .._internal.os_text import is_undecodable
 from ..config import Config
 from ..value_factory import from_map
 from . import AdapterError
@@ -51,6 +52,12 @@ def load(
     environment having no meaningful order to break the tie with (F1.6). The
     two names have to reach the *same segments*: ``APP_FOO.BAR`` and
     ``APP_FOO__BAR`` are different paths and coexist (F1.2).
+
+    An entry under ``prefix`` whose name or value the OS could not decode as
+    UTF-8 is an error too (F1.9b) — a mount that quietly dropped it would look
+    complete while the operator's setting was missing. Entries outside the
+    prefix are never inspected, so an undecodable variable elsewhere in the
+    environment cannot break an unrelated mount.
     """
     if not prefix:
         raise AdapterError("env: a prefix is required when mounting the environment (spec F1.1)")
@@ -62,6 +69,21 @@ def load(
     for name in sorted(source):
         if not name.startswith(prefix):
             continue
+        # F1.9b — deliberately after the prefix filter: a mount is an explicit
+        # request for this namespace, so an entry in it the OS could not decode
+        # is an error rather than a silent omission that leaves a stale default
+        # winning invisibly. An undecodable variable *elsewhere* in the
+        # environment stays none of this mount's business.
+        if is_undecodable(name):
+            raise AdapterError(
+                f"env: the name {name!r} is not valid UTF-8 (spec F1.9); "
+                f"a bulk mount of {prefix!r} cannot silently omit it"
+            )
+        if is_undecodable(source[name]):
+            raise AdapterError(
+                f"env: the value of {name!r} is not valid UTF-8 (spec F1.9); "
+                f"a bulk mount of {prefix!r} cannot silently omit it"
+            )
         path = _to_path(name[len(prefix) :], name)
         # The segments themselves are the identity — keyed as a tuple rather
         # than joined into a string, which would need a delimiter no segment

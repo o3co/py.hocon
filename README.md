@@ -478,6 +478,17 @@ definite order, so there the last line simply wins. Segments are lowercased
 four implementations rather than each language's Unicode rules — and a single
 `_` stays inside the segment (`APP_DB__MAX_CONN` → `db.max_conn`).
 
+**env — an entry that is not valid UTF-8 never becomes a value.** Python
+decodes the environment with `surrogateescape`, so undecodable bytes survive as
+lone surrogates that raise only when something later encodes them. What happens
+to such an entry depends on whether you asked for it: `${VAR}` and `${?VAR}`
+treat it as **absent** (the optional form falls through to its default, the
+required form raises the usual unresolved error), while `env.load(prefix=...)`
+**errors** if the entry is inside the prefix you mounted — a mount that dropped
+it silently would look complete while the operator's setting was missing.
+Entries outside the prefix are never inspected, so an undecodable variable
+elsewhere cannot break your mount.
+
 **jsonc — comments separate tokens.** A comment is removed by replacing it with
 whitespace, so `{"a": 1/*x*/2}` is a syntax error rather than `{"a": 12}`. A
 `//` comment ends at LF or CR, matching the dialect VS Code reads.
