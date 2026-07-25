@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A literal `.` in an environment variable name became a path boundary
+  (F1.2).** The env adapter joined the `__`-split segments with `.` and
+  re-split on `.` while nesting, so `APP_FOO.BAR=v` produced
+  `{"foo": {"bar": "v"}}` — the same shape as `APP_FOO__BAR` — and the pair was
+  even reported as an F1.6 collision. Amended F1.2 pins the rule: only `__`
+  creates hierarchy, so the mapped path is carried as a segment list end-to-end
+  (collision detection joins on NUL, as go.hocon does). `APP_FOO.BAR` now
+  yields the single top-level key `"foo.bar"`, quoted-path addressable and
+  coexisting with `APP_FOO__BAR`; genuine collisions such as `APP_A__B` vs
+  `APP_a__b` still error. The same path serves `parse_dotenv`.
 - **JSONC comment stripping could fuse the tokens around a block comment
   (F3.2).** `strip_comments` replaced a `/* */` comment with the empty string
   (plus any contained newlines), so `{"a":1/*x*/2}` decoded as `{"a": 12}` and

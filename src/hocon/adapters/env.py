@@ -40,16 +40,19 @@ def load(
 
     # Sorted so a collision is reported the same way on every run.
     seen: dict[str, str] = {}
-    pairs: list[tuple[str, str]] = []
+    pairs: list[tuple[list[str], str]] = []
     for name in sorted(source):
         if not name.startswith(prefix):
             continue
         path = _to_path(name[len(prefix) :], name)
-        if path in seen:
+        # NUL cannot appear in a segment, so distinct paths cannot collide
+        # into one detection key the way a "." join would let them (F1.2).
+        key = "\x00".join(path)
+        if key in seen:
             # F1.6: two names can reach one path and the environment has no
             # meaningful order to break the tie with, so neither wins.
-            raise AdapterError(f"env: {seen[path]} and {name} both map to {path!r}")
-        seen[path] = name
+            raise AdapterError(f"env: {seen[key]} and {name} both map to {'.'.join(path)!r}")
+        seen[key] = name
         pairs.append((path, source[name]))
 
     return from_map(_nest(pairs), origin_description or "environment variables")
@@ -69,7 +72,7 @@ def parse_dotenv(
     rather than a guess. No ``${...}`` expansion.
     """
     origin = origin_description or ".env"
-    pairs: list[tuple[str, str]] = []
+    pairs: list[tuple[list[str], str]] = []
 
     normalized = input_text.replace("\r\n", "\n").replace("\r", "\n")
     for lineno, raw in enumerate(normalized.split("\n"), start=1):
@@ -100,20 +103,27 @@ def parse_dotenv_file(path: str | Path, prefix: str = "") -> Config:
     return parse_dotenv(p.read_text(encoding="utf-8"), prefix, str(p))
 
 
-def _to_path(rest: str, name: str) -> str:
-    """Strip the prefix, split on ``__``, lowercase each segment (F1.2, F1.3)."""
+def _to_path(rest: str, name: str) -> list[str]:
+    """Split the prefix-stripped name on ``__``, lowercasing each segment
+    (F1.2, F1.3).
+
+    The result stays a segment list end-to-end: joining on ``.`` and
+    re-splitting later would turn a literal ``.`` in a variable name into a
+    path boundary it never was, so ``APP_FOO.BAR`` is the single top-level key
+    ``"foo.bar"``, distinct from ``APP_FOO__BAR`` (F1.2).
+    """
     segs = [s.lower() for s in rest.split(SEPARATOR)]
     if any(s == "" for s in segs):
         raise AdapterError(f"env: {name!r} produces an empty path segment")
-    return ".".join(segs)
+    return segs
 
 
-def _nest(pairs: list[tuple[str, str]]) -> dict[str, Any]:
-    """Nest dotted paths, objects winning over scalars over the whole set so the
-    outcome does not depend on input order (spec F1.8, mirroring F2.5)."""
+def _nest(pairs: list[tuple[list[str], str]]) -> dict[str, Any]:
+    """Nest pre-split segment paths, objects winning over scalars over the
+    whole set so the outcome does not depend on input order (spec F1.8,
+    mirroring F2.5)."""
     root: dict[str, Any] = {}
-    for path, value in sorted(pairs, key=lambda kv: kv[0]):
-        segments = path.split(".")
+    for segments, value in sorted(pairs, key=lambda kv: kv[0]):
         current = root
         for seg in segments[:-1]:
             existing = current.get(seg)

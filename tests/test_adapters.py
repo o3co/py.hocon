@@ -53,6 +53,25 @@ def test_env_refuses_a_collision() -> None:
     """F1.6 — the environment has no order to break a tie with."""
     with pytest.raises(AdapterError, match="both map to"):
         env.load("APP_", {"APP_A__B": "1", "APP_a__b": "2"})
+    # A literal-dot pair genuinely reaching one path is still a collision.
+    with pytest.raises(AdapterError, match="both map to"):
+        env.load("APP_", {"APP_FOO.BAR": "1", "APP_foo.bar": "2"})
+
+
+def test_env_keeps_a_literal_dot_as_key_text() -> None:
+    """F1.2 — only `__` creates hierarchy; a `.` in the name is key text, so
+    the value lands under one top-level key, addressable by quoting."""
+    cfg = env.load("APP_", {"APP_FOO.BAR": "v"})
+    assert cfg.get_string('"foo.bar"') == "v"
+    assert not cfg.has("foo"), "must not nest — no phantom foo object"
+
+
+def test_env_literal_dot_coexists_with_the_separated_path() -> None:
+    """F1.2/F1.6 — `APP_FOO.BAR` and `APP_FOO__BAR` are different paths and
+    must not be reported as a collision."""
+    cfg = env.load("APP_", {"APP_FOO.BAR": "1", "APP_FOO__BAR": "2"})
+    assert cfg.get_string('"foo.bar"') == "1"
+    assert cfg.get_string("foo.bar") == "2"
 
 
 def test_dotenv_reads_the_small_dialect() -> None:
@@ -74,6 +93,13 @@ def test_dotenv_reads_the_small_dialect() -> None:
     assert cfg.get_string("quoted") == "a\nb"
     assert cfg.get_string("single") == "raw ${x} #hash"
     assert cfg.get_string("hash") == "#fff"
+
+
+def test_dotenv_keeps_a_literal_dot_as_key_text() -> None:
+    """F1.2 applies to the .env path too — same mapping, same rule."""
+    cfg = env.parse_dotenv("FOO.BAR=v\n")
+    assert cfg.get_string('"foo.bar"') == "v"
+    assert not cfg.has("foo"), "must not nest — no phantom foo object"
 
 
 def test_dotenv_refuses_an_ambiguous_trailing_hash() -> None:
