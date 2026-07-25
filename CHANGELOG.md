@@ -21,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `APP_a__b` still error, and their message now spells the path as HOCON would
   (`both map to "foo.bar"` vs `both map to a.b`) so the two cases are
   distinguishable. The same path serves `parse_dotenv`.
+- **Environment variable names were case-folded with full Unicode rules
+  (F1.3).** `str.lower()` maps `İ` (U+0130) to `i` + U+0307, while Go's simple
+  mapping yields plain `i` — so `APP_İ` alongside `APP_I` was an F1.6 collision
+  error in go.hocon and two coexisting keys here, for the same environment.
+  New F1.3 pins ASCII-only folding (`A`–`Z` only, every other codepoint left
+  alone), which all four implementations now share. Variable names are ASCII in
+  every practical setting, so nothing else changes.
 - **`.properties` silently dropped `__proto__`, `constructor` and `prototype`
   keys (F2.9).** A denylist ported verbatim from ts.hocon's first commit made
   `_set_nested` return without inserting, so `x.__proto__ = f` produced a

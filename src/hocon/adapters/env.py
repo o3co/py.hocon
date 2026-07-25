@@ -22,12 +22,19 @@ __all__ = ["load", "parse_dotenv", "parse_dotenv_file"]
 #: does: a single underscore stays part of the segment, so ``APP_DB__MAX_CONN``
 #: is ``db.max_conn``, and a literal ``.`` is key text, so ``APP_FOO.BAR`` is
 #: the single key ``"foo.bar"`` rather than ``foo.bar`` (spec F1.2). Fixed
-#: rather than configurable so every language's adapter nests identically.
+#: rather than configurable so the same variable name splits into the same
+#: segments in every language's adapter (what those segments are then *called*
+#: is the case-folding rule, :data:`_ASCII_FOLD`).
 SEPARATOR = "__"
 
 #: Segment characters that need no quoting when a path is spelled back out in
 #: an error message. Deliberately conservative — anything else gets quotes.
 _BARE_SEGMENT_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_-")
+
+#: ASCII-only case fold (F1.3). Every other codepoint is left alone, so the
+#: mapping is the same in all four implementations rather than inheriting each
+#: standard library's Unicode case rules.
+_ASCII_FOLD = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
 
 
 def load(
@@ -123,8 +130,14 @@ def _to_path(rest: str, name: str) -> list[str]:
     re-splitting later would turn a literal ``.`` in a variable name into a
     path boundary it never was, so ``APP_FOO.BAR`` is the single top-level key
     ``"foo.bar"``, distinct from ``APP_FOO__BAR`` (F1.2).
+
+    Case folding is ASCII-only (F1.3). ``str.lower`` applies the full Unicode
+    mapping, so ``İ`` (U+0130) would become ``i`` + U+0307 here while Go's
+    simple mapping yields ``i`` — which would decide whether ``APP_İ`` collides
+    with ``APP_I`` under F1.6 differently per language. Variable names are
+    ASCII in every practical setting, so pinning the fold costs nothing.
     """
-    segs = [s.lower() for s in rest.split(SEPARATOR)]
+    segs = [s.translate(_ASCII_FOLD) for s in rest.split(SEPARATOR)]
     if any(s == "" for s in segs):
         raise AdapterError(f"env: {name!r} produces an empty path segment")
     return segs

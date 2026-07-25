@@ -96,6 +96,16 @@ def test_env_collision_detection_is_exact_not_delimiter_based() -> None:
     assert cfg.get_string("a.b") == "2"
 
 
+def test_env_case_folding_is_ascii_only() -> None:
+    """F1.3 — `str.lower` would map `İ` (U+0130) to `i` + U+0307 while Go's
+    simple mapping yields `i`, which decides F1.6 collisions differently per
+    language. ASCII-only folding leaves every non-ASCII codepoint alone."""
+    cfg = env.load("APP_", {"APP_İ": "dotted", "APP_I": "ascii"})
+    assert cfg.get_string('"İ"') == "dotted", "İ must survive unfolded"
+    assert cfg.get_string("i") == "ascii"
+    assert not cfg.has('"i̇"'), "no full-Unicode fold artifact"
+
+
 def test_env_keeps_a_literal_dot_as_key_text() -> None:
     """F1.2 — only `__` creates hierarchy; a `.` in the name is key text, so
     the value lands under one top-level key, addressable by quoting."""
