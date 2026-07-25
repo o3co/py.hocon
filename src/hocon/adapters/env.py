@@ -18,8 +18,10 @@ from . import AdapterError
 
 __all__ = ["load", "parse_dotenv", "parse_dotenv_file"]
 
-#: The double underscore that marks a path boundary; a single one stays part of
-#: the segment, so ``APP_DB__MAX_CONN`` is ``db.max_conn`` (spec F1.2). Fixed
+#: The double underscore that marks a path boundary, and the only thing that
+#: does: a single underscore stays part of the segment, so ``APP_DB__MAX_CONN``
+#: is ``db.max_conn``, and a literal ``.`` is key text, so ``APP_FOO.BAR`` is
+#: the single key ``"foo.bar"`` rather than ``foo.bar`` (spec F1.2). Fixed
 #: rather than configurable so every language's adapter nests identically.
 SEPARATOR = "__"
 
@@ -33,6 +35,11 @@ def load(
 
     ``prefix`` is required: mounting everything would pull in PATH, HOME and
     whatever secrets happen to be set (spec F1.1).
+
+    Two names reaching one path is an error rather than last-wins, the
+    environment having no meaningful order to break the tie with (F1.6). The
+    two names have to reach the *same segments*: ``APP_FOO.BAR`` and
+    ``APP_FOO__BAR`` are different paths and coexist (F1.2).
     """
     if not prefix:
         raise AdapterError("env: a prefix is required when mounting the environment (spec F1.1)")

@@ -10,6 +10,10 @@ S23.5 and S23.6 were out-of-scope until 2026-07-24.
 Object always wins over scalar on a key conflict (S23.4, HOCON.md L1485),
 enforced via key-sorted insertion so conflict direction is input-order
 independent.
+
+There is no key denylist: ``__proto__``, ``constructor`` and ``prototype`` are
+ordinary keys and keep their values (F2.9). A Python ``dict`` has no prototype
+to pollute, so dropping them would be data loss protecting nothing.
 """
 
 from __future__ import annotations
