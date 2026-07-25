@@ -7,6 +7,7 @@ already does that.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -172,13 +173,20 @@ def _render_path(segments: list[str]) -> str:
     A collision message has to distinguish ``APP_FOO.BAR`` (one segment, so
     ``"foo.bar"``) from ``APP_FOO__BAR`` (two, so ``foo.bar``) — printing the
     dot-joined form for both would erase exactly the difference F1.2 draws.
+
+    The quoted form is produced by :func:`json.dumps`, HOCON quoted strings
+    being JSON string syntax. That escapes control characters too, so a name
+    carrying a newline or a NUL cannot spray unprintables through the error
+    message. ``ensure_ascii`` stays off so a non-ASCII segment is printed as
+    itself — ASCII-only folding (F1.3) means such segments now reach here, and
+    escaping them would drift from go.hocon's ``%q`` and rs.hocon's ``{:?}``.
     """
     out: list[str] = []
     for seg in segments:
         if seg and not set(seg) - _BARE_SEGMENT_CHARS:
             out.append(seg)
         else:
-            out.append('"' + seg.replace("\\", "\\\\").replace('"', '\\"') + '"')
+            out.append(json.dumps(seg, ensure_ascii=False))
     return ".".join(out)
 
 

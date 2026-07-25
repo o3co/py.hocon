@@ -28,8 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   arbitrary precision, so `jsonc.parse('{"a":9223372036854775808}')` and
   `hocon.from_map({"a": 2**63})` produced a config no sibling implementation
   can hold. `from_map` and the shared adapter leaf rule now raise
-  (`ConfigError` / `AdapterError`) outside `[-2^63, 2^63-1]`; `INT64_MIN` /
-  `INT64_MAX` are exported from `hocon.value_factory`. **HOCON source text is
+  (`ConfigError` / `AdapterError`) outside `[-2^63, 2^63-1]`. The bound itself
+  is internal, as it is in ts.hocon — no new public API. **HOCON source text is
   deliberately different and stays as it is**: `a = 9223372036854775808` in a
   `.conf` file remains a double, following Lightbend's `Long`-then-`Double`
   fallback. A foreign format declares its integer type, so a value that cannot

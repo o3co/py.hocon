@@ -87,6 +87,16 @@ def test_env_refuses_a_collision() -> None:
     # is not mistaken for the two-segment `__` spelling.
     with pytest.raises(AdapterError, match=r'both map to "foo\.bar"$'):
         env.load("APP_", {"APP_FOO.BAR": "1", "APP_foo.bar": "2"})
+    # A control character in the name is escaped rather than sprayed into the
+    # message: the quoted form is JSON string syntax, as HOCON's is.
+    with pytest.raises(AdapterError, match=r'both map to "a\\nb"$'):
+        env.load("APP_", {"APP_A\nB": "1", "APP_a\nb": "2"})
+    with pytest.raises(AdapterError, match=r'both map to "a\\u0000b"$'):
+        env.load("APP_", {"APP_A\x00B": "1", "APP_a\x00b": "2"})
+    # A non-ASCII segment prints as itself (F1.3 leaves it unfolded, and
+    # go.hocon's %q / rs.hocon's {:?} print it literally too).
+    with pytest.raises(AdapterError, match=r'both map to "İa"$'):
+        env.load("APP_", {"APP_İA": "1", "APP_İa": "2"})
 
 
 def test_env_collision_detection_is_exact_not_delimiter_based() -> None:

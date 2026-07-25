@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import date, datetime, time
 from typing import Any
 
-from ..value_factory import INT64_MAX, INT64_MIN
+from .._internal.int64 import INT64_MAX, INT64_MIN
 from . import AdapterError
 
 __all__ = ["object_root", "convert"]

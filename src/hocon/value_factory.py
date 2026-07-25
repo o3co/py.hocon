@@ -10,17 +10,12 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ._internal.int64 import INT64_MAX, INT64_MIN
 from .config import Config
 from .errors import ConfigError
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue
 
 __all__ = ["empty", "from_map"]
-
-#: HOCON integers are int64 (spec F0.5), and Python's ``int`` is unbounded, so
-#: the bound has to be checked rather than inherited. Accepting a wider value
-#: would mean handing out a config the sibling implementations cannot hold.
-INT64_MIN = -(2**63)
-INT64_MAX = 2**63 - 1
 
 
 def from_map(values: dict[str, Any], origin_description: str | None = None) -> Config:
