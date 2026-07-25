@@ -41,9 +41,12 @@ def _scalar(v: Any, at: str) -> Any:
 
 
 def strip_comments(src: str) -> str:
-    """Remove ``//`` line comments and block comments, leaving string literals
-    alone. Newlines inside removed spans are kept so the JSON parser still
-    reports useful positions."""
+    """Replace ``//`` line comments and block comments with whitespace, leaving
+    string literals alone. A comment becomes at least one space — never the
+    empty string — so the tokens around it cannot fuse into one (``1/*x*/2``
+    stays two tokens; spec F3.2). Newlines inside a removed span are kept so
+    the JSON parser still reports useful line numbers, though columns after a
+    comment shift by the replacement."""
     out: list[str] = []
     i = 0
     while i < len(src):
@@ -55,11 +58,12 @@ def strip_comments(src: str) -> str:
         elif c == "/" and src[i : i + 2] == "//":
             while i < len(src) and src[i] != "\n":
                 i += 1
+            out.append(" ")
         elif c == "/" and src[i : i + 2] == "/*":
             end = src.find("*/", i + 2)
             if end == -1:
                 raise AdapterError("jsonc: unterminated block comment")
-            out.append("\n" * src.count("\n", i, end + 2))
+            out.append("\n" * src.count("\n", i, end + 2) + " ")
             i = end + 2
         else:
             out.append(c)

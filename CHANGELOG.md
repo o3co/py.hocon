@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **JSONC comment stripping could fuse the tokens around a block comment
+  (F3.2).** `strip_comments` replaced a `/* */` comment with the empty string
+  (plus any contained newlines), so `{"a":1/*x*/2}` decoded as `{"a": 12}` and
+  `{"b": tr/*x*/ue}` as `{"b": true}` instead of erroring. A comment is now
+  replaced by whitespace — at least one space, with the contained newlines still
+  preserved for line numbers — so the surrounding tokens stay separate and the
+  malformed document fails the JSON decode as `AdapterError`.
+
 ## [1.10.0] - 2026-07-25
 
 ### Added — format adapters for config owned by other programs

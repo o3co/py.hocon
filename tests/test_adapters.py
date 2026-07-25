@@ -100,6 +100,15 @@ def test_jsonc_leaves_comment_markers_inside_strings() -> None:
     assert cfg.get_string("note") == "a /* b */ c"
 
 
+def test_jsonc_comment_removal_separates_tokens() -> None:
+    """F3.2 — a comment is replaced by whitespace, never the empty string, so
+    the tokens around it cannot fuse into one valid token."""
+    with pytest.raises(AdapterError, match="jsonc"):
+        jsonc.parse('{"a":1/*x*/2}')
+    with pytest.raises(AdapterError, match="jsonc"):
+        jsonc.parse('{"b": tr/*x*/ue}')
+
+
 def test_jsonc_refuses_a_non_object_root() -> None:
     """F0.3 — a config root has to be an object."""
     with pytest.raises(AdapterError, match="F0.3"):
