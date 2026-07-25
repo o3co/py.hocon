@@ -44,11 +44,14 @@ def test_properties_keeps_prototype_pollution_names_as_ordinary_keys() -> None:
 
 
 def test_properties_leaves_no_phantom_parent_behind() -> None:
-    """The old denylist dropped `x.__proto__` after creating `x`, leaving a
+    """The old denylist dropped the key after creating its parents, leaving a
     phantom empty object where the document defined a value."""
     cfg = properties.parse("x.__proto__ = f\n")
-    assert cfg.keys() == ["x"]
+    assert cfg.get_config("x").keys() == ["__proto__"], "x must not be an empty object"
     assert cfg.get_string("x.__proto__") == "f"
+    # The case where the phantom was the whole result: this parsed to {} before.
+    nested = properties.parse("__proto__.a = 1\n")
+    assert nested.get_string("__proto__.a") == "1"
 
 
 def test_env_mounts_a_prefixed_namespace() -> None:
@@ -137,6 +140,15 @@ def test_dotenv_keeps_a_literal_dot_as_key_text() -> None:
     assert not cfg.has("foo"), "must not nest — no phantom foo object"
 
 
+def test_dotenv_is_last_wins_on_a_repeated_name() -> None:
+    """F0.7 — a file has a definite line order, so the last line wins where the
+    environment would raise. Pins that `_nest`'s sort stays stable now that its
+    key is a segment list rather than a string."""
+    assert env.parse_dotenv("A=1\nA=2\n").get_string("a") == "2"
+    assert env.parse_dotenv("A.B=1\nA.B=2\n").get_string('"a.b"') == "2"
+    assert env.parse_dotenv("A__B=1\nA__B=2\n").get_string("a.b") == "2"
+
+
 def test_dotenv_refuses_an_ambiguous_trailing_hash() -> None:
     with pytest.raises(AdapterError, match="quote the value"):
         env.parse_dotenv("FOO=bar # comment")
@@ -164,9 +176,9 @@ def test_jsonc_leaves_comment_markers_inside_strings() -> None:
 def test_jsonc_comment_removal_separates_tokens() -> None:
     """F3.2 — a comment is replaced by whitespace, never the empty string, so
     the tokens around it cannot fuse into one valid token."""
-    with pytest.raises(AdapterError, match="jsonc"):
+    with pytest.raises(AdapterError, match="Expecting ',' delimiter"):
         jsonc.parse('{"a":1/*x*/2}')
-    with pytest.raises(AdapterError, match="jsonc"):
+    with pytest.raises(AdapterError, match="Expecting value"):
         jsonc.parse('{"b": tr/*x*/ue}')
 
 
