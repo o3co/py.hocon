@@ -25,6 +25,10 @@ __all__ = ["load", "parse_dotenv", "parse_dotenv_file"]
 #: rather than configurable so every language's adapter nests identically.
 SEPARATOR = "__"
 
+#: Segment characters that need no quoting when a path is spelled back out in
+#: an error message. Deliberately conservative — anything else gets quotes.
+_BARE_SEGMENT_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_-")
+
 
 def load(
     prefix: str,
@@ -46,19 +50,20 @@ def load(
     source = os.environ if env is None else env
 
     # Sorted so a collision is reported the same way on every run.
-    seen: dict[str, str] = {}
+    seen: dict[tuple[str, ...], str] = {}
     pairs: list[tuple[list[str], str]] = []
     for name in sorted(source):
         if not name.startswith(prefix):
             continue
         path = _to_path(name[len(prefix) :], name)
-        # NUL cannot appear in a segment, so distinct paths cannot collide
-        # into one detection key the way a "." join would let them (F1.2).
-        key = "\x00".join(path)
+        # The segments themselves are the identity — keyed as a tuple rather
+        # than joined into a string, which would need a delimiter no segment
+        # can contain and there is no such character (F1.2).
+        key = tuple(path)
         if key in seen:
             # F1.6: two names can reach one path and the environment has no
             # meaningful order to break the tie with, so neither wins.
-            raise AdapterError(f"env: {seen[key]} and {name} both map to {'.'.join(path)!r}")
+            raise AdapterError(f"env: {seen[key]} and {name} both map to {_render_path(path)}")
         seen[key] = name
         pairs.append((path, source[name]))
 
@@ -125,10 +130,32 @@ def _to_path(rest: str, name: str) -> list[str]:
     return segs
 
 
+def _render_path(segments: list[str]) -> str:
+    """Spell a mapped path the way it would be written as a HOCON path
+    expression: bare where a segment can be, quoted where it cannot.
+
+    A collision message has to distinguish ``APP_FOO.BAR`` (one segment, so
+    ``"foo.bar"``) from ``APP_FOO__BAR`` (two, so ``foo.bar``) — printing the
+    dot-joined form for both would erase exactly the difference F1.2 draws.
+    """
+    out: list[str] = []
+    for seg in segments:
+        if seg and not set(seg) - _BARE_SEGMENT_CHARS:
+            out.append(seg)
+        else:
+            out.append('"' + seg.replace("\\", "\\\\").replace('"', '\\"') + '"')
+    return ".".join(out)
+
+
 def _nest(pairs: list[tuple[list[str], str]]) -> dict[str, Any]:
     """Nest pre-split segment paths, objects winning over scalars over the
     whole set so the outcome does not depend on input order (spec F1.8,
-    mirroring F2.5)."""
+    mirroring F2.5).
+
+    The sort is by path only and Python's is stable, so entries sharing a path
+    keep their input order and the last one written wins — which is what a
+    ``.env`` file's definite line order calls for (F0.7).
+    """
     root: dict[str, Any] = {}
     for segments, value in sorted(pairs, key=lambda kv: kv[0]):
         current = root

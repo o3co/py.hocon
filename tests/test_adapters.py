@@ -76,11 +76,21 @@ def test_env_requires_a_prefix() -> None:
 
 def test_env_refuses_a_collision() -> None:
     """F1.6 — the environment has no order to break a tie with."""
-    with pytest.raises(AdapterError, match="both map to"):
+    with pytest.raises(AdapterError, match=r"both map to a\.b$"):
         env.load("APP_", {"APP_A__B": "1", "APP_a__b": "2"})
-    # A literal-dot pair genuinely reaching one path is still a collision.
-    with pytest.raises(AdapterError, match="both map to"):
+    # A literal-dot pair genuinely reaching one path is still a collision, and
+    # the message spells the path as HOCON would, so the single quoted segment
+    # is not mistaken for the two-segment `__` spelling.
+    with pytest.raises(AdapterError, match=r'both map to "foo\.bar"$'):
         env.load("APP_", {"APP_FOO.BAR": "1", "APP_foo.bar": "2"})
+
+
+def test_env_collision_detection_is_exact_not_delimiter_based() -> None:
+    """`load` takes any mapping, so a NUL in a name is type-legal; keying the
+    detection on the segments themselves means it cannot fake a collision."""
+    cfg = env.load("APP_", {"APP_A\x00B": "1", "APP_A__B": "2"})
+    assert cfg.get_string('"a\x00b"') == "1"
+    assert cfg.get_string("a.b") == "2"
 
 
 def test_env_keeps_a_literal_dot_as_key_text() -> None:

@@ -58,6 +58,9 @@ def strip_comments(src: str) -> str:
         elif c == "/" and src[i : i + 2] == "//":
             while i < len(src) and src[i] != "\n":
                 i += 1
+            # The loop stops at the newline (or EOF) and leaves it in place, so
+            # the tokens are already separated: this space is for uniformity,
+            # not correctness. The block-comment branch is the load-bearing one.
             out.append(" ")
         elif c == "/" and src[i : i + 2] == "/*":
             end = src.find("*/", i + 2)

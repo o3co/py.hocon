@@ -15,10 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `{"foo": {"bar": "v"}}` — the same shape as `APP_FOO__BAR` — and the pair was
   even reported as an F1.6 collision. Amended F1.2 pins the rule: only `__`
   creates hierarchy, so the mapped path is carried as a segment list end-to-end
-  (collision detection joins on NUL, as go.hocon does). `APP_FOO.BAR` now
+  (collision detection keys on the segments themselves). `APP_FOO.BAR` now
   yields the single top-level key `"foo.bar"`, quoted-path addressable and
   coexisting with `APP_FOO__BAR`; genuine collisions such as `APP_A__B` vs
-  `APP_a__b` still error. The same path serves `parse_dotenv`.
+  `APP_a__b` still error, and their message now spells the path as HOCON would
+  (`both map to "foo.bar"` vs `both map to a.b`) so the two cases are
+  distinguishable. The same path serves `parse_dotenv`.
 - **`.properties` silently dropped `__proto__`, `constructor` and `prototype`
   keys (F2.9).** A denylist ported verbatim from ts.hocon's first commit made
   `_set_nested` return without inserting, so `x.__proto__ = f` produced a
@@ -35,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replaced by whitespace — at least one space, with the contained newlines still
   preserved for line numbers — so the surrounding tokens stay separate and the
   malformed document fails the JSON decode as `AdapterError`.
+
+**Migrating from 1.10.0**: input that used to be accepted can now change shape
+or raise. A variable name with a literal `.` that was relied on for nesting
+(`APP_FOO.BAR` → `foo.bar`) must be respelled with the separator
+(`APP_FOO__BAR`), or read through a quoted path (`cfg.get_string('"foo.bar"')`);
+and a JSONC document where a block comment sat between two tokens
+(`{"a": 1/*x*/2}`) now raises instead of silently decoding as `12`.
 
 ## [1.10.0] - 2026-07-25
 
