@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-07-25
+
+### Added — format adapters for config owned by other programs
+
+- **Properties, env, JSONC, TOML and YAML can now be mounted under a HOCON
+  document**, so a `${...}` can reach into a file another program maintains
+  (`hocon.adapters.{properties,env,jsonc,toml,yaml}`). The base install stays
+  pure standard library: **TOML uses `tomllib`, which Python 3.11 ships**, so the
+  only adapter needing a dependency is YAML, behind the `[yaml]` extra
+  (`pip install hocon-parser[yaml]`). Plain JSON needs no adapter, HOCON being a
+  JSON superset.
+- Ingestion is AST-level — a document is decoded and built into a value tree via
+  `from_map`, never rendered to HOCON text. A `${a.b}` in a mounted value stays
+  literal. Parse the host document with `resolve_substitutions=False` before
+  attaching the fallback.
+- **YAML scalar resolution is the library's answer, not a guarantee here**, so
+  `yaml.from_value` takes an already-decoded tree for a caller who needs a
+  different library. `ruamel.yaml` is the default rather than the more widely
+  installed PyYAML, which implements YAML 1.1 and resolves `no` to `False` — the
+  Norway problem — along with `010` to 8.
+
+### Fixed — `.properties` now accepts the whole java.util.Properties syntax (S23.5, S23.6)
+
+- **Backslash continuations, escapes, and whitespace separators in a
+  `.properties` file were mishandled**, and a continued line was dropped
+  silently. `parse_properties` had implemented roughly the
+  `key=value`-with-comments subset; `b\:c = 2` produced the key `b\` with value
+  `c = 2`, and `a = one\` continued by `two` lost the second line. S23.5/S23.6
+  were out-of-scope until [xx.hocon#73](https://github.com/o3co/xx.hocon/pull/73)
+  brought them in.
+- **Behavior change**: a value keeps its trailing whitespace, because Java skips
+  whitespace before a value and never after it. A malformed escape raises
+  `ParseError`. An unpaired surrogate is rejected: a Python `str` can hold one,
+  but encoding it to UTF-8 raises, so accepting it would only defer the failure
+  to serialization. The syntax layer is shared with `adapters.properties`.
+
 ### Fixed
 
 - **Empty path segments rejected in key position (S11.7,
