@@ -119,7 +119,7 @@ def parse_dotenv(
 def parse_dotenv_file(path: str | Path, prefix: str = "") -> Config:
     """Read a ``.env`` file, using its path as the origin description."""
     p = Path(path)
-    return parse_dotenv(p.read_text(encoding="utf-8"), prefix, str(p))
+    return parse_dotenv(p.read_text(encoding="utf-8-sig"), prefix, str(p))
 
 
 def _to_path(rest: str, name: str) -> list[str]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+from pathlib import Path
 
 import pytest
 
@@ -309,6 +310,34 @@ def test_yaml_from_value_accepts_an_externally_decoded_tree() -> None:
         yaml.from_value({"a": float("nan")})
     with pytest.raises(AdapterError, match="F0.3"):
         yaml.from_value([1, 2])
+
+
+def test_a_leading_bom_never_becomes_part_of_a_key(tmp_path: Path) -> None:
+    """F0.9 — a Windows editor's BOM left in place lands inside the first key,
+    so a lookup of `a` misses and the value is silently unreachable. Every
+    file-reading entry point strips it."""
+    bom = "﻿"
+    cases = {
+        "c.properties": (bom + "a = 1\n", properties.parse_file, "a", "1"),
+        ".env": (bom + "FOO=1\n", env.parse_dotenv_file, "foo", "1"),
+        "c.jsonc": (bom + '{"a": "1"}\n', jsonc.parse_file, "a", "1"),
+        "c.toml": (bom + 'a = "1"\n', toml.parse_file, "a", "1"),
+        "c.conf": (bom + 'a = "1"\n', hocon.parse_file, "a", "1"),
+    }
+    for name, (text, reader, key, want) in cases.items():
+        p = tmp_path / name
+        p.write_text(text, encoding="utf-8")
+        cfg = reader(str(p))
+        assert cfg.get_string(key) == want, f"{name}: BOM leaked into the key"
+        assert cfg.keys() == [key], f"{name}: {cfg.keys()}"
+
+
+@needs_ruamel
+def test_a_leading_bom_never_becomes_part_of_a_yaml_key(tmp_path: Path) -> None:
+    """F0.9, for the adapter whose dependency is an extra."""
+    p = tmp_path / "c.yaml"
+    p.write_text('﻿a: "1"\n', encoding="utf-8")
+    assert yaml.parse_file(str(p)).keys() == ["a"]
 
 
 def test_used_as_a_substitution_source_under_hocon() -> None:

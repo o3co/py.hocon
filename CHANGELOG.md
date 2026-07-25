@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A leading UTF-8 BOM became part of the first key (F0.9).** A file saved by
+  a Windows editor starts with U+FEFF, and `properties.parse_file` /
+  `env.parse_dotenv_file` admitted it into the key: `a = 1` produced `"﻿a"`, so
+  `get_string("a")` missed and the value was silently unreachable — plausible
+  but wrong output, which this spec ranks as the worst failure mode. New F0.9
+  requires the BOM stripped at every file-reading entry point, so all of
+  `hocon.parse_file`, `include`'s default reader and the five adapter
+  `parse_file` helpers now read as `utf-8-sig`. (The core parser already
+  ignored U+FEFF mid-document, and `jsonc.parse_file` used to raise.)
 - **A literal `.` in an environment variable name became a path boundary
   (F1.2).** The env adapter joined the `__`-split segments with `.` and
   re-split on `.` while nesting, so `APP_FOO.BAR=v` produced

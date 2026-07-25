@@ -27,7 +27,7 @@ _ResolveFrom = str | list[str] | None
 
 
 def _default_read_file_sync(path: str) -> str:
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         return f.read()
 
 
