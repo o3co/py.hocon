@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yields the single top-level key `"foo.bar"`, quoted-path addressable and
   coexisting with `APP_FOO__BAR`; genuine collisions such as `APP_A__B` vs
   `APP_a__b` still error. The same path serves `parse_dotenv`.
+- **`.properties` silently dropped `__proto__`, `constructor` and `prototype`
+  keys (F2.9).** A denylist ported verbatim from ts.hocon's first commit made
+  `_set_nested` return without inserting, so `x.__proto__ = f` produced a
+  phantom empty `x` object and the value was lost. A Python dict has no
+  prototype, so the list protected nothing while causing data loss; new F2.9
+  pins that these are ordinary keys everywhere. The denylist is removed — the
+  keys are preserved with their values, at top level and nested, for both
+  `adapters.properties` and `include "x.properties"` (the shared syntax
+  layer). The env adapter nests through its own path and never dropped them.
 - **JSONC comment stripping could fuse the tokens around a block comment
   (F3.2).** `strip_comments` replaced a `/* */` comment with the empty string
   (plus any contained newlines), so `{"a":1/*x*/2}` decoded as `{"a": 12}` and

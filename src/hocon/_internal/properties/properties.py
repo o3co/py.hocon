@@ -21,7 +21,6 @@ from ...value import HoconObject, HoconScalar, HoconValue
 
 __all__ = ["parse_properties", "properties_to_hocon_value"]
 
-_DANGEROUS_KEYS = frozenset(("__proto__", "constructor", "prototype"))
 _PROPS_SPACE = (" ", "\t", "\f")
 
 
@@ -175,17 +174,15 @@ def _hex4(s: str, start: int, line_no: int) -> int:
 
 
 def _set_nested(obj: dict[str, Any], segments: list[str], value: str) -> None:
+    # F2.9 — every key is an ordinary key, `__proto__` included: a Python dict
+    # has no prototype to pollute, so there is no denylist here.
     current = obj
     for seg in segments[:-1]:
-        if seg in _DANGEROUS_KEYS:
-            return
         existing = current.get(seg)
         if not isinstance(existing, dict):
             current[seg] = {}
         current = current[seg]
     last = segments[-1]
-    if last in _DANGEROUS_KEYS:
-        return
     # S23.4 — object always wins over scalar: do not overwrite an object.
     if isinstance(current.get(last), dict):
         return

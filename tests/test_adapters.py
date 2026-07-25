@@ -26,6 +26,31 @@ def test_properties_leaves_substitution_syntax_literal() -> None:
     assert properties.parse("a = ${foo.bar}").get_string("a") == "${foo.bar}"
 
 
+def test_properties_keeps_prototype_pollution_names_as_ordinary_keys() -> None:
+    """F2.9 — no key denylist. Python dicts have no prototype to pollute, and
+    silently dropping a key is data loss."""
+    cfg = properties.parse(
+        "__proto__ = a\n"
+        "constructor = b\n"
+        "prototype = c\n"
+        "x.__proto__ = d\n"
+        "deep.constructor.leaf = e\n"
+    )
+    assert cfg.get_string("__proto__") == "a"
+    assert cfg.get_string("constructor") == "b"
+    assert cfg.get_string("prototype") == "c"
+    assert cfg.get_string("x.__proto__") == "d"
+    assert cfg.get_string("deep.constructor.leaf") == "e"
+
+
+def test_properties_leaves_no_phantom_parent_behind() -> None:
+    """The old denylist dropped `x.__proto__` after creating `x`, leaving a
+    phantom empty object where the document defined a value."""
+    cfg = properties.parse("x.__proto__ = f\n")
+    assert cfg.keys() == ["x"]
+    assert cfg.get_string("x.__proto__") == "f"
+
+
 def test_env_mounts_a_prefixed_namespace() -> None:
     """F1.2/F1.3 — `__` separates, a single `_` does not, segments lowercase."""
     cfg = env.load(
