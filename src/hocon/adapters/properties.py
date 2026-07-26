@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .._internal.properties.properties import parse_properties
+from .._internal.text import strip_bom
 from ..config import Config
 from ..value_factory import from_map
 
@@ -18,7 +19,7 @@ def parse(input_text: str, origin_description: str | None = None) -> Config:
     drift apart. Values are all strings, and a ``${a.b}`` among them stays that
     literal text (spec F0.2, F2.2).
     """
-    return from_map(parse_properties(input_text), origin_description)
+    return from_map(parse_properties(strip_bom(input_text)), origin_description)
 
 
 def parse_file(path: str | Path) -> Config:

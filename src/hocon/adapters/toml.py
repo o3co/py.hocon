@@ -14,6 +14,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .._internal.text import strip_bom
 from ..config import Config
 from ..value_factory import from_map
 from . import AdapterError
@@ -25,7 +26,7 @@ __all__ = ["parse", "parse_file"]
 def parse(input_text: str, origin_description: str | None = None) -> Config:
     """Read TOML text."""
     try:
-        doc = tomllib.loads(input_text)
+        doc = tomllib.loads(strip_bom(input_text))
     except tomllib.TOMLDecodeError as e:
         raise AdapterError(f"toml: {e}") from None
     return from_map(object_root(doc, "toml", _scalar), origin_description)

@@ -24,6 +24,7 @@ import io
 from pathlib import Path
 from typing import Any
 
+from .._internal.text import strip_bom
 from ..config import Config
 from ..value_factory import from_map
 from . import AdapterError
@@ -50,7 +51,7 @@ def _loader() -> Any:
 def parse(input_text: str, origin_description: str | None = None) -> Config:
     """Read YAML text with this module's default library."""
     try:
-        docs = list(_loader().load_all(io.StringIO(input_text)))
+        docs = list(_loader().load_all(io.StringIO(strip_bom(input_text))))
     except AdapterError:
         raise
     except Exception as e:

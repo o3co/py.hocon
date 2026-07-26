@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from .._internal.os_text import is_undecodable
+from .._internal.text import strip_bom
 from ..config import Config
 from ..value_factory import from_map
 from . import AdapterError
@@ -122,7 +123,7 @@ def parse_dotenv(
     origin = origin_description or ".env"
     pairs: list[tuple[list[str], str]] = []
 
-    normalized = input_text.replace("\r\n", "\n").replace("\r", "\n")
+    normalized = strip_bom(input_text).replace("\r\n", "\n").replace("\r", "\n")
     for lineno, raw in enumerate(normalized.split("\n"), start=1):
         line = raw.strip()
         if line == "" or line.startswith("#"):
