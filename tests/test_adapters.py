@@ -97,6 +97,10 @@ def test_env_refuses_a_collision() -> None:
     # go.hocon's %q / rs.hocon's {:?} print it literally too).
     with pytest.raises(AdapterError, match=r'both map to "İa"$'):
         env.load("APP_", {"APP_İA": "1", "APP_İa": "2"})
+    # The variable names are escaped for the same reason the path is: a name
+    # holding a newline would otherwise split the message across log lines.
+    with pytest.raises(AdapterError, match=r"'APP_A\\nB' and 'APP_a\\nb'"):
+        env.load("APP_", {"APP_A\nB": "1", "APP_a\nb": "2"})
 
 
 def test_env_collision_detection_is_exact_not_delimiter_based() -> None:

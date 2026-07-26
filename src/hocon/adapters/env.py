@@ -93,7 +93,13 @@ def load(
         if key in seen:
             # F1.6: two names can reach one path and the environment has no
             # meaningful order to break the tie with, so neither wins.
-            raise AdapterError(f"env: {seen[key]} and {name} both map to {_render_path(path)}")
+            # The names come from the environment, so they are rendered with !r
+            # for the same reason the path is rendered by _render_path: a name
+            # holding a newline or NUL would otherwise split or corrupt the
+            # message a reader sees in a log.
+            raise AdapterError(
+                f"env: {seen[key]!r} and {name!r} both map to {_render_path(path)}"
+            )
         seen[key] = name
         pairs.append((path, source[name]))
 
