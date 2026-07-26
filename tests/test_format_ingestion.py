@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from hocon.adapters import AdapterError, env, jsonc, toml, yaml
+from hocon.adapters import AdapterError, env, jsonc, properties, toml, yaml
 from hocon.config import Config
 
 _ROOT = Path(__file__).parent / "conformance" / "testdata" / "format-ingestion"
@@ -38,11 +38,16 @@ _HAS_RUAMEL = importlib.util.find_spec("ruamel.yaml") is not None
 
 
 def _ingest(case: dict[str, Any]) -> Config:
-    text = (_ROOT / case["input"]).read_text(encoding="utf-8")
+    # read_text applies universal-newline translation, which rewrites a lone CR to
+    # LF before the adapter sees it — fi24 would then pass without exercising
+    # anything. Decode explicitly instead.
+    text = (_ROOT / case["input"]).read_bytes().decode("utf-8")
     fmt = case["format"]
     origin = case["id"]
     if fmt == "jsonc":
         return jsonc.parse(text, origin)
+    if fmt == "properties":
+        return properties.parse(text, origin)
     if fmt == "toml":
         return toml.parse(text, origin)
     if fmt == "yaml":
