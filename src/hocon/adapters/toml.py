@@ -34,7 +34,7 @@ def parse(input_text: str, origin_description: str | None = None) -> Config:
 def parse_file(path: str | Path) -> Config:
     """Read a TOML file, using its path as the origin description."""
     p = Path(path)
-    return parse(p.read_text(encoding="utf-8"), str(p))
+    return parse(p.read_text(encoding="utf-8-sig"), str(p))
 
 
 def _scalar(v: Any, at: str) -> Any:

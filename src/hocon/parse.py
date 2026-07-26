@@ -12,6 +12,7 @@ import os
 from collections.abc import Callable
 
 from ._internal.lexer.lexer import tokenize
+from ._internal.os_text import is_undecodable
 from ._internal.parser.ast import AstArray
 from ._internal.parser.parser import parse_tokens
 from ._internal.resolver.resolver import build_tree, contains_placeholders, resolve
@@ -27,12 +28,30 @@ _ResolveFrom = str | list[str] | None
 
 
 def _default_read_file_sync(path: str) -> str:
-    with open(path, encoding="utf-8") as f:
+    with open(path, encoding="utf-8-sig") as f:
         return f.read()
 
 
 def _get_env(env: dict[str, str] | None) -> dict[str, str]:
-    return env if env is not None else dict(os.environ)
+    """The variable map every ``${VAR}`` / ``${?VAR}`` / ``${NAME[]}`` lookup
+    reads.
+
+    An entry the OS could not decode as UTF-8 is dropped here rather than
+    handed on (spec F1.9a): Python's ``surrogateescape`` would otherwise let
+    the undecodable bytes reach a config value as lone surrogates, and the
+    failure would surface wherever that value is first encoded, far from the
+    parse. Dropping it makes ``${?VAR}`` fall through to its default and
+    ``${VAR}`` raise the ordinary unresolved error — the two answers F1.9a
+    asks for, and both of them local.
+
+    An explicitly supplied ``env`` is the caller's own data rather than the
+    process environment, so it is passed through untouched.
+    """
+    if env is not None:
+        return env
+    return {
+        k: v for k, v in os.environ.items() if not (is_undecodable(k) or is_undecodable(v))
+    }
 
 
 def _build_resolve_context(

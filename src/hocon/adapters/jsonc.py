@@ -19,6 +19,18 @@ from ._tree import common_scalar, object_root
 
 __all__ = ["parse", "parse_file", "strip_comments"]
 
+#: What ends a ``//`` comment. Both, not just LF: a CRLF file split across
+#: readers, or a lone CR, would otherwise let the comment eat the following
+#: line — and with the trailing comma behind it stripped too, the JSON stays
+#: valid and a key silently disappears (spec F3.2).
+#:
+#: U+2028 / U+2029 are deliberately *not* here. The dialect this adapter
+#: implements is the one VS Code reads, and ``node-jsonc-parser``'s
+#: ``isLineBreak`` is LF and CR only, so there a comment runs through U+2028 to
+#: the next real break. Ending the comment early would mean a document parses
+#: one way in the editor that owns the format and another way here.
+_LINE_BREAKS = ("\n", "\r")
+
 
 def parse(input_text: str, origin_description: str | None = None) -> Config:
     """Read JSONC text."""
@@ -33,7 +45,7 @@ def parse(input_text: str, origin_description: str | None = None) -> Config:
 def parse_file(path: str | Path) -> Config:
     """Read a JSONC file, using its path as the origin description."""
     p = Path(path)
-    return parse(p.read_text(encoding="utf-8"), str(p))
+    return parse(p.read_text(encoding="utf-8-sig"), str(p))
 
 
 def _scalar(v: Any, at: str) -> Any:
@@ -41,9 +53,14 @@ def _scalar(v: Any, at: str) -> Any:
 
 
 def strip_comments(src: str) -> str:
-    """Remove ``//`` line comments and block comments, leaving string literals
-    alone. Newlines inside removed spans are kept so the JSON parser still
-    reports useful positions."""
+    """Replace ``//`` line comments and block comments with whitespace, leaving
+    string literals alone. A comment becomes at least one space — never the
+    empty string — so the tokens around it cannot fuse into one (``1/*x*/2``
+    stays two tokens; spec F3.2). Newlines inside a removed span are kept so
+    the JSON parser still reports useful line numbers, though columns after a
+    comment shift by the replacement.
+
+    A ``//`` comment ends at LF *or* CR (see :data:`_LINE_BREAKS`)."""
     out: list[str] = []
     i = 0
     while i < len(src):
@@ -53,13 +70,17 @@ def strip_comments(src: str) -> str:
             out.append(src[i:end])
             i = end
         elif c == "/" and src[i : i + 2] == "//":
-            while i < len(src) and src[i] != "\n":
+            while i < len(src) and src[i] not in _LINE_BREAKS:
                 i += 1
+            # The loop stops at the break (or EOF) and leaves it in place, so
+            # the tokens are already separated: this space is for uniformity,
+            # not correctness. The block-comment branch is the load-bearing one.
+            out.append(" ")
         elif c == "/" and src[i : i + 2] == "/*":
             end = src.find("*/", i + 2)
             if end == -1:
                 raise AdapterError("jsonc: unterminated block comment")
-            out.append("\n" * src.count("\n", i, end + 2))
+            out.append("\n" * src.count("\n", i, end + 2) + " ")
             i = end + 2
         else:
             out.append(c)

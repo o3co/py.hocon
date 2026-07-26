@@ -346,6 +346,139 @@ pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) よ�
 | [rs.hocon](https://github.com/o3co/rs.hocon) | Rust | [crates.io](https://crates.io/crates/hocon-parser) | Rust 向け HOCON パーサー |
 | [hocon2](https://github.com/o3co/hocon2) | Go | [pkg.go.dev](https://pkg.go.dev/github.com/o3co/hocon2) | HOCON → JSON/YAML/TOML/Properties CLI |
 
+## ベストプラクティス
+
+### 設定の構造
+
+- **ドメインで分割する**: 論理単位ごとにファイルを分ける (`database.conf`,
+  `server.conf`, `logging.conf`)
+- **合成には `include` を使う**: ドメイン別ファイルを組み合わせて全体を構成する
+- **設定にロジックを持ち込まない**: HOCON は宣言的なデータのためのもので、条件分岐や
+  計算のためのものではありません
+
+### 環境変数
+
+- **`${ENV}` は最小限に**: `${?ENV}` (optional) と設定側の妥当な default を優先する
+- **ローカル開発で環境変数を必須にしない**: 何も設定しなくても default で動くようにする
+- **必要な環境変数を文書化する**: プロジェクトの README か `.env.example` に列挙する
+- **名前空間ごとマウントする場合**: `hocon.adapters.env` が prefix 配下をまとめて
+  サブツリーにします (`APP_DB__HOST` → `db.host`)。階層の区切りは `__` **のみ**です —
+  [フォーマットアダプタ](#フォーマットアダプタ)を参照
+
+### dev / prod の分離
+
+```text
+config/
+├── application.conf    # 共通の default
+├── dev.conf            # include "application.conf" + dev 用の上書き
+└── prod.conf           # include "application.conf" + prod 用の上書き
+```
+
+### バリデーション
+
+設定の検証は利用箇所ではなく起動時に行います。型付きの構造 (dataclass / `attrs` /
+Pydantic) に読み込むと、エラーが早期に表面化します:
+
+```python
+from dataclasses import dataclass
+import hocon
+
+@dataclass
+class ServerConfig:
+    host: str
+    port: int
+
+cfg = hocon.parse_file("application.conf")
+server = ServerConfig(
+    host=cfg.get_string("server.host"),
+    port=cfg.get_int("server.port"),
+)   # フィールド欠落や型不一致は起動時に fail する
+```
+
+## フォーマットアダプタ
+
+**他のプログラム**が所有する設定ファイルを HOCON としてマウントでき、自分の
+ドキュメントの `${...}` からその中身を参照できます:
+
+```python
+import hocon
+from hocon.adapters import env
+
+base = env.load(prefix="APP_")               # APP_DB__HOST -> db.host
+cfg = hocon.parse(src, resolve_substitutions=False)
+merged = cfg.with_fallback(base).resolve()
+```
+
+解決を遅らせるのが重要です: 素の `parse` はパースしながら解決するため、fallback を
+付ける前に `${...}` の解決が失敗してしまいます。
+
+| モジュール | 追加インストール | 備考 |
+| --- | --- | --- |
+| `hocon.adapters.properties` | — | `java.util.Properties`。`include` と構文層を共有 |
+| `hocon.adapters.env` | — | prefix 付き名前空間をまとめてマウント。`.env` も読める |
+| `hocon.adapters.jsonc` | — | コメントと trailing comma 付き JSON |
+| `hocon.adapters.toml` | — | Python 3.11 同梱の `tomllib` 経由 |
+| `hocon.adapters.yaml` | `pip install hocon-parser[yaml]` | `ruamel.yaml` 経由 |
+
+依存が要るのは YAML だけで、base install は pure stdlib のままです。プレーンな JSON に
+アダプタは不要です — HOCON は JSON の上位集合なので `hocon.parse` がそのまま受け付け
+ます。
+
+外部のデータはデータのままです: マウントした値の中の `${a.b}` は参照ではなくただの
+文字列になります。そのファイルは HOCON の構文に同意していないプログラムのものだから
+です。
+
+### 間違えやすいマッピング規則
+
+**env — 階層の区切りは `__` のみ。** 変数名の中の `.` は階層ではなくキーの文字なので、
+2 つの綴りは別のパスになります:
+
+```python
+cfg = env.load("APP_", {"APP_FOO__BAR": "nested", "APP_FOO.BAR": "literal"})
+cfg.get_string("foo.bar")      # "nested"  — APP_FOO__BAR 由来
+cfg.get_string('"foo.bar"')    # "literal" — APP_FOO.BAR 由来、クォートした 1 キー
+```
+
+別のパスである以上、衝突もしません。本当の衝突 (小文字化して同じパスになる
+`APP_A__B` と `APP_a__b`) はエラーです — 環境変数の列挙順に優劣を決める根拠がない
+ためです。`.env` ファイルは行の順序が確定しているので、そちらは後勝ちになります。
+セグメントの小文字化は **ASCII のみ** (`A`–`Z` だけで、それ以外の符号位置はそのまま)
+です — 各言語の Unicode 規則を継承すると実装間でマッピングがずれるためです。単一の
+`_` はセグメントの一部として残ります (`APP_DB__MAX_CONN` → `db.max_conn`)。
+
+**env — UTF-8 として不正なエントリは値にならない。** Python は環境変数を
+`surrogateescape` でデコードするため、デコードできないバイトは lone surrogate として
+残り、後段で encode したときに初めて例外になります。扱いは「その変数を要求したか」で
+決まります: `${VAR}` / `${?VAR}` は **存在しないもの**として扱い (optional は default に
+フォールバック、必須形は通常の未解決エラー)、`env.load(prefix=...)` は mount した prefix
+の内側にそのエントリがあれば **エラー**にします — 黙って落とすと、設定が欠けたまま
+subtree だけが完全に見えてしまうためです。prefix の外側は検査しないので、無関係な
+変数がデコード不能でも mount は壊れません。
+
+**jsonc — コメントはトークンを分割する。** コメントは空白に置き換えて除去されるため、
+`{"a": 1/*x*/2}` は `{"a": 12}` ではなく構文エラーになります。`//` コメントは LF
+だけでなく CR でも終わります (VS Code が読む方言に合わせています)。
+
+**properties — すべてのキーが普通のキー。** `__proto__` / `constructor` /
+`prototype` も他のキーと同じく値ごと保持されます。Python の `dict` に汚染される
+prototype は存在しないので、除外は行いません。
+
+**全フォーマット共通 — 整数は int64、BOM はキーの一部ではない。** 取り込んだ整数が
+`[-2^63, 2^63-1]` の範囲外ならエラーです (他実装が保持できない値を受け入れないため)。
+先頭の UTF-8 BOM は各 `parse_file` が除去するので、最初のキーに紛れ込みません。
+
+YAML のスカラー解決はライブラリの責務で、本パッケージの保証ではありません。
+`ruamel.yaml` は YAML 1.2 を読むので `no` は文字列 `"no"` のままです。PyYAML は
+YAML 1.1 で `False` に解決してしまう (Norway problem) ため default にしていません。
+別のライブラリを使いたい場合は、呼び出し側でデコードしたツリーを渡します:
+
+```python
+import yaml as pyyaml
+from hocon.adapters.yaml import from_value
+
+cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
+```
+
 ## 既知の制限
 
 - **`include url(...)`** 非対応。リモート設定の取得はパーサーの範囲外です。HTTP
@@ -358,8 +491,6 @@ pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) よ�
   `parse()` / `parse_file()` を再実行してください。
 - **ストリーミングパーサーなし** — 入力全体をメモリに読み込みます。信頼できない入力は
   パース前にサイズを検証してください。
-- **`.properties` include** — 基本的な `key=value` / `key:value` のみ対応。複数行
-  (バックスラッシュ継続)・Unicode エスケープ・キーエスケープは非対応。
 
 ## セキュリティ上の考慮
 

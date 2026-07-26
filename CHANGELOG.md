@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Environment entries that are not valid UTF-8 leaked into config values
+  (F1.9).** Python decodes `os.environ` with `surrogateescape` instead of
+  failing, so undecodable bytes survived as lone surrogates: `${?VAR}` returned
+  text like `'\udcff\udcfe'` rather than falling through to its default, and
+  `env.load(prefix=...)` mounted such entries — undecodable *names* included,
+  producing keys no lookup could match. Encoding any of it raises
+  `UnicodeEncodeError`, always far from the parse that admitted it. Now, per
+  F1.9: a substitution lookup treats an undecodable entry as **absent**
+  (`${?VAR}` takes its default, `${VAR}` raises the ordinary unresolved error),
+  and a **bulk mount errors** when the entry falls under the mounted prefix.
+  The check runs after the prefix filter, so an undecodable variable elsewhere
+  in the environment can never break an unrelated mount, and an entry the
+  config never mentions is still never fatal. An explicitly supplied `env=`
+  mapping is the caller's own data and is passed through untouched.
+- **Integers outside the int64 range were accepted (F0.5).** HOCON integers are
+  int64, but Python's `int` is unbounded and both `json` and `tomllib` decode
+  arbitrary precision, so `jsonc.parse('{"a":9223372036854775808}')` and
+  `hocon.from_map({"a": 2**63})` produced a config no sibling implementation
+  can hold. `from_map` and the shared adapter leaf rule now raise
+  (`ConfigError` / `AdapterError`) outside `[-2^63, 2^63-1]`. The bound itself
+  is internal, as it is in ts.hocon — no new public API. **HOCON source text is
+  deliberately different and stays as it is**: `a = 9223372036854775808` in a
+  `.conf` file remains a double, following Lightbend's `Long`-then-`Double`
+  fallback. A foreign format declares its integer type, so a value that cannot
+  survive as an int64 is a defect in the mapping; HOCON text carries no such
+  declaration (F0.5).
+- **A leading UTF-8 BOM became part of the first key (F0.9).** A file saved by
+  a Windows editor starts with U+FEFF, and `properties.parse_file` /
+  `env.parse_dotenv_file` admitted it into the key: `a = 1` produced `"﻿a"`, so
+  `get_string("a")` missed and the value was silently unreachable — plausible
+  but wrong output, which this spec ranks as the worst failure mode. New F0.9
+  requires the BOM stripped at every file-reading entry point, so all of
+  `hocon.parse_file`, `include`'s default reader and the five adapter
+  `parse_file` helpers now read as `utf-8-sig`. (The core parser already
+  ignored U+FEFF mid-document, and `jsonc.parse_file` used to raise.)
+- **A literal `.` in an environment variable name became a path boundary
+  (F1.2).** The env adapter joined the `__`-split segments with `.` and
+  re-split on `.` while nesting, so `APP_FOO.BAR=v` produced
+  `{"foo": {"bar": "v"}}` — the same shape as `APP_FOO__BAR` — and the pair was
+  even reported as an F1.6 collision. Amended F1.2 pins the rule: only `__`
+  creates hierarchy, so the mapped path is carried as a segment list end-to-end
+  (collision detection keys on the segments themselves). `APP_FOO.BAR` now
+  yields the single top-level key `"foo.bar"`, quoted-path addressable and
+  coexisting with `APP_FOO__BAR`; genuine collisions such as `APP_A__B` vs
+  `APP_a__b` still error, and their message now spells the path as HOCON would
+  (`both map to "foo.bar"` vs `both map to a.b`) so the two cases are
+  distinguishable. The same path serves `parse_dotenv`.
+- **Environment variable names were case-folded with full Unicode rules
+  (F1.3).** `str.lower()` maps `İ` (U+0130) to `i` + U+0307, while Go's simple
+  mapping yields plain `i` — so `APP_İ` alongside `APP_I` was an F1.6 collision
+  error in go.hocon and two coexisting keys here, for the same environment.
+  New F1.3 pins ASCII-only folding (`A`–`Z` only, every other codepoint left
+  alone), which all four implementations now share. Variable names are ASCII in
+  every practical setting, so nothing else changes.
+- **`.properties` silently dropped `__proto__`, `constructor` and `prototype`
+  keys (F2.9).** A denylist ported verbatim from ts.hocon's first commit made
+  `_set_nested` return without inserting, so `x.__proto__ = f` produced a
+  phantom empty `x` object and the value was lost. A Python dict has no
+  prototype, so the list protected nothing while causing data loss; new F2.9
+  pins that these are ordinary keys everywhere. The denylist is removed — the
+  keys are preserved with their values, at top level and nested, for both
+  `adapters.properties` and `include "x.properties"` (the shared syntax
+  layer). The env adapter nests through its own path and never dropped them.
+- **JSONC comment stripping could fuse the tokens around a block comment
+  (F3.2).** `strip_comments` replaced a `/* */` comment with the empty string
+  (plus any contained newlines), so `{"a":1/*x*/2}` decoded as `{"a": 12}` and
+  `{"b": tr/*x*/ue}` as `{"b": true}` instead of erroring. A comment is now
+  replaced by whitespace — at least one space, with the contained newlines still
+  preserved for line numbers — so the surrounding tokens stay separate and the
+  malformed document fails the JSON decode as `AdapterError`.
+- **A JSONC `//` comment terminated by CR silently deleted the following key
+  (F3.2).** The scan looked for `\n` only, so a lone CR — a CRLF file whose
+  line endings were split, or a classic-Mac ending — was comment body and the
+  next line was swallowed. With the now-dangling comma stripped behind it the
+  document stayed valid JSON, so `{"port": 8080, // c\r "tlsRequired": true}`
+  loaded as `{"port": 8080}` with no diagnostic at all: the same silent-loss
+  failure F3.2 exists to prevent, and a divergence from the dialect this
+  adapter implements, where CR ends a comment. A `//` comment now ends at LF
+  or CR. U+2028/U+2029 deliberately do **not** end one: `node-jsonc-parser`
+  does not treat them as line breaks either, so a document reads the same here
+  as in the editor that owns the format.
+
+**Migrating from 1.10.0**: input that used to be accepted can now change shape
+or raise. A variable name with a literal `.` that was relied on for nesting
+(`APP_FOO.BAR` → `foo.bar`) must be respelled with the separator
+(`APP_FOO__BAR`), or read through a quoted path (`cfg.get_string('"foo.bar"')`);
+and a JSONC document where a block comment sat between two tokens
+(`{"a": 1/*x*/2}`) now raises instead of silently decoding as `12`. An ingested
+document carrying an integer beyond int64 (`{"a": 9223372036854775808}`) now
+raises as well — decode it as a string or a float if the value is genuinely
+that large. In the other direction, documents that used to lose data now load
+fully: a key after a CR-terminated JSONC comment, and the first key of a
+BOM-prefixed file, both reappear.
+
 ## [1.10.0] - 2026-07-25
 
 ### Added — format adapters for config owned by other programs

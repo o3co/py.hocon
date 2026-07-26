@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ._internal.int64 import INT64_MAX, INT64_MIN
 from .config import Config
 from .errors import ConfigError
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue
@@ -43,6 +44,12 @@ def _coerce_value(v: Any, at_path: str) -> HoconValue:
     if isinstance(v, bool):
         return HoconScalar("true" if v else "false", "boolean")
     if isinstance(v, int):
+        if not INT64_MIN <= v <= INT64_MAX:
+            raise ConfigError(
+                f"from_map: {v} is outside the int64 range HOCON integers use "
+                f'(spec F0.5) at path "{at_path}"',
+                at_path,
+            )
         return HoconScalar(str(v), "number")
     if isinstance(v, float):
         if math.isnan(v) or math.isinf(v):

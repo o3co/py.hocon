@@ -392,6 +392,9 @@ for per-impl conformance rates.
   defined in the config itself
 - **Never require env vars for local development**: defaults should work out of the box
 - **Document required env vars**: list them in your project's README or a `.env.example`
+- **Bulk-mounting a namespace**: `hocon.adapters.env` maps a whole prefix into a
+  subtree (`APP_DB__HOST` → `db.host`); `__` is the only hierarchy boundary —
+  see [Format adapters](#format-adapters)
 
 ### Dev / Prod Separation
 
@@ -455,6 +458,49 @@ accepts it as it stands.
 Foreign data stays data: a `${a.b}` in a mounted value is literal text, never a
 reference, because the file belongs to a program that never agreed to HOCON's
 syntax.
+
+### Mapping rules worth knowing
+
+**env — `__` is the only hierarchy boundary.** A `.` inside a variable name is
+key text, not a nesting level, so the two spellings are different paths:
+
+```python
+cfg = env.load("APP_", {"APP_FOO__BAR": "nested", "APP_FOO.BAR": "literal"})
+cfg.get_string("foo.bar")      # "nested"  — from APP_FOO__BAR
+cfg.get_string('"foo.bar"')    # "literal" — from APP_FOO.BAR, one quoted key
+```
+
+Because they are different paths they never collide. A genuine collision
+(`APP_A__B` and `APP_a__b`, which lowercase onto the same path) is an error:
+the environment has no order to break the tie with. A `.env` file does have a
+definite order, so there the last line simply wins. Segments are lowercased
+**ASCII-only** — `A`–`Z` and nothing else, so the mapping is identical in all
+four implementations rather than each language's Unicode rules — and a single
+`_` stays inside the segment (`APP_DB__MAX_CONN` → `db.max_conn`).
+
+**env — an entry that is not valid UTF-8 never becomes a value.** Python
+decodes the environment with `surrogateescape`, so undecodable bytes survive as
+lone surrogates that raise only when something later encodes them. What happens
+to such an entry depends on whether you asked for it: `${VAR}` and `${?VAR}`
+treat it as **absent** (the optional form falls through to its default, the
+required form raises the usual unresolved error), while `env.load(prefix=...)`
+**errors** if the entry is inside the prefix you mounted — a mount that dropped
+it silently would look complete while the operator's setting was missing.
+Entries outside the prefix are never inspected, so an undecodable variable
+elsewhere cannot break your mount.
+
+**jsonc — comments separate tokens.** A comment is removed by replacing it with
+whitespace, so `{"a": 1/*x*/2}` is a syntax error rather than `{"a": 12}`. A
+`//` comment ends at LF or CR, matching the dialect VS Code reads.
+
+**properties — every key is an ordinary key.** `__proto__`, `constructor` and
+`prototype` are kept with their values like any other key; a Python `dict` has
+no prototype to pollute, so nothing is filtered out.
+
+**all formats — integers are int64, and a BOM is not key text.** An ingested
+integer outside `[-2^63, 2^63-1]` is an error rather than a value the other
+implementations could not hold, and a leading UTF-8 BOM is stripped by every
+`parse_file` helper instead of ending up inside the first key.
 
 For YAML, scalar resolution belongs to the library, not to this package.
 `ruamel.yaml` reads YAML 1.2, so `no` stays the string `"no"`; PyYAML is YAML

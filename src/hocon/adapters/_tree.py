@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import date, datetime, time
 from typing import Any
 
+from .._internal.int64 import INT64_MAX, INT64_MIN
 from . import AdapterError
 
 __all__ = ["object_root", "convert"]
@@ -60,7 +61,17 @@ def _key_string(k: Any, at: str, fmt: str) -> str:
 
 def common_scalar(v: Any, at: str, fmt: str) -> Any:
     """Leaf rules every nested format shares."""
-    if v is None or isinstance(v, (bool, str, int)):
+    if v is None or isinstance(v, (bool, str)):
+        return v
+    if isinstance(v, int):
+        # F0.5 — integers are int64. Python's int is unbounded and its JSON and
+        # TOML decoders will happily hand back a wider one, so a document that
+        # no sibling implementation can hold would otherwise load here.
+        if not INT64_MIN <= v <= INT64_MAX:
+            raise AdapterError(
+                f"{fmt}: at {at or 'document root'}: {v} is outside the int64 range "
+                "HOCON integers use (spec F0.5)"
+            )
         return v
     if isinstance(v, float):
         if math.isnan(v) or math.isinf(v):
