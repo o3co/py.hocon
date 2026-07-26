@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-07-26
+
 ### Fixed
 
 - **Environment entries that are not valid UTF-8 leaked into config values
@@ -44,6 +46,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `hocon.parse_file`, `include`'s default reader and the five adapter
   `parse_file` helpers now read as `utf-8-sig`. (The core parser already
   ignored U+FEFF mid-document, and `jsonc.parse_file` used to raise.)
+  **The text entry points needed the same treatment**, which the first fix
+  missed: `utf-8-sig` only covers reading a file, so a caller who decoded the
+  bytes themselves still handed the BOM to `properties.parse` /
+  `env.parse_dotenv` and got the unreachable key back. All five adapters now
+  route their `parse` through one `strip_bom`, matching go.hocon, ts.hocon and
+  rs.hocon; only a *leading* BOM is removed, and U+FEFF elsewhere stays data.
+  Caught by the new cross-implementation fixtures
+  ([xx.hocon#77](https://github.com/o3co/xx.hocon/pull/77)), where py.hocon was
+  the only one of four failing `fi17-bom` and `fi51-bom`.
 - **A literal `.` in an environment variable name became a path boundary
   (F1.2).** The env adapter joined the `__`-split segments with `.` and
   re-split on `.` while nesting, so `APP_FOO.BAR=v` produced
