@@ -346,12 +346,36 @@ def test_a_leading_bom_never_becomes_part_of_a_key(tmp_path: Path) -> None:
         assert cfg.keys() == [key], f"{name}: {cfg.keys()}"
 
 
+def test_a_leading_bom_never_becomes_part_of_a_key_from_text() -> None:
+    """F0.9 again, for the entry points that take an already-decoded str.
+
+    `utf-8-sig` covers only the file readers. A caller who read the bytes
+    themselves — or a fixture harness — hands the BOM straight through, and the
+    two flat formats then admit it into the first key, which is the failure F0.9
+    singles out: the document parses and the value is simply unreachable.
+    """
+    bom = "﻿"
+    cases = [
+        ("properties", properties.parse(bom + "a = 1\n"), "a", "1"),
+        (".env", env.parse_dotenv(bom + "FOO=1\n"), "foo", "1"),
+        ("jsonc", jsonc.parse(bom + '{"a": "1"}\n'), "a", "1"),
+        ("toml", toml.parse(bom + 'a = "1"\n'), "a", "1"),
+    ]
+    for name, cfg, key, want in cases:
+        assert cfg.keys() == [key], f"{name}: {cfg.keys()}"
+        assert cfg.get_string(key) == want, f"{name}: BOM leaked into the key"
+
+    # Only a *leading* BOM is a byte-order mark; elsewhere U+FEFF is data.
+    assert properties.parse("a = x" + bom + "y\n").get_string("a") == "x" + bom + "y"
+
+
 @needs_ruamel
 def test_a_leading_bom_never_becomes_part_of_a_yaml_key(tmp_path: Path) -> None:
     """F0.9, for the adapter whose dependency is an extra."""
     p = tmp_path / "c.yaml"
     p.write_text('﻿a: "1"\n', encoding="utf-8")
     assert yaml.parse_file(str(p)).keys() == ["a"]
+    assert yaml.parse('﻿a: "1"\n').keys() == ["a"]
 
 
 def test_integers_outside_int64_are_refused(tmp_path: Path) -> None:
