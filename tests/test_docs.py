@@ -43,13 +43,21 @@ def _find_one(text: str, pattern: re.Pattern[str], what: str) -> str:
     Fails the test when the pattern no longer matches — a doc rewrite that drops
     the claim must fail loudly rather than silently stop checking it.
     """
-    m = pattern.search(text)
-    if m is None:
+    matches = pattern.findall(text)
+    if not matches:
         pytest.fail(
             f"{what} not found (pattern {pattern.pattern}); "
             "update the pattern if the doc was restructured"
         )
-    return m.group(1)
+    if len(matches) > 1:
+        # Two matches mean the doc states the claim twice, and this would
+        # silently check whichever came first — so the pair can drift apart
+        # while the test stays green. Make the ambiguity the failure.
+        pytest.fail(
+            f"{what} matched {len(matches)} times (pattern {pattern.pattern}); "
+            f"the claim must appear once so there is one thing to pin: {matches}"
+        )
+    return matches[0]
 
 
 def _count_compliance() -> dict[str, int]:
@@ -95,7 +103,9 @@ def test_readme_python_version_matches_pyproject() -> None:
     )
     assert claimed == required, (
         f"README says Python {claimed}+, pyproject.toml requires >={required} — "
-        f"a user on {claimed} cannot install this package"
+        "one of the two is wrong, and which way it hurts depends on the direction: "
+        "a README claiming a lower minimum sends users to a version pip will refuse, "
+        "and a README claiming a higher one turns away users who could install fine"
     )
 
 
