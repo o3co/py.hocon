@@ -293,6 +293,59 @@ def test_yaml_resolves_merge_keys_and_aliases() -> None:
 
 
 @needs_ruamel
+@pytest.mark.parametrize(
+    ("src", "key"),
+    [
+        ("1: a\n'1': b\n", "'1'"),
+        ("'1': b\n1: a\n", "'1'"),
+        ("1.0: a\n'1.0': b\n", "'1.0'"),
+        ("~: a\n'null': b\n", "'null'"),
+        ("0x10: a\n'16': b\n", "'16'"),
+    ],
+)
+def test_yaml_refuses_sibling_keys_that_coincide(src: str, key: str) -> None:
+    """F5.3 — two source keys with one string form used to be last-wins, and
+    the loser's value was gone with nothing left to notice.
+
+    Which forms coincide follows from ruamel's scalar resolution (F5.1) and is
+    not aligned across implementations; what is pinned here is that a
+    coincidence errors.
+    """
+    with pytest.raises(AdapterError, match="F5.3") as excinfo:
+        yaml.parse(src)
+    assert f"both give the key {key}" in str(excinfo.value)
+
+
+@needs_ruamel
+def test_yaml_collision_names_the_path() -> None:
+    """The message says where it happened, not just what."""
+    with pytest.raises(AdapterError, match="at outer"):
+        yaml.parse("outer:\n  1: a\n  '1': b\n")
+
+
+@needs_ruamel
+def test_yaml_stringifies_a_lone_non_string_key() -> None:
+    """The other half of F5.3: no sibling, no collision, just a string form."""
+    assert yaml.parse("1: a\n").to_object() == {"1": "a"}
+    assert yaml.parse("~: a\n").to_object() == {"null": "a"}
+
+
+@needs_ruamel
+def test_yaml_merge_key_override_is_not_a_collision() -> None:
+    """`<<: *defaults` bringing in a key the mapping overrides is YAML's own
+    semantics, so the F5.3 check must not fire on it."""
+    cfg = yaml.parse("base: &b\n  x: 1\nchild:\n  <<: *b\n  x: 2\n  y: 3\n")
+    assert cfg.to_object()["child"] == {"x": 2, "y": 3}
+
+
+def test_key_collision_check_leaves_the_string_keyed_formats_alone() -> None:
+    """JSON and TOML keys are strings by construction, so the shared converter's
+    F5.3 check can never fire for them."""
+    assert jsonc.parse('{"a": {"b": 1}}').to_object() == {"a": {"b": 1}}
+    assert toml.parse("a = 1\n[t]\nb = 2\n").to_object() == {"a": 1, "t": {"b": 2}}
+
+
+@needs_ruamel
 def test_yaml_refuses_a_multi_document_stream() -> None:
     """F5.7 — decoding one and dropping the rest would be silent loss."""
     with pytest.raises(AdapterError, match="F5.7"):
