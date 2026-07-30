@@ -541,3 +541,15 @@ def test_recursion_guard_also_covers_a_cyclic_structure() -> None:
     cyclic["self"] = cyclic
     with pytest.raises(ConfigError, match="or contains a cycle"):
         hocon.from_map(cyclic)
+
+
+def test_env_load_refuses_a_non_string_value() -> None:
+    """F1.4 — every value the environment supplies is a string. `os.environ`
+    cannot hold anything else, but the `env=` seam is public, and a value that
+    got through would give the config a type no real mount can produce. It used
+    to leak a bare TypeError out of the UTF-8 check."""
+    with pytest.raises(AdapterError, match="environment values are strings"):
+        env.load("APP_", {"APP_N": 5})  # type: ignore[dict-item]
+    # A string still works, and entries outside the prefix stay uninspected.
+    cfg = env.load("APP_", {"APP_N": "5", "OTHER": 5})  # type: ignore[dict-item]
+    assert cfg.get_string("n") == "5"

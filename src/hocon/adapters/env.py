@@ -61,6 +61,10 @@ def load(
     complete while the operator's setting was missing. Entries outside the
     prefix are never inspected, so an undecodable variable elsewhere in the
     environment cannot break an unrelated mount.
+
+    ``env`` is a test seam. It is checked as strictly as the real environment
+    would be: a non-string value is an error rather than something that reaches
+    the config with a type ``os.environ`` cannot produce (F1.4).
     """
     if not prefix:
         raise AdapterError("env: a prefix is required when mounting the environment (spec F1.1)")
@@ -81,6 +85,17 @@ def load(
             raise AdapterError(
                 f"env: the name {name!r} is not valid UTF-8 (spec F1.9); "
                 f"a bulk mount of {prefix!r} cannot silently omit it"
+            )
+        if not isinstance(source[name], str):
+            # `os.environ` can only hold strings, but the `env=` seam is public
+            # and a caller can hand over anything. F1.4 is that every value the
+            # environment supplies is a string, so a non-string would end up in
+            # the config with a type no real mount can produce — a config that
+            # passes its tests here and fails against the real environment.
+            # It also used to leak a bare TypeError out of the UTF-8 check below.
+            raise AdapterError(
+                f"env: the value of {name!r} is a {type(source[name]).__name__}, "
+                "but environment values are strings (spec F1.4)"
             )
         if is_undecodable(source[name]):
             raise AdapterError(

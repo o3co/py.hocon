@@ -61,6 +61,19 @@ Two mechanisms, because two different things can be too deep:
   `from_map` — which from inside the handler is indistinguishable from depth, so
   the message names both shapes rather than asserting one.
 
+### Fixed — `adapters.env`: `load()` trusted caller-supplied value types
+
+`env.load("APP_", {"APP_N": 5})` reached the UTF-8 check with an `int` and left
+as a bare `TypeError: 'int' object is not iterable`. `os.environ` cannot hold a
+non-string, but the `env=` seam is public, and a value that got through would
+give the config a type no real mount can produce — passing here and failing
+against the real environment. Now an `AdapterError` citing F1.4
+([#19](https://github.com/o3co/py.hocon/issues/19), part 3).
+
+The other two parts of that issue are unchanged: cross-checking found go.hocon,
+ts.hocon and rs.hocon behave identically, so they are a four-way question about
+F1.7 rather than a defect here — see the issue for the measurements.
+
 ## [1.11.0] - 2026-07-26
 
 ### Fixed
