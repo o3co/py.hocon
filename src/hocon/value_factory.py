@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ._internal.depth import guard_recursion
 from ._internal.int64 import INT64_MAX, INT64_MIN
 from .config import Config
 from .errors import ConfigError
@@ -20,7 +21,13 @@ __all__ = ["empty", "from_map"]
 
 def from_map(values: dict[str, Any], origin_description: str | None = None) -> Config:
     """Construct a resolved Config from a plain ``dict``."""
-    fields = _coerce_object(values, "")
+    # Every adapter funnels its decoded tree through here, and the coercion
+    # below recurses once per level, so this is the one place that has to keep
+    # a too-deep tree from leaving as a RecursionError (see _internal.depth).
+    fields = guard_recursion(
+        lambda: _coerce_object(values, ""),
+        lambda msg: ConfigError(f"from_map: {msg}", ""),
+    )
     return Config._from_resolved_value(HoconObject(fields), origin_description)
 
 

@@ -30,6 +30,34 @@ Which forms coincide follows from ruamel's scalar resolution and is not aligned
 across implementations (F5.1) — `1.0` gives `'1.0'` here and in rs.hocon, `"1"`
 in go.hocon and ts.hocon. What is common is that a coincidence errors.
 
+### Fixed — deeply nested input raised `RecursionError`, outside the documented error contract
+
+**BREAKING** for one of the two halves (a mapped path over 64 segments is now
+refused; nothing else changes about what is accepted).
+
+`RecursionError` is not a type this library documents, so a caller writing
+`except ConfigError` or `except AdapterError` did not catch it and the failure
+escaped as an interpreter-level error from the middle of a parse
+([#18](https://github.com/o3co/py.hocon/issues/18)). Four entry points reached
+it, the cheapest from a **1493-byte variable name**.
+
+Two mechanisms, because two different things can be too deep:
+
+- **A name that maps to a path is capped at 64 segments** — an environment
+  variable's `__` segments, a Properties file's dotted key. One name produces
+  one arbitrarily deep chain, which is what made the input so small. rs.hocon
+  caps the same mapping at the same number, so a name that mounts in one
+  implementation mounts in the other. Over the limit is now an `AdapterError`
+  (env) or `ParseError` (Properties) naming the depth and the limit.
+- **A deeply nested document is not capped** — refusing a 65-level JSON file
+  would be a claim about the format rather than about a mapping we invented.
+  Instead `RecursionError` is turned into the error type the entry point's
+  contract names: `AdapterError` from the adapters (including the `from_value`
+  tree entry points, which skip the decoder), `ConfigError` from `from_map`, and
+  `ParseError` from `parse`. That matters beyond tidiness, because the depth at
+  which CPython gives out depends on how deep the *caller* already is: the same
+  document could load from one call site and fail from another.
+
 ## [1.11.0] - 2026-07-26
 
 ### Fixed

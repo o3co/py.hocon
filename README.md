@@ -541,6 +541,15 @@ When parsing untrusted HOCON input, be aware of:
   validate size before calling `parse()`.
 - **Include depth:** limited to 50 levels to prevent stack overflow from deep
   include chains.
+- **Mapped path depth:** an environment variable's `__` segments and a
+  Properties file's dotted key are limited to 64 segments. One name produces one
+  arbitrarily deep chain, so without the cap 1.5 kB of variable name was enough
+  to exhaust the interpreter's stack. rs.hocon caps the same mapping at 64.
+- **Document nesting depth:** not capped. A document nested past what the
+  interpreter's stack holds fails as `ParseError` or `AdapterError` — never as a
+  bare `RecursionError` — but the depth at which that happens depends on how
+  deep the calling code already is, so validate size before parsing untrusted
+  input (see above) rather than relying on a fixed level.
 
 ## Development
 

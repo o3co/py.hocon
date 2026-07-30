@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .._internal.depth import MAX_PATH_SEGMENTS, too_deep
 from .._internal.os_text import is_undecodable
 from .._internal.text import strip_bom
 from ..config import Config
@@ -170,6 +171,15 @@ def _to_path(rest: str, name: str) -> list[str]:
     segs = [s.translate(_ASCII_FOLD) for s in rest.split(SEPARATOR)]
     if any(s == "" for s in segs):
         raise AdapterError(f"env: {name!r} produces an empty path segment")
+    if too_deep(len(segs)):
+        # One name produces one arbitrarily deep chain, so 1.5 kB of variable
+        # name used to be enough to exhaust the interpreter's stack — and it
+        # did so as a RecursionError, outside every error type documented here.
+        # rs.hocon caps the same mapping at the same number.
+        raise AdapterError(
+            f"env: {name!r} maps to a path {len(segs)} segments deep, over the "
+            f"limit of {MAX_PATH_SEGMENTS}"
+        )
     return segs
 
 

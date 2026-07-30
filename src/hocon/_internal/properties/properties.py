@@ -22,6 +22,7 @@ from typing import Any
 
 from ...errors import ParseError
 from ...value import HoconObject, HoconScalar, HoconValue
+from ..depth import MAX_PATH_SEGMENTS, too_deep
 
 __all__ = ["parse_properties", "properties_to_hocon_value"]
 
@@ -37,6 +38,19 @@ def parse_properties(input_text: str) -> dict[str, Any]:
         key = _unescape(raw_key, line_no)
         if key == "":
             continue
+        if too_deep(key.count(".") + 1):
+            # One dotted key produces one arbitrarily deep chain, so ~1 kB of
+            # key text was enough to exhaust the interpreter's stack during
+            # coercion — as a RecursionError, outside every error type
+            # documented here. Checked in file order rather than after the sort
+            # below: the sort exists to make conflict *direction* independent of
+            # input order, and a key that is too deep is not a conflict.
+            raise ParseError(
+                f"key maps to a path {key.count('.') + 1} segments deep, over "
+                f"the limit of {MAX_PATH_SEGMENTS}",
+                line_no,
+                1,
+            )
         pairs.append((key, _unescape(raw_value, line_no)))
 
     # Sort by key so conflict-direction is input-order independent (S23.4).
