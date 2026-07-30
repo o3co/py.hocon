@@ -47,18 +47,18 @@ def guard_recursion(fn: Callable[[], T], wrap: Callable[[str], Exception]) -> T:
     catch it and the failure escapes as an interpreter-level error from
     somewhere in the middle of a parse.
 
-    The message names both possibilities, because from inside the handler the
-    two are indistinguishable: input nested past what the interpreter's stack
-    holds, or — if this ever fires on a shallow document — a cycle in this
-    library. Saying only the first would send a reader looking for depth that
-    is not there.
+    The message names the possibilities rather than asserting one, because from
+    inside the handler they are indistinguishable: input nested past what the
+    interpreter's stack holds, a *cyclic* input structure (a dict that contains
+    itself, handed to ``from_map``), or — least likely — a cycle in this
+    library. Naming only depth would send a reader looking for nesting that is
+    not there when the real shape is a cycle.
     """
     try:
         return fn()
     except RecursionError:
         raise wrap(
-            "input is nested too deeply for this interpreter's stack "
-            "(raise sys.setrecursionlimit, or flatten the document); if the "
-            "input is not deeply nested, this is a cycle in hocon-parser and "
-            "is a bug worth reporting"
+            "input is nested too deeply for this interpreter's stack, or "
+            "contains a cycle (raise sys.setrecursionlimit, flatten the "
+            "document, or break the cycle)"
         ) from None

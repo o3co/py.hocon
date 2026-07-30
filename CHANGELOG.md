@@ -52,7 +52,9 @@ Two mechanisms, because two different things can be too deep:
 - **A deeply nested document is not capped** — refusing a 65-level JSON file
   would be a claim about the format rather than about a mapping we invented.
   Instead `RecursionError` is turned into the error type the entry point's
-  contract names: `AdapterError` from the adapters (including the `from_value`
+  contract names — which also covers a *cyclic* input structure, such as a dict
+  that contains itself handed to `from_map`, since from inside the handler that
+  is indistinguishable from depth: `AdapterError` from the adapters (including the `from_value`
   tree entry points, which skip the decoder), `ConfigError` from `from_map`, and
   `ParseError` from `parse`. That matters beyond tidiness, because the depth at
   which CPython gives out depends on how deep the *caller* already is: the same

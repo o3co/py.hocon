@@ -532,3 +532,12 @@ def _nested_dict(depth: int) -> dict[str, Any]:
 def test_parse_reports_a_too_deep_document_as_a_parse_error() -> None:
     with pytest.raises(ParseError, match="nested too deeply"):
         hocon.parse('{"a":' * 2000 + "1" + "}" * 2000)
+
+
+def test_recursion_guard_also_covers_a_cyclic_structure() -> None:
+    """A dict that contains itself hits the same limit from a different shape,
+    so the message names both rather than asserting depth."""
+    cyclic: dict[str, Any] = {}
+    cyclic["self"] = cyclic
+    with pytest.raises(ConfigError, match="or contains a cycle"):
+        hocon.from_map(cyclic)

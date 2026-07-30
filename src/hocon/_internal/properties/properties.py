@@ -38,7 +38,8 @@ def parse_properties(input_text: str) -> dict[str, Any]:
         key = _unescape(raw_key, line_no)
         if key == "":
             continue
-        if too_deep(key.count(".") + 1):
+        depth = key.count(".") + 1
+        if too_deep(depth):
             # One dotted key produces one arbitrarily deep chain, so ~1 kB of
             # key text was enough to exhaust the interpreter's stack during
             # coercion — as a RecursionError, outside every error type
@@ -46,8 +47,8 @@ def parse_properties(input_text: str) -> dict[str, Any]:
             # below: the sort exists to make conflict *direction* independent of
             # input order, and a key that is too deep is not a conflict.
             raise ParseError(
-                f"key maps to a path {key.count('.') + 1} segments deep, over "
-                f"the limit of {MAX_PATH_SEGMENTS}",
+                f"key maps to a path {depth} segments deep, over the limit of "
+                f"{MAX_PATH_SEGMENTS}",
                 line_no,
                 1,
             )
