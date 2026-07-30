@@ -67,8 +67,8 @@ Two mechanisms, because two different things can be too deep:
 as a bare `TypeError: 'int' object is not iterable`. `os.environ` cannot hold a
 non-string, but the `env=` seam is public, and a value that got through would
 give the config a type no real mount can produce — passing here and failing
-against the real environment. Now an `AdapterError` citing F1.4
-([#19](https://github.com/o3co/py.hocon/issues/19), part 3).
+against the real environment. Now an `AdapterError` citing F1.4.
+([#19](https://github.com/o3co/py.hocon/issues/19), part 3.)
 
 The other two parts of that issue are unchanged: cross-checking found go.hocon,
 ts.hocon and rs.hocon behave identically, so they are a four-way question about

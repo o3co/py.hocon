@@ -86,7 +86,8 @@ def load(
                 f"env: the name {name!r} is not valid UTF-8 (spec F1.9); "
                 f"a bulk mount of {prefix!r} cannot silently omit it"
             )
-        if not isinstance(source[name], str):
+        value = source[name]
+        if not isinstance(value, str):
             # `os.environ` can only hold strings, but the `env=` seam is public
             # and a caller can hand over anything. F1.4 is that every value the
             # environment supplies is a string, so a non-string would end up in
@@ -94,10 +95,10 @@ def load(
             # passes its tests here and fails against the real environment.
             # It also used to leak a bare TypeError out of the UTF-8 check below.
             raise AdapterError(
-                f"env: the value of {name!r} is a {type(source[name]).__name__}, "
+                f"env: the value of {name!r} has type {type(value).__name__}, "
                 "but environment values are strings (spec F1.4)"
             )
-        if is_undecodable(source[name]):
+        if is_undecodable(value):
             raise AdapterError(
                 f"env: the value of {name!r} is not valid UTF-8 (spec F1.9); "
                 f"a bulk mount of {prefix!r} cannot silently omit it"
@@ -118,7 +119,7 @@ def load(
                 f"env: {seen[key]!r} and {name!r} both map to {_render_path(path)}"
             )
         seen[key] = name
-        pairs.append((path, source[name]))
+        pairs.append((path, value))
 
     return from_map(_nest(pairs), origin_description or "environment variables")
 

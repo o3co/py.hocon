@@ -548,7 +548,7 @@ def test_env_load_refuses_a_non_string_value() -> None:
     cannot hold anything else, but the `env=` seam is public, and a value that
     got through would give the config a type no real mount can produce. It used
     to leak a bare TypeError out of the UTF-8 check."""
-    with pytest.raises(AdapterError, match="environment values are strings"):
+    with pytest.raises(AdapterError, match="has type int"):
         env.load("APP_", {"APP_N": 5})  # type: ignore[dict-item]
     # A string still works, and entries outside the prefix stay uninspected.
     cfg = env.load("APP_", {"APP_N": "5", "OTHER": 5})  # type: ignore[dict-item]
