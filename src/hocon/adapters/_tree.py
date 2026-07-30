@@ -34,8 +34,22 @@ def object_root(doc: Any, fmt: str, scalar: Callable[[Any, str], Any]) -> dict[s
 def convert(v: Any, at: str, fmt: str, scalar: Callable[[Any, str], Any]) -> Any:
     if isinstance(v, dict):
         out: dict[str, Any] = {}
+        # The source key behind each written key, so a second one landing on it
+        # can name what it collided with (F5.3). Only YAML can produce this —
+        # JSON and TOML keys are strings by construction — so for the other two
+        # formats this is a dict lookup that never fires.
+        seen: dict[str, Any] = {}
         for k, e in v.items():
             key = _key_string(k, at, fmt)
+            if key in seen:
+                raise AdapterError(
+                    f"{fmt}: sibling mapping keys {_key_form(seen[key])} and "
+                    f"{_key_form(k)} both give the key {key!r}"
+                    f"{'' if at == '' else f' at {at}'}; quote the one you mean to "
+                    "keep distinct, because one of the two values would otherwise "
+                    "be lost (spec F5.3)"
+                )
+            seen[key] = k
             out[key] = convert(e, key if at == "" else f"{at}.{key}", fmt, scalar)
         return out
     if isinstance(v, (list, tuple)):
@@ -57,6 +71,27 @@ def _key_string(k: Any, at: str, fmt: str) -> str:
         f"{fmt}: at {at or 'document root'}: a {type(k).__name__} key is not usable "
         "as an object key (spec F5.3)"
     )
+
+
+def _key_form(k: Any) -> str:
+    """Render a source key for the F5.3 collision error: a string is quoted,
+    every other scalar names its kind, so the int ``1`` and the string ``"1"``
+    stay apart in the message the way they failed to in the mapping.
+
+    ``bool`` is checked before ``int`` because it subclasses it, the same order
+    :func:`_key_string` uses.
+    """
+    if isinstance(k, str):
+        return repr(k)
+    if k is None:
+        return "None (null)"
+    if isinstance(k, bool):
+        return f"{k} (boolean)"
+    if isinstance(k, int):
+        return f"{k} (integer)"
+    if isinstance(k, float):
+        return f"{k} (float)"
+    return f"{k!r} ({type(k).__name__})"
 
 
 def common_scalar(v: Any, at: str, fmt: str) -> Any:
