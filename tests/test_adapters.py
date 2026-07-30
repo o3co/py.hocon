@@ -318,9 +318,21 @@ def test_yaml_refuses_sibling_keys_that_coincide(src: str, key: str) -> None:
 
 @needs_ruamel
 def test_yaml_collision_names_the_path() -> None:
-    """The message says where it happened, not just what."""
+    """The message says where it happened, not just what — and says
+    ``document root`` rather than nothing when the collision is at the top, the
+    way every other adapter error in this module words it."""
     with pytest.raises(AdapterError, match="at outer"):
         yaml.parse("outer:\n  1: a\n  '1': b\n")
+    with pytest.raises(AdapterError, match="at document root"):
+        yaml.parse("1: a\n'1': b\n")
+
+
+@needs_ruamel
+def test_yaml_collision_does_not_advise_quoting_when_that_cannot_help() -> None:
+    """Quoting ``1`` gives ``'1'``, which is the same key again, so the message
+    must not offer it as the fix. Renaming is what always works."""
+    with pytest.raises(AdapterError, match="rename one of them"):
+        yaml.parse("1: a\n'1': b\n")
 
 
 @needs_ruamel

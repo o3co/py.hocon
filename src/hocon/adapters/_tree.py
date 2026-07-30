@@ -44,10 +44,11 @@ def convert(v: Any, at: str, fmt: str, scalar: Callable[[Any, str], Any]) -> Any
             if key in seen:
                 raise AdapterError(
                     f"{fmt}: sibling mapping keys {_key_form(seen[key])} and "
-                    f"{_key_form(k)} both give the key {key!r}"
-                    f"{'' if at == '' else f' at {at}'}; quote the one you mean to "
-                    "keep distinct, because one of the two values would otherwise "
-                    "be lost (spec F5.3)"
+                    f"{_key_form(k)} both give the key {key!r} at "
+                    f"{at or 'document root'}; rename one of them, because one of "
+                    "the two values would otherwise be lost. Quoting a non-string "
+                    "key helps only where that changes the key text, as 0x10 does "
+                    "and 1 does not (spec F5.3)"
                 )
             seen[key] = k
             out[key] = convert(e, key if at == "" else f"{at}.{key}", fmt, scalar)
