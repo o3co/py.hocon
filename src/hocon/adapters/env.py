@@ -349,6 +349,23 @@ def _strip_export(line: str) -> str:
     return stripped
 
 
+# ``str.isspace`` is not the Unicode ``White_Space`` property: enumerated over
+# the whole codepoint space (2026-07-31) it is ``White_Space`` plus exactly
+# these four C0 separators. F1.7 pins the property, because the four
+# implementations otherwise disagree on which names are refused — Go's
+# ``unicode.IsSpace`` and Rust's ``char::is_whitespace`` are the property
+# exactly, and JavaScript's ``\s`` is the property minus U+0085 plus U+FEFF.
+#
+# Subtracting the four is how Python spells the property without a table:
+# ``White_Space`` is a strict subset of ``str.isspace``, so nothing else moves.
+_NOT_WHITE_SPACE = frozenset("\x1c\x1d\x1e\x1f")
+
+
+def _is_white_space(ch: str) -> bool:
+    """Whether ``ch`` has the Unicode ``White_Space`` property (spec F1.7)."""
+    return ch.isspace() and ch not in _NOT_WHITE_SPACE
+
+
 def _check_name(name: str, origin: str, lineno: int) -> None:
     """Refuse a name that cannot have been meant (spec F1.7).
 
@@ -359,10 +376,14 @@ def _check_name(name: str, origin: str, lineno: int) -> None:
 
     Deliberately narrower than a POSIX name grammar, which would reject
     ``APP_FOO.BAR`` — a name F1.2 documents as valid and the fixtures exercise.
+
+    "Whitespace" is the Unicode ``White_Space`` property, pinned by F1.7 rather
+    than inherited from ``str.isspace`` — see :data:`_NOT_WHITE_SPACE`.
     """
     for ch in name:
-        if ch.isspace() or ch == "#":
-            what = "whitespace" if ch.isspace() else "'#'"
+        space = _is_white_space(ch)
+        if space or ch == "#":
+            what = "whitespace" if space else "'#'"
             raise AdapterError(
                 f"{origin}:{lineno}: variable name {name!r} contains {what}; "
                 "the line is not NAME=value (spec F1.7)"

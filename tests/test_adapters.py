@@ -686,6 +686,29 @@ def test_dotenv_refuses_a_name_that_cannot_have_been_meant(src: str, what: str) 
         env.parse_dotenv(src)
 
 
+def test_dotenv_name_whitespace_is_unicode_white_space() -> None:
+    """F1.7 pins "whitespace" in a name to the Unicode ``White_Space`` property
+    rather than to whichever predicate a stdlib offers, because the four do not
+    agree. Enumerated over the whole codepoint space on 2026-07-31::
+
+        Go   unicode.IsSpace     == White_Space
+        Rust char::is_whitespace == White_Space
+        Py   str.isspace         == White_Space + U+001C..U+001F
+        JS   regex \\s            == White_Space - U+0085 + U+FEFF
+
+    Python is the outlier that refuses too much, so U+001F is the case that
+    changes here: it used to raise and is now an ordinary name character.
+    """
+    # U+0085 NEL is White_Space, so the name is a mis-parse and refused.
+    with pytest.raises(AdapterError, match="F1.7"):
+        env.parse_dotenv("FOO\u0085BAR=baz\n")
+
+    # U+001F UNIT SEPARATOR is not White_Space. str.isspace disagrees, which is
+    # why the set is pinned rather than inherited.
+    cfg = env.parse_dotenv("FOO\u001fBAR=baz\n")
+    assert cfg.get_string('"foo\u001fbar"') == "baz"
+
+
 def test_dotenv_name_rule_still_allows_a_dotted_name() -> None:
     """Deliberately narrower than a POSIX name grammar, which would reject this
     — a name F1.2 documents as valid (one key `"foo.bar"`, not nesting)."""
