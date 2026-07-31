@@ -146,6 +146,14 @@ def parse_dotenv(
     double quotes with ``\\n \\r \\t \\\\ \\"``. Multi-line values and trailing
     comments are unsupported — an unquoted value containing ``" #"`` is an error
     rather than a guess. No ``${...}`` expansion.
+
+    **The prefix filter runs before validation**, so a ``.env`` shared with
+    tools that support trailing comments stays loadable when the caller wants
+    only their own slice of it. This is :func:`load`'s rule applied here —
+    "entries outside the prefix are never inspected" (F1.1) — and the two
+    disagreeing was the actual inconsistency. The old split, where the value was
+    parsed before the filter and the path mapped after, was accidental, and the
+    same accident in all four implementations.
     """
     origin = origin_description or ".env"
     pairs: list[tuple[list[str], str]] = []
@@ -155,17 +163,21 @@ def parse_dotenv(
         line = raw.strip()
         if line == "" or line.startswith("#"):
             continue
-        if line.startswith("export "):
-            line = line[len("export ") :]
+        line = _strip_export(line)
         name, sep, rest = line.partition("=")
         if not sep:
             raise AdapterError(f"{origin}:{lineno}: expected NAME=value")
         name = name.strip()
+        # Everything past here is about this entry, so the filter goes first.
+        # The two checks that precede it are about the *line* rather than the
+        # entry: a line with no `=` is not a NAME=value pair at all, and an
+        # empty name gives nothing to compare the prefix against.
         if name == "":
             raise AdapterError(f"{origin}:{lineno}: empty variable name")
-        value = _dotenv_value(rest.lstrip(" \t"), origin, lineno, name)
         if not name.startswith(prefix):
             continue
+        _check_name(name, origin, lineno)
+        value = _dotenv_value(rest.lstrip(" \t"), origin, lineno, name)
         pairs.append((_to_path(name[len(prefix) :], name), value))
 
     # A file has a definite line order, so a repeated name is last-wins (F0.7)
@@ -311,3 +323,41 @@ def _dotenv_value(v: str, origin: str, lineno: int, name: str) -> str:
                 "so quote the value if the # belongs to it"
             )
     return trimmed
+
+
+def _strip_export(line: str) -> str:
+    """Drop a leading ``export`` and the whitespace after it (spec F1.7).
+
+    Matching the literal ``"export "`` missed a tab, so ``export<TAB>FOO=bar``
+    became the variable ``export<TAB>foo`` — a key nothing would ever look up,
+    produced silently.
+    """
+    if not line.startswith("export"):
+        return line
+    rest = line[len("export") :]
+    stripped = rest.lstrip(" \t")
+    if stripped == rest:
+        # No whitespace after it, so this is a variable whose name merely begins
+        # with "export" (``exportFOO=1``), not the keyword.
+        return line
+    return stripped
+
+
+def _check_name(name: str, origin: str, lineno: int) -> None:
+    """Refuse a name that cannot have been meant (spec F1.7).
+
+    F1.7's rule for values is an error naming the fix rather than a guess about
+    the author's intent; names get the same treatment. Whitespace or ``#``
+    inside one means the line was mis-parsed — ``FOO BAR=baz`` and ``FOO#x=1``
+    used to become the keys ``foo bar`` and ``foo#x``.
+
+    Deliberately narrower than a POSIX name grammar, which would reject
+    ``APP_FOO.BAR`` — a name F1.2 documents as valid and the fixtures exercise.
+    """
+    for ch in name:
+        if ch.isspace() or ch == "#":
+            what = "whitespace" if ch.isspace() else "'#'"
+            raise AdapterError(
+                f"{origin}:{lineno}: variable name {name!r} contains {what}; "
+                "the line is not NAME=value (spec F1.7)"
+            )
