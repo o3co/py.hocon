@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `adapters.env`: two small corrections to how a path is rendered in an error
+
+Rendering is pinned as spec F0.10 so go.hocon, rs.hocon and py.hocon produce the
+same text for the same key — the cross-language fixtures compare it
+([xx.hocon#76](https://github.com/o3co/xx.hocon/issues/76)). This module was
+already closest to the pinned rule, `json.dumps(..., ensure_ascii=False)` being
+JSON string syntax; two things changed:
+
+- **U+2028 / U+2029 are escaped.** JSON permits them raw and `json.dumps` left
+  them raw, but they are line separators to enough log viewers and editors that
+  a variable name holding one could break the very message reporting it — which
+  is the reason the other control characters are escaped.
+- **The bare-segment rule admits `A`–`Z`.** HOCON's own grammar accepts an
+  uppercase key unquoted, and the same renderer serves adapters that do not
+  case-fold, so quoting `A` was noise. Environment segments are folded before
+  they reach here, so nothing changes for `env.load` itself.
+
+The docstring's paste-into-a-getter framing is corrected too: measured, no
+implementation's path parser decodes escapes inside a quoted segment, so
+`"a\nb"` never addressed the key `a<LF>b`. The guarantee that matters for a
+collision message — two different paths never render alike — is now pinned by a
+test.
+
 ### Fixed — `adapters.yaml`: coinciding sibling keys were last-wins, not an error
 
 **BREAKING** (input previously accepted is now refused; rename one of the two

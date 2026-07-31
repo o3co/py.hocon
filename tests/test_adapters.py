@@ -553,3 +553,50 @@ def test_env_load_refuses_a_non_string_value() -> None:
     # A string still works, and entries outside the prefix stay uninspected.
     cfg = env.load("APP_", {"APP_N": "5", "OTHER": 5})  # type: ignore[dict-item]
     assert cfg.get_string("n") == "5"
+
+
+# --- F0.10: a rendered path is a JSON string literal -------------------------
+
+
+def test_rendered_path_segment_is_a_json_string_literal() -> None:
+    """The three implementations that render paths must produce the same text,
+    because the cross-language fixtures compare it (spec F0.10)."""
+
+    def render(seg: str) -> str:
+        with pytest.raises(AdapterError) as excinfo:
+            env.load("APP_", {f"APP_{seg}": "1", f"APP_{seg.upper()}": "2"})
+        return str(excinfo.value).rsplit("both map to ", 1)[-1]
+
+    assert render("a b") == '"a b"'
+    assert render("a.b") == '"a.b"'
+    assert render("a\nb") == '"a\\nb"'
+    assert render("a\tb") == '"a\\tb"'
+    assert render("a\x00b") == '"a\\u0000b"'
+    assert render('a"b') == '"a\\"b"'
+    # Printable non-ASCII stays itself: F1.3 leaves these unfolded, so they
+    # arrive here in normal use and escaping them would bury the common case.
+    assert render("İa") == '"İa"'
+
+
+def test_rendered_path_escapes_the_line_separators_json_allows_raw() -> None:
+    """U+2028 / U+2029 are legal raw inside a JSON string, and escaped anyway:
+    they are line separators to enough log viewers that a key holding one could
+    break the very message reporting it (spec F0.10)."""
+    with pytest.raises(AdapterError) as excinfo:
+        env.load("APP_", {"APP_a b": "1", "APP_A B": "2"})
+    rendered = str(excinfo.value).rsplit("both map to ", 1)[-1]
+    assert rendered == '"a\\u2028b"'
+    assert " " not in rendered
+
+
+def test_distinct_paths_render_distinctly() -> None:
+    """The property a collision message actually needs. Pasting the result into
+    a getter is deliberately not promised — no implementation's path parser
+    decodes escapes inside a quoted segment."""
+
+    def render(name: str) -> str:
+        with pytest.raises(AdapterError) as excinfo:
+            env.load("APP_", {f"APP_{name}": "1", f"APP_{name.upper()}": "2"})
+        return str(excinfo.value).rsplit("both map to ", 1)[-1]
+
+    assert render("foo.bar") != render("foo__bar")
