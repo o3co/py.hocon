@@ -656,14 +656,22 @@ def test_dotenv_filters_before_it_validates() -> None:
         env.parse_dotenv("APP___=x\n", prefix="APP_")
 
 
-def test_dotenv_export_takes_any_whitespace() -> None:
+def test_dotenv_export_takes_spaces_and_tabs() -> None:
     """Matching the literal `"export "` missed a tab, so `export<TAB>FOO=bar`
-    became the variable `export<TAB>foo` — silently (spec F1.7)."""
+    became the variable `export<TAB>foo` — silently (spec F1.7).
+
+    Spaces and tabs, matching what the dialect trims on the value side. Anything
+    else after `export` leaves it part of the name, where the F1.7 name rule
+    refuses it — an error rather than a silently odd key."""
     assert env.parse_dotenv("export\tFOO=bar\n").to_object() == {"foo": "bar"}
     assert env.parse_dotenv("export  FOO=bar\n").to_object() == {"foo": "bar"}
     assert env.parse_dotenv("export FOO=bar\n").to_object() == {"foo": "bar"}
     # …and a name that merely begins with "export" is still a name.
     assert env.parse_dotenv("exportFOO=bar\n").to_object() == {"exportfoo": "bar"}
+    # A form feed is not one of the two, so `export` stays part of the name and
+    # the F1.7 name rule rejects it. That is the intended outcome, not a gap.
+    with pytest.raises(AdapterError, match="F1.7"):
+        env.parse_dotenv("export\fFOO=bar\n")
 
 
 @pytest.mark.parametrize(

@@ -326,11 +326,17 @@ def _dotenv_value(v: str, origin: str, lineno: int, name: str) -> str:
 
 
 def _strip_export(line: str) -> str:
-    """Drop a leading ``export`` and the whitespace after it (spec F1.7).
+    """Drop a leading ``export`` and the spaces or tabs after it (spec F1.7).
 
     Matching the literal ``"export "`` missed a tab, so ``export<TAB>FOO=bar``
     became the variable ``export<TAB>foo`` — a key nothing would ever look up,
     produced silently.
+
+    Space and tab specifically, not ``str.isspace``: that is what this dialect
+    already trims on the value side. Leaving the rest out is also the better
+    outcome — ``export<FF>FOO=bar`` is then a *name* of ``export<FF>FOO``, which
+    :func:`_check_name` refuses, rather than a keyword line producing a silently
+    odd key.
     """
     if not line.startswith("export"):
         return line
