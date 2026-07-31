@@ -635,3 +635,50 @@ def test_jsonc_leaves_valid_documents_alone() -> None:
     # the value is the six characters `\u0041`, not `A`.
     assert jsonc.parse(r'{"a":"\\u0041"}').get_string("a") == r"\u0041"
     assert jsonc.parse(r'{"a":"\\ud800 is text"}').get_string("a") == r"\ud800 is text"
+
+
+# --- F1.7: the prefix filter runs first, and names are validated -------------
+
+
+def test_dotenv_filters_before_it_validates() -> None:
+    """A `.env` shared with tools that support trailing comments has to stay
+    loadable when the caller wants only their own slice of it. `load` already
+    said so — "entries outside the prefix are never inspected" (F1.1) — and
+    `parse_dotenv` disagreeing with its sibling was the actual inconsistency."""
+    # Discarded by the prefix, so never inspected: all three used to raise.
+    assert env.parse_dotenv("BAD=x # y\n", prefix="APP_").to_object() == {}
+    assert env.parse_dotenv("BAD NAME=x\n", prefix="APP_").to_object() == {}
+    assert env.parse_dotenv("OTHER__=x\n", prefix="APP_").to_object() == {}
+    # Kept by the prefix, so validated as strictly as ever.
+    with pytest.raises(AdapterError, match="trailing comments"):
+        env.parse_dotenv("APP_BAD=x # y\n", prefix="APP_")
+    with pytest.raises(AdapterError, match="empty path segment"):
+        env.parse_dotenv("APP___=x\n", prefix="APP_")
+
+
+def test_dotenv_export_takes_any_whitespace() -> None:
+    """Matching the literal `"export "` missed a tab, so `export<TAB>FOO=bar`
+    became the variable `export<TAB>foo` — silently (spec F1.7)."""
+    assert env.parse_dotenv("export\tFOO=bar\n").to_object() == {"foo": "bar"}
+    assert env.parse_dotenv("export  FOO=bar\n").to_object() == {"foo": "bar"}
+    assert env.parse_dotenv("export FOO=bar\n").to_object() == {"foo": "bar"}
+    # …and a name that merely begins with "export" is still a name.
+    assert env.parse_dotenv("exportFOO=bar\n").to_object() == {"exportfoo": "bar"}
+
+
+@pytest.mark.parametrize(
+    ("src", "what"),
+    [("FOO BAR=baz\n", "whitespace"), ("FOO#x=1\n", "'#'")],
+)
+def test_dotenv_refuses_a_name_that_cannot_have_been_meant(src: str, what: str) -> None:
+    """F1.7's rule for values — an error naming the fix rather than a guess
+    about the author's intent — applies to names too. These used to become the
+    keys `foo bar` and `foo#x`."""
+    with pytest.raises(AdapterError, match="F1.7"):
+        env.parse_dotenv(src)
+
+
+def test_dotenv_name_rule_still_allows_a_dotted_name() -> None:
+    """Deliberately narrower than a POSIX name grammar, which would reject this
+    — a name F1.2 documents as valid (one key `"foo.bar"`, not nesting)."""
+    assert env.parse_dotenv("FOO.BAR=v\n").get_string('"foo.bar"') == "v"
