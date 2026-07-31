@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-07-31
+
+Cross-impl release, coordinated to land at v1.12.0 across go.hocon / ts.hocon /
+rs.hocon / py.hocon so the ecosystem stays on one version line.
+
+**Minor, not patch, and the `.env` changes are BREAKING in both directions**:
+the prefix filter now runs before validation (a file that used to fail may now
+load), a variable name containing whitespace or `#` is refused (a file that used
+to load may now fail), and "whitespace" is now the Unicode `White_Space`
+property rather than `str.isspace()` — so a name containing one of
+U+001C–U+001F is accepted where it used to raise.
+
+The rest: a lone surrogate in JSONC is refused at parse time instead of failing
+later at encode time, deeply nested input raises this library's own error rather
+than `RecursionError`, coinciding sibling keys in YAML are an error rather than
+last-wins, and `load()` no longer trusts caller-supplied value types.
+
+The F-item spec these errors cite is now public at
+[`xx.hocon/docs/format-ingestion-mapping.md`](https://github.com/o3co/xx.hocon/blob/main/docs/format-ingestion-mapping.md);
+it previously lived in a private working scope.
+
+The published version comes from the tag; `pyproject.toml` stays at `0.0.0`.
+
 ### Changed — `.env`: the prefix filter runs first, and names are validated (F1.7)
 
 **BREAKING both ways**: a line the prefix discards is no longer validated (so a
