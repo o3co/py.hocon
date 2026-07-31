@@ -32,8 +32,18 @@ __all__ = ["load", "parse_dotenv", "parse_dotenv_file"]
 SEPARATOR = "__"
 
 #: Segment characters that need no quoting when a path is spelled back out in
-#: an error message. Deliberately conservative — anything else gets quotes.
-_BARE_SEGMENT_CHARS = frozenset("abcdefghijklmnopqrstuvwxyz0123456789_-")
+#: an error message (spec F0.10). Deliberately conservative — anything else
+#: gets quotes. Upper case is included although env segments are folded before
+#: they reach here: the same renderer serves adapters that do not fold, and
+#: quoting ``A`` when HOCON's own grammar accepts it bare is noise.
+_BARE_SEGMENT_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+)
+
+#: Line separators JSON permits raw inside a string. Escaped anyway: enough log
+#: viewers and editors break a line on them that a key could otherwise break the
+#: message reporting it (spec F0.10).
+_JSON_RAW_LINE_SEPARATORS = {"\u2028": "\\u2028", "\u2029": "\\u2029"}
 
 #: ASCII-only case fold (F1.3). Every other codepoint is left alone, so the
 #: mapping is the same in all four implementations rather than inheriting each
@@ -207,19 +217,31 @@ def _render_path(segments: list[str]) -> str:
     ``"foo.bar"``) from ``APP_FOO__BAR`` (two, so ``foo.bar``) — printing the
     dot-joined form for both would erase exactly the difference F1.2 draws.
 
-    The quoted form is produced by :func:`json.dumps`, HOCON quoted strings
-    being JSON string syntax. That escapes control characters too, so a name
-    carrying a newline or a NUL cannot spray unprintables through the error
-    message. ``ensure_ascii`` stays off so a non-ASCII segment is printed as
-    itself — ASCII-only folding (F1.3) means such segments now reach here, and
-    escaping them would drift from go.hocon's ``%q`` and rs.hocon's ``{:?}``.
+    The quoted form is a JSON string literal, HOCON quoted strings being JSON
+    string syntax, and go.hocon and rs.hocon now render the same segment the
+    same way (spec F0.10). ``ensure_ascii`` stays off so a non-ASCII segment
+    prints as itself — ASCII-only folding (F1.3) means such segments reach here
+    in normal use, and escaping them would bury the common case.
+
+    U+2028 and U+2029 are escaped on top of what :func:`json.dumps` does. JSON
+    permits them raw, but they are line separators to enough log viewers and
+    editors that a key holding one could break the very message reporting it —
+    which is the whole reason the other control characters are escaped.
+
+    The result is **not** guaranteed to paste into a getter: no implementation's
+    path parser decodes escapes inside a quoted segment, so ``"a\\nb"`` does not
+    address the key ``a<LF>b``. What it does guarantee, and what a collision
+    message needs, is that two different paths never render alike.
     """
     out: list[str] = []
     for seg in segments:
         if seg and not set(seg) - _BARE_SEGMENT_CHARS:
             out.append(seg)
         else:
-            out.append(json.dumps(seg, ensure_ascii=False))
+            quoted = json.dumps(seg, ensure_ascii=False)
+            for raw, escaped in _JSON_RAW_LINE_SEPARATORS.items():
+                quoted = quoted.replace(raw, escaped)
+            out.append(quoted)
     return ".".join(out)
 
 
