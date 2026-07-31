@@ -21,7 +21,8 @@ Foreign data stays data: a ``${a.b}`` in an ingested value is literal text,
 never a reference (spec F0.2). Ingestion is AST-level — a document is decoded
 and turned into a value tree, never rendered to HOCON text.
 
-See ``docs/specs/format-ingestion-mapping.md`` in the hocon scope.
+See the format-ingestion mapping spec:
+https://github.com/o3co/xx.hocon/blob/main/docs/format-ingestion-mapping.md
 """
 
 from __future__ import annotations
