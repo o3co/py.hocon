@@ -161,6 +161,26 @@ nothing. The spec is now published at
 there ([xx.hocon#81](https://github.com/o3co/xx.hocon/issues/81)). Error text is
 unchanged; only the pointers move.
 
+### Fixed — `.env`: "whitespace" in a name is the Unicode `White_Space` property (F1.7)
+
+`_check_name` used `str.isspace()`, which is **not** the `White_Space`
+property: enumerated over the whole codepoint space, it is `White_Space` plus
+U+001C–U+001F (the C0 file / group / record / unit separators). A name
+containing one of those four raised here and was an ordinary name elsewhere —
+Go's `unicode.IsSpace` and Rust's `char::is_whitespace` are the property
+exactly.
+
+Whether a name is refused must not depend on which stdlib helper an
+implementation reached for; this is the same argument F1.3 makes for ASCII-only
+case folding. The spec now pins the property
+([xx.hocon#81](https://github.com/o3co/xx.hocon/issues/81)) and this refuses
+strictly less than before: `FOO<US>BAR=baz` now yields the key `foo<US>bar`
+instead of raising. Everything `White_Space` covers — including U+0085 (NEL),
+where JavaScript is the outlier in the other direction — is unchanged.
+
+The behaviour being corrected has not been released; the name rule itself
+arrived in this same unreleased window.
+
 ## [1.11.0] - 2026-07-26
 
 ### Fixed

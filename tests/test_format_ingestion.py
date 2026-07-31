@@ -54,7 +54,11 @@ def _ingest(case: dict[str, Any]) -> Config:
         return yaml.parse(text, origin)
     if fmt == "env":
         if case.get("kind") == "dotenv":
-            return env.parse_dotenv(text, origin_description=origin)
+            # `prefix` is optional and only dotenv cases carry it; an env-vars
+            # input names its own prefix inside the JSON document.
+            return env.parse_dotenv(
+                text, case.get("prefix", ""), origin_description=origin
+            )
         fixture = json.loads(text)
         return env.load(fixture["prefix"], fixture["vars"], origin_description=origin)
     raise AssertionError(f"unknown format {fmt}")
