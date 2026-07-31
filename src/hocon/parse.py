@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 
+from ._internal.depth import guard_recursion
 from ._internal.lexer.lexer import tokenize
 from ._internal.os_text import is_undecodable
 from ._internal.parser.ast import AstArray
@@ -18,7 +19,7 @@ from ._internal.parser.parser import parse_tokens
 from ._internal.resolver.resolver import build_tree, contains_placeholders, resolve
 from ._internal.resolver.types import PackageResolver, ResolveOptions
 from .config import Config
-from .errors import ConfigError
+from .errors import ConfigError, ParseError
 from .value import HoconObject
 
 __all__ = ["parse", "parse_file", "parse_string"]
@@ -140,6 +141,38 @@ def _parse_text(
     that error names the file, without globally re-attributing resolver
     errors (which may originate inside included files) to the top-level file.
     """
+    return guard_recursion(
+        lambda: _parse_text_inner(
+            text,
+            base_dir=base_dir,
+            env=env,
+            read_file=read_file,
+            resolve_substitutions=resolve_substitutions,
+            origin_description=origin_description,
+            resolve_from=resolve_from,
+            package_resolver=package_resolver,
+            array_root_origin=array_root_origin,
+        ),
+        # A ParseError, not a ResolveError: the lexer, the parser and the
+        # resolver all recurse per level, and by the time the interpreter gives
+        # out there is no position left to report, so the honest thing to name
+        # is the document rather than a stage.
+        lambda msg: ParseError(msg, 1, 1, origin_description),
+    )
+
+
+def _parse_text_inner(
+    text: str,
+    *,
+    base_dir: str | None,
+    env: dict[str, str] | None,
+    read_file: _ReadFile | None,
+    resolve_substitutions: bool,
+    origin_description: str | None,
+    resolve_from: _ResolveFrom,
+    package_resolver: PackageResolver | None,
+    array_root_origin: str | None,
+) -> Config:
     ast, opts = _build_resolve_context(
         text,
         base_dir,

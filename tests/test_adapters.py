@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import hocon
 from hocon.adapters import AdapterError, env, jsonc, properties, toml, yaml
+from hocon.errors import ConfigError, ParseError
 
 # The yaml adapter's dependency is an extra, so a checkout installed without it
 # can still run everything else.
@@ -464,3 +466,78 @@ def test_used_as_a_substitution_source_under_hocon() -> None:
     cfg = hocon.parse("image = ${services.db.image}", resolve_substitutions=False)
     merged = cfg.with_fallback(base).resolve()
     assert merged.get_string("image") == "postgres:16"
+
+
+# --- depth: nothing outside the documented error types escapes (#18) ---------
+#
+# Two mechanisms, because two different things can be too deep. A *name* that
+# maps to a path is capped, because one name produces one arbitrarily deep
+# chain and 1.5 kB of it used to exhaust the stack. A deeply nested *document*
+# is not capped — refusing a 65-level JSON file would be a claim about the
+# format — but the RecursionError it can still provoke is turned into the error
+# type this library documents.
+
+
+def test_env_refuses_a_name_deeper_than_the_segment_limit() -> None:
+    """rs.hocon caps the same mapping at the same number (its version aborted
+    the process rather than raising)."""
+    assert env.load("APP_", {"APP_" + "__".join(["s"] * 64): "v"}).keys() == ["s"]
+    with pytest.raises(AdapterError, match="over the limit of 64"):
+        env.load("APP_", {"APP_" + "__".join(["s"] * 65): "v"})
+    with pytest.raises(AdapterError, match="over the limit of 64"):
+        env.load("APP_", {"APP_" + "__".join(["s"] * 497): "v"})
+
+
+def test_dotenv_refuses_a_name_deeper_than_the_segment_limit() -> None:
+    with pytest.raises(AdapterError, match="over the limit of 64"):
+        env.parse_dotenv("__".join(["S"] * 65) + "=v\n")
+
+
+def test_properties_refuses_a_key_deeper_than_the_segment_limit() -> None:
+    assert properties.parse(".".join(["k"] * 64) + " = 1").keys() == ["k"]
+    with pytest.raises(ParseError, match="over the limit of 64"):
+        properties.parse(".".join(["k"] * 65) + " = 1")
+
+
+def test_jsonc_reports_a_too_deep_document_as_an_adapter_error() -> None:
+    """The stdlib decoder reaches its recursion limit before anything here
+    does, so the guard has to wrap ``json.loads`` and not only the conversion
+    after it."""
+    assert jsonc.parse('{"a":' * 100 + "1" + "}" * 100).has("a")
+    with pytest.raises(AdapterError, match="nested too deeply"):
+        jsonc.parse('{"a":' * 2000 + "1" + "}" * 2000)
+
+
+def test_from_value_reports_a_too_deep_tree_as_an_adapter_error() -> None:
+    """``from_value`` skips the decoder entirely, so the shared converter needs
+    its own guard rather than relying on ``from_map``'s."""
+    with pytest.raises(AdapterError, match="nested too deeply"):
+        yaml.from_value(_nested_dict(2000))
+
+
+def test_from_map_reports_a_too_deep_tree_as_a_config_error() -> None:
+    """Every adapter funnels through here, so this is the backstop."""
+    with pytest.raises(ConfigError, match="nested too deeply"):
+        hocon.from_map(_nested_dict(2000))
+
+
+def _nested_dict(depth: int) -> dict[str, Any]:
+    inner: Any = 1
+    for _ in range(depth):
+        inner = {"a": inner}
+    assert isinstance(inner, dict)
+    return inner
+
+
+def test_parse_reports_a_too_deep_document_as_a_parse_error() -> None:
+    with pytest.raises(ParseError, match="nested too deeply"):
+        hocon.parse('{"a":' * 2000 + "1" + "}" * 2000)
+
+
+def test_recursion_guard_also_covers_a_cyclic_structure() -> None:
+    """A dict that contains itself hits the same limit from a different shape,
+    so the message names both rather than asserting depth."""
+    cyclic: dict[str, Any] = {}
+    cyclic["self"] = cyclic
+    with pytest.raises(ConfigError, match="or contains a cycle"):
+        hocon.from_map(cyclic)

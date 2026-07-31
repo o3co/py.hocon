@@ -13,6 +13,7 @@ from collections.abc import Callable
 from datetime import date, datetime, time
 from typing import Any
 
+from .._internal.depth import guard_recursion
 from .._internal.int64 import INT64_MAX, INT64_MIN
 from . import AdapterError
 
@@ -26,7 +27,13 @@ def object_root(doc: Any, fmt: str, scalar: Callable[[Any, str], Any]) -> dict[s
         raise AdapterError(
             f"{fmt}: document root is {kind}, but a config root must be an object (spec F0.3)"
         )
-    result = convert(doc, "", fmt, scalar)
+    # `convert` recurses per level and runs before `from_map`'s own guard, so a
+    # tree handed straight to a `from_value` entry point would otherwise leave
+    # as a RecursionError (see _internal.depth).
+    result = guard_recursion(
+        lambda: convert(doc, "", fmt, scalar),
+        lambda msg: AdapterError(f"{fmt}: {msg}"),
+    )
     assert isinstance(result, dict)
     return result
 

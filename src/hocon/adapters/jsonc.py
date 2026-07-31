@@ -12,6 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .._internal.depth import guard_recursion
 from .._internal.text import strip_bom
 from ..config import Config
 from ..value_factory import from_map
@@ -37,7 +38,12 @@ def parse(input_text: str, origin_description: str | None = None) -> Config:
     """Read JSONC text."""
     cleaned = _strip_trailing_commas(strip_comments(strip_bom(input_text)))
     try:
-        doc = json.loads(cleaned)
+        # The stdlib decoder recurses per level and reaches its limit before
+        # anything here does, so the guard has to wrap it rather than only the
+        # conversion below (see _internal.depth).
+        doc = guard_recursion(
+            lambda: json.loads(cleaned), lambda msg: AdapterError(f"jsonc: {msg}")
+        )
     except json.JSONDecodeError as e:
         raise AdapterError(f"jsonc: {e}") from None
     return from_map(object_root(doc, "jsonc", _scalar), origin_description)
