@@ -600,3 +600,38 @@ def test_distinct_paths_render_distinctly() -> None:
         return str(excinfo.value).rsplit("both map to ", 1)[-1]
 
     assert render("foo.bar") != render("foo__bar")
+
+
+# --- F3.5: an unpaired surrogate is an error, mirroring F2.8 -----------------
+
+
+@pytest.mark.parametrize(
+    ("name", "src"),
+    [
+        ("lone high in a value", r'{"a":"\ud800"}'),
+        ("lone low in a value", r'{"a":"\udc00"}'),
+        ("lone high in a key", r'{"\ud800":1}'),
+        ("lone after a valid pair", r'{"a":"😀\ud800"}'),
+        ("high then non-low", r'{"a":"\ud800A"}'),
+        ("nested in an array", r'{"a":[{"b":"\ud800"}]}'),
+    ],
+)
+def test_jsonc_refuses_an_unpaired_surrogate(name: str, src: str) -> None:
+    """A Python str *can* hold one, which is why the stdlib decoder returned it
+    without complaint — but it cannot be encoded as UTF-8, so the failure only
+    arrived when something wrote the value out, far from the parse that
+    admitted it. The properties parser already refused for this reason (F2.8)."""
+    with pytest.raises(AdapterError, match="F3.5"):
+        jsonc.parse(src)
+
+
+def test_jsonc_leaves_valid_documents_alone() -> None:
+    """A valid pair is one astral codepoint, and nothing that merely looks like
+    an escape is mistaken for one."""
+    assert jsonc.parse(r'{"a":"😀"}').get_string("a") == "\U0001f600"
+    assert jsonc.parse('{"a":"\U0001f600"}').get_string("a") == "\U0001f600"
+    assert jsonc.parse(r'{"a":"xAy"}').get_string("a") == "xAy"
+    # `\\` is an escaped backslash, so the `u` after it is text, not an escape —
+    # the value is the six characters `\u0041`, not `A`.
+    assert jsonc.parse(r'{"a":"\\u0041"}').get_string("a") == r"\u0041"
+    assert jsonc.parse(r'{"a":"\\ud800 is text"}').get_string("a") == r"\ud800 is text"
