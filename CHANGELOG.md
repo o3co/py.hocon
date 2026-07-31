@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — `adapters.jsonc`: an unpaired surrogate loaded, then failed later
+
+**BREAKING** (input previously accepted is now refused).
+
+`jsonc.parse(r'{"a":"\\ud800"}')` returned a config holding a lone surrogate. A
+Python `str` can hold one, which is why the stdlib decoder handed it back
+without complaint — but it cannot be encoded as UTF-8, so the failure arrived
+only when something wrote the value out, arbitrarily far from the parse that
+admitted it ([xx.hocon#75](https://github.com/o3co/xx.hocon/issues/75)).
+
+Now an `AdapterError` citing spec F3.5, which mirrors F2.8 — the rule the
+`.properties` parser has enforced for exactly this reason since S23.6. Valid
+surrogate **pairs** still combine into the astral codepoint, and keys are checked
+as well as values: a key no lookup can match is worse than a value, not better.
+
+The check runs on the decoded tree rather than on the source escapes, because a
+surrogate arrives as a code point whatever spelled it, so one pass catches every
+route in.
+
+For the record on the other three: rs.hocon already refused, go.hocon was
+silently substituting U+FFFD and now refuses, and **ts.hocon deliberately
+accepts** — a JavaScript string is UTF-16 like Java's, the same S1.2.6-class
+divergence F2.8 records.
+
 ### Changed — `adapters.env`: two small corrections to how a path is rendered in an error
 
 Rendering is pinned as spec F0.10 so go.hocon, rs.hocon and py.hocon produce the

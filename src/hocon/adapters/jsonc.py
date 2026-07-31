@@ -46,6 +46,7 @@ def parse(input_text: str, origin_description: str | None = None) -> Config:
         )
     except json.JSONDecodeError as e:
         raise AdapterError(f"jsonc: {e}") from None
+    _reject_lone_surrogates(doc)
     return from_map(object_root(doc, "jsonc", _scalar), origin_description)
 
 
@@ -129,3 +130,48 @@ def _strip_trailing_commas(src: str) -> str:
         out.append(c)
         i += 1
     return "".join(out)
+
+
+def _reject_lone_surrogates(doc: Any) -> None:
+    """Refuse an unpaired surrogate anywhere in the decoded document (spec
+    F3.5, mirroring F2.8 for ``.properties``).
+
+    A Python ``str`` *can* hold a lone surrogate, which is why the stdlib
+    decoder hands one back without complaint — but it cannot be encoded as
+    UTF-8, so the failure only arrives when something tries to write the value
+    out, arbitrarily far from the parse that admitted it. The properties parser
+    already refuses one for exactly this reason; this is the same rule for the
+    JSON family.
+
+    Checked on the decoded tree rather than on the escapes in the source: a
+    surrogate reaches here as a code point whatever spelled it, so one pass over
+    the values catches every route in. Keys are checked too — a key no lookup
+    can match is worse than a value, not better.
+
+    rs.hocon already refuses (serde_json does); go.hocon refuses as of the
+    sibling change. ts.hocon deliberately accepts: JavaScript strings are UTF-16
+    like Java's and can hold one, the S1.2.6-class divergence F2.8 records.
+    """
+    stack: list[Any] = [doc]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            _check_no_surrogate(node, "a value")
+        elif isinstance(node, dict):
+            for k, v in node.items():
+                if isinstance(k, str):
+                    _check_no_surrogate(k, "a key")
+                stack.append(v)
+        elif isinstance(node, list):
+            stack.extend(node)
+
+
+def _check_no_surrogate(text: str, where: str) -> None:
+    for ch in text:
+        if 0xD800 <= ord(ch) <= 0xDFFF:
+            kind = "high" if ord(ch) <= 0xDBFF else "low"
+            raise AdapterError(
+                f"jsonc: \\u{ord(ch):04X} in {where} is an unpaired {kind} surrogate; "
+                "it cannot be encoded as UTF-8, so admitting it would defer the "
+                "failure to whenever the value is written out (spec F3.5)"
+            )
