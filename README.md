@@ -66,6 +66,13 @@ cfg = hocon.parse("""
 cfg.get_string("server.host")   # "localhost"
 cfg.get_int("server.port")      # 8080
 cfg.has("server.host")          # True
+
+# Config is a Mapping — dict-style access works throughout
+cfg["server.host"]              # "localhost"
+cfg["database"]                 # {"url": ..., "pool-size": 10}
+cfg.get("server.timeout", 30)   # 30 (default for a missing path)
+"server.port" in cfg            # True
+dict(cfg)                       # plain nested dict of the whole config
 ```
 
 ## Why HOCON?
@@ -110,6 +117,8 @@ making it a strong fit for anything beyond flat key-value config.
 - Deferred resolution lifecycle: `parse(..., resolve_substitutions=False)` →
   `with_fallback` → `resolve()` (Lightbend `parseString` / `withFallback` /
   `resolve()` API)
+- `Config` is a `collections.abc.Mapping`: `cfg[path]`, `path in cfg`,
+  `cfg.get(path, default)`, iteration, `len`, `dict(cfg)`, `**cfg`
 - Zero runtime dependencies (pure stdlib), fully typed (`py.typed`)
 
 ## API Reference
@@ -144,7 +153,8 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 
 | Method | Returns | Raises if |
 |--------|---------|-----------|
-| `get(path)` | value or `None` | — |
+| `get(path, default=None)` | value or `default` | — |
+| `config[path]` | value | `KeyError` when missing |
 | `get_string(path)` | `str` | missing, wrong type, or unresolved |
 | `get_number(path)` | `int \| float` | missing, not numeric, or unresolved |
 | `get_int(path)` | `int` | missing, not numeric, or unresolved |
@@ -166,6 +176,16 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 
 `get_boolean` also accepts `yes`/`no` and `on`/`off`. `get_number` returns an
 `int` for integral lexemes and a `float` otherwise.
+
+`Config` implements `collections.abc.Mapping` over its top-level keys:
+iteration, `len(cfg)`, `dict(cfg)`, `**cfg`, `items()` / `values()` all work.
+`cfg[path]` and `path in cfg` additionally accept dotted path expressions
+(`cfg["server.host"]`); a literal top-level key containing a dot wins over
+path traversal, so every key yielded by iteration can be indexed back.
+Mapping semantics follow `dict`: equality is value-based (a `Config` compares
+equal to an equivalent `dict`), an empty config is falsy, and `Config` is
+unhashable. An explicit HOCON `null` is a *present* value — `cfg.get(path,
+default)` returns `None` for it, and `path in cfg` is `True`.
 
 ### Value factories
 
