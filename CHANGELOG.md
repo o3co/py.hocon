@@ -20,9 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (it does not fall back to the default), matching `dict.get`.
 - `Config.decode(cls, path=None)` — typed decoding into user-defined types,
   mirroring go.hocon `Unmarshal` / `UnmarshalPath`. Dataclasses are built
-  recursively from type hints with per-field key matching
-  (`field(metadata={"hocon": key})` alias → exact → kebab-case → camelCase;
-  `"-"` skips), dataclass defaults for absent keys, an error for an absent
+  recursively from type hints with per-field key matching (an exclusive
+  `field(metadata={"hocon": key})` alias, otherwise exact → kebab-case →
+  camelCase; `"-"` skips), dataclass defaults for absent keys, an error for an absent
   key without a default, and extra keys ignored. Classes exposing
   `model_validate` (Pydantic v2) receive the decoded plain object wholesale.
   Supported hints: nested dataclasses, `list[T]` (S15 numeric-keyed objects

@@ -8,11 +8,13 @@ rs.hocon's serde integration, adapted to Python typing: nested dataclasses,
 durations, ``Period``, ``Enum``, nested ``Config``, and duck-typed delegation
 to Pydantic v2's ``model_validate``.
 
-Field-name resolution for dataclass fields, first match wins:
-``field(metadata={"hocon": key})`` alias → exact name → kebab-case
-(``pool_size`` → ``pool-size``) → camelCase (``pool_size`` → ``poolSize``).
-An alias of ``"-"`` skips the field entirely (it must then have a default),
-mirroring go.hocon's ``hocon:"-"`` tag.
+Field-name resolution for dataclass fields: a ``field(metadata={"hocon":
+key})`` alias, when present, is the *only* key consulted (like go.hocon's
+``hocon:"..."`` tag and serde's ``rename`` — no fallback to the field name).
+Otherwise the exact name, kebab-case (``pool_size`` → ``pool-size``), and
+camelCase (``poolSize``) are tried in order, first match wins. An alias of
+``"-"`` skips the field entirely (it must then have a default), mirroring
+go.hocon's ``hocon:"-"`` tag.
 """
 
 from __future__ import annotations
@@ -127,7 +129,16 @@ def _decode_dataclass(node: HoconValue, target: type, path: str) -> Any:
             continue
         alias = f.metadata.get("hocon") if f.metadata else None
         if alias == "-":
-            continue  # explicitly skipped; the field must carry a default
+            # Explicitly skipped. Enforce the documented default requirement
+            # here so the caller gets a ConfigError with the field path, not a
+            # TypeError out of the dataclass constructor.
+            if f.default is MISSING and f.default_factory is MISSING:
+                skipped = _child(path, f.name)
+                raise ConfigError(
+                    f'field skipped via metadata {{"hocon": "-"}} needs a default: {skipped}',
+                    skipped,
+                )
+            continue
         child: HoconValue | None = None
         found_key: str | None = None
         for cand in _key_candidates(f.name, alias):
