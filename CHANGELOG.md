@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `Config` now implements `collections.abc.Mapping` over its top-level keys:
+  `cfg[path]` (`KeyError` when missing), `path in cfg`, iteration, `len(cfg)`,
+  `dict(cfg)`, `**cfg`, and the `items()` / `values()` views. `cfg[path]` and
+  `path in cfg` accept dotted path expressions in addition to literal top-level
+  keys; a literal key containing a dot wins over path traversal so iteration →
+  indexing always round-trips.
+- `Config.get(path, default=None)` — the `default` is returned when the path is
+  absent. An explicit HOCON `null` is a present value and decodes to `None`
+  (it does not fall back to the default), matching `dict.get`.
+
+### Changed
+
+- As a consequence of the `Mapping` base, `Config` equality is now value-based
+  (two configs with equal decoded content compare equal, as does an equivalent
+  plain `dict`) instead of identity-based, an empty config is now falsy, and
+  `Config` is now unhashable — all matching `dict` semantics.
+- `Config.has(path)` (and the new membership/indexing operations) now check the
+  literal top-level key before path traversal. Behaviour only differs on a
+  document that defines both a quoted top-level key containing a dot and the
+  equivalent nested path.
+
 ## [1.12.0] - 2026-07-31
 
 Cross-impl release, coordinated to land at v1.12.0 across go.hocon / ts.hocon /

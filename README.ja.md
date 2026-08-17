@@ -64,6 +64,13 @@ cfg = hocon.parse("""
 cfg.get_string("server.host")   # "localhost"
 cfg.get_int("server.port")      # 8080
 cfg.has("server.host")          # True
+
+# Config は Mapping — dict スタイルのアクセスがそのまま使える
+cfg["server.host"]              # "localhost"
+cfg["database"]                 # {"url": ..., "pool-size": 10}
+cfg.get("server.timeout", 30)   # 30 (不在パスの default)
+"server.port" in cfg            # True
+dict(cfg)                       # config 全体の素の nested dict
 ```
 
 ## なぜ HOCON？
@@ -104,6 +111,8 @@ attrs 等) に委ねます。HOCON はそれらを仕様に組み込んでおり
 - `.properties` include
 - 遅延解決ライフサイクル: `parse(..., resolve_substitutions=False)` →
   `with_fallback` → `resolve()`
+- `Config` は `collections.abc.Mapping`: `cfg[path]`、`path in cfg`、
+  `cfg.get(path, default)`、イテレーション、`len`、`dict(cfg)`、`**cfg`
 - 外部 runtime 依存ゼロ (pure stdlib)、型付き (`py.typed`)
 
 ## API リファレンス
@@ -138,7 +147,8 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 
 | メソッド | 返り値 | 例外条件 |
 |--------|---------|-----------|
-| `get(path)` | 値 または `None` | — |
+| `get(path, default=None)` | 値 または `default` | — |
+| `config[path]` | 値 | 不在なら `KeyError` |
 | `get_string(path)` | `str` | 不在・型不一致・未解決 |
 | `get_number(path)` | `int \| float` | 不在・非数値・未解決 |
 | `get_int(path)` | `int` | 不在・非数値・未解決 |
@@ -160,6 +170,16 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 
 `get_boolean` は `yes`/`no`・`on`/`off` も受け付けます。`get_number` は整数字句なら
 `int`、それ以外は `float` を返します。
+
+`Config` はトップレベルキーに対する `collections.abc.Mapping` を実装します:
+イテレーション、`len(cfg)`、`dict(cfg)`、`**cfg`、`items()` / `values()` が使えます。
+`cfg[path]` と `path in cfg` はドット記法のパス式も受け付けます
+(`cfg["server.host"]`)。ドットを含むリテラルなトップレベルキーはパス走査より
+優先されるため、イテレーションが返すキーは必ずそのまま index できます。
+Mapping の意味論は `dict` に従います: 等価性は値ベース (`Config` は同内容の
+`dict` と等しい)、空 config は falsy、`Config` は unhashable。明示的な HOCON
+`null` は「存在する値」です — `cfg.get(path, default)` は `None` を返し、
+`path in cfg` は `True` になります。
 
 ### 値ファクトリ
 

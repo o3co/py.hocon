@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -61,7 +62,22 @@ class Period:
     days: int
 
 
-class Config:
+class Config(Mapping[str, Any]):
+    """Read-only :class:`~collections.abc.Mapping` over the top-level keys.
+
+    Iteration / ``len`` / ``dict(config)`` operate on the top-level fields;
+    ``config[path]`` and ``path in config`` additionally accept dotted path
+    expressions (``config["server.host"]``), with a literal top-level key
+    taking precedence over path traversal so that iteration → indexing
+    round-trips for quoted keys that contain dots. Values decode to plain
+    Python objects exactly like :meth:`get` / :meth:`to_object`.
+
+    Being a ``Mapping`` gives dict-style semantics: equality is value-based
+    (two Configs — or a Config and a ``dict`` — compare equal when their
+    decoded content is equal), truthiness is emptiness, and Config is
+    unhashable, all matching ``dict``.
+    """
+
     def __init__(
         self,
         root: HoconObject,
@@ -111,12 +127,36 @@ class Config:
             resolve_opts=resolve_opts,
         )
 
+    # ─── Mapping protocol ─────────────────────────────────────────────────────
+
+    def __getitem__(self, path: str) -> Any:
+        v = self._lookup_key_or_path(path)
+        if v is None:
+            raise KeyError(path)
+        return _hocon_to_py(v)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._root.fields)
+
+    def __len__(self) -> int:
+        return len(self._root.fields)
+
+    def __contains__(self, path: object) -> bool:
+        if not isinstance(path, str):
+            return False
+        return self._lookup_key_or_path(path) is not None
+
     # ─── accessors ────────────────────────────────────────────────────────────
 
-    def get(self, path: str) -> Any:
-        v = self._lookup_node(path)
+    def get(self, path: str, default: Any = None) -> Any:
+        """Decoded value at ``path``, or ``default`` when the path is absent.
+
+        An explicit HOCON ``null`` is a present value and decodes to ``None``
+        (it does not fall back to ``default``), matching ``dict.get``.
+        """
+        v = self._lookup_key_or_path(path)
         if v is None:
-            return None
+            return default
         return _hocon_to_py(v)
 
     def get_value(self, path: str) -> HoconValue | None:
@@ -228,9 +268,11 @@ class Config:
         return [_hocon_to_py(x) for x in v.items]
 
     def has(self, path: str) -> bool:
-        return self._lookup_node(path) is not None
+        return self._lookup_key_or_path(path) is not None
 
-    def keys(self) -> list[str]:
+    # Pre-Mapping API returned a list; kept for backward compatibility over
+    # typeshed's KeysView (iteration / len / `in` work the same on both).
+    def keys(self) -> list[str]:  # type: ignore[override]
         return list(self._root.fields.keys())
 
     def with_fallback(self, fallback: Config | None) -> Config:
@@ -360,6 +402,18 @@ class Config:
             use_system_environment=use_system_environment,
             origin_description=self._origin_description,
         )
+
+    def _lookup_key_or_path(self, path: str) -> HoconValue | None:
+        """Literal top-level key first, then dotted-path traversal.
+
+        The literal branch makes ``config[k]`` work for every ``k`` yielded by
+        iteration, including quoted keys containing dots; on the (pathological)
+        document that defines both, the literal key wins.
+        """
+        v = self._root.fields.get(path)
+        if v is not None:
+            return v
+        return self._lookup_node(path)
 
     def _lookup_node(self, path: str) -> HoconValue | None:
         segments = _split_config_path(path)
