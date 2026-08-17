@@ -211,10 +211,12 @@ default)` returns `None` for it, and `path in cfg` is `True`.
 `cfg.decode(cls, path=None)` builds an instance of `cls` from the config (or
 from the value at `path`), mirroring go.hocon's `Unmarshal` / `UnmarshalPath`:
 
-- **Dataclasses** are constructed recursively from their type hints. HOCON
-  keys are matched per field as `field(metadata={"hocon": key})` alias →
-  exact name → kebab-case (`pool_size` → `pool-size`) → camelCase
-  (`poolSize`), first match wins; `metadata={"hocon": "-"}` skips a field.
+- **Dataclasses** are constructed recursively from their type hints. A
+  `field(metadata={"hocon": key})` alias, when present, is the *only* key
+  consulted (like a go struct tag or serde `rename` — no fallback to the
+  field name); otherwise the exact name, kebab-case (`pool_size` →
+  `pool-size`), and camelCase (`poolSize`) are tried in order, first match
+  wins. `metadata={"hocon": "-"}` skips a field (it must have a default).
   A field whose key is absent uses its dataclass default; without a default
   it is an error. Extra config keys are ignored.
 - **Pydantic v2 models** (any class with `model_validate` — pydantic is never

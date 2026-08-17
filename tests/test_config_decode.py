@@ -103,6 +103,26 @@ def test_metadata_alias() -> None:
     assert parse_string("max-heap = 64").decode(C).size == 64
 
 
+def test_metadata_alias_is_exclusive() -> None:
+    @dataclass
+    class C:
+        size: int = field(metadata={"hocon": "max-heap"})
+
+    # the field name is NOT consulted when an alias is present (go tag /
+    # serde rename semantics); the error names the key that was looked up
+    with pytest.raises(ConfigError, match="max-heap"):
+        parse_string("size = 1").decode(C)
+
+
+def test_metadata_skip_without_default_errors() -> None:
+    @dataclass
+    class C:
+        secret: str = field(metadata={"hocon": "-"})
+
+    with pytest.raises(ConfigError, match="secret"):
+        parse_string("x = 1").decode(C)
+
+
 def test_metadata_skip_alias() -> None:
     @dataclass
     class C:

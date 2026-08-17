@@ -12,7 +12,7 @@ import math
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar, cast, overload
 
 from ._internal.resolver.resolver import (
     build_partial_hocon_from_res_obj,
@@ -391,7 +391,17 @@ class Config(Mapping[str, Any]):
     def to_object(self) -> Any:
         return _hocon_to_py(self._root)
 
-    def decode(self, cls: type[T], path: str | None = None) -> T:
+    # The Any overload keeps typing expressions that are not `type` objects
+    # statically (e.g. `Optional[int]`, unparameterized aliases) usable; plain
+    # classes and subscripted generics like `list[Server]` hit the first
+    # overload and keep full inference.
+    @overload
+    def decode(self, cls: type[T], path: str | None = None) -> T: ...
+
+    @overload
+    def decode(self, cls: Any, path: str | None = None) -> Any: ...
+
+    def decode(self, cls: Any, path: str | None = None) -> Any:
         """Decode the whole config — or the value at ``path`` — into ``cls``.
 
         ``cls`` may be a dataclass (constructed recursively, honouring type
@@ -422,7 +432,7 @@ class Config(Mapping[str, Any]):
             node = found
         if not self._resolved and self._subtree_has_placeholders(path or ""):
             raise NotResolvedError(path or "")
-        return cast("T", decode_node(node, cls, path or ""))
+        return decode_node(node, cls, path or "")
 
     def _render_json_for_test(self) -> str:
         """Test-only: render this resolved Config as canonical JSON (sorted keys,

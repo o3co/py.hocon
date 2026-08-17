@@ -205,10 +205,12 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
 `cfg.decode(cls, path=None)` は config 全体 (または `path` の値) から `cls` の
 インスタンスを構築します。go.hocon の `Unmarshal` / `UnmarshalPath` と同じ契約です:
 
-- **dataclass** は型ヒントから再帰的に構築します。HOCON キーはフィールドごとに
-  `field(metadata={"hocon": key})` alias → 完全一致 → kebab-case
-  (`pool_size` → `pool-size`) → camelCase (`poolSize`) の順で照合し、最初の
-  一致を使います。`metadata={"hocon": "-"}` はフィールドを skip します。
+- **dataclass** は型ヒントから再帰的に構築します。`field(metadata={"hocon":
+  key})` alias がある場合はそのキー**のみ**を照合します (go の struct tag /
+  serde の `rename` と同じで、フィールド名への fallback はしない)。alias が
+  ない場合は 完全一致 → kebab-case (`pool_size` → `pool-size`) → camelCase
+  (`poolSize`) の順で照合し、最初の一致を使います。`metadata={"hocon": "-"}`
+  はフィールドを skip します (default が必須)。
   キーが不在のフィールドは dataclass の default を使い、default がなければ
   エラー。config 側の余分なキーは無視します。
 - **Pydantic v2 モデル** (`model_validate` を持つ任意のクラス — pydantic を
