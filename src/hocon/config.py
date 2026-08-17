@@ -130,6 +130,10 @@ class Config(Mapping[str, Any]):
     # ─── Mapping protocol ─────────────────────────────────────────────────────
 
     def __getitem__(self, path: str) -> Any:
+        # dict parity: a non-str key is simply absent (KeyError), it must not
+        # leak a TypeError out of the path splitter.
+        if not isinstance(path, str):
+            raise KeyError(path)
         v = self._lookup_key_or_path(path)
         if v is None:
             raise KeyError(path)
@@ -154,6 +158,8 @@ class Config(Mapping[str, Any]):
         An explicit HOCON ``null`` is a present value and decodes to ``None``
         (it does not fall back to ``default``), matching ``dict.get``.
         """
+        if not isinstance(path, str):  # dict parity: non-str keys are absent
+            return default
         v = self._lookup_key_or_path(path)
         if v is None:
             return default
