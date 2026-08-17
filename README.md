@@ -75,6 +75,20 @@ cfg.get("server.timeout", 30)   # 30 (default for a missing path)
 dict(cfg)                       # plain nested dict of the whole config
 ```
 
+Or decode straight into your own types:
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Database:
+    url: str
+    pool_size: int   # ← matches `pool-size`
+
+db = cfg.decode(Database, path="database")
+db.pool_size                    # 10, statically typed
+```
+
 ## Why HOCON?
 
 | | `.env` | JSON | YAML | HOCON |
@@ -119,6 +133,10 @@ making it a strong fit for anything beyond flat key-value config.
   `resolve()` API)
 - `Config` is a `collections.abc.Mapping`: `cfg[path]`, `path in cfg`,
   `cfg.get(path, default)`, iteration, `len`, `dict(cfg)`, `**cfg`
+- Typed decoding: `cfg.decode(MyDataclass)` — recursive dataclass
+  construction (kebab-case/camelCase key matching, defaults, `Optional`,
+  `list[T]` / `dict[str, T]`, `timedelta` durations, `Enum`) and Pydantic v2
+  delegation via `model_validate`
 - Zero runtime dependencies (pure stdlib), fully typed (`py.typed`)
 
 ## API Reference
@@ -166,6 +184,7 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `get_config(path)` | `Config` | missing, not an object, or unresolved |
 | `get_list(path)` | `list` | missing, not an array, or unresolved |
 | `get_value(path)` | `HoconValue \| None` | subtree unresolved |
+| `decode(cls, path=None)` | instance of `cls` | missing path/field, type mismatch, or unresolved |
 | `has(path)` | `bool` | — |
 | `keys()` | `list[str]` | — |
 | `with_fallback(fallback)` | `Config` | — |
@@ -186,6 +205,32 @@ Mapping semantics follow `dict`: equality is value-based (a `Config` compares
 equal to an equivalent `dict`), an empty config is falsy, and `Config` is
 unhashable. An explicit HOCON `null` is a *present* value — `cfg.get(path,
 default)` returns `None` for it, and `path in cfg` is `True`.
+
+### Typed decoding
+
+`cfg.decode(cls, path=None)` builds an instance of `cls` from the config (or
+from the value at `path`), mirroring go.hocon's `Unmarshal` / `UnmarshalPath`:
+
+- **Dataclasses** are constructed recursively from their type hints. HOCON
+  keys are matched per field as `field(metadata={"hocon": key})` alias →
+  exact name → kebab-case (`pool_size` → `pool-size`) → camelCase
+  (`poolSize`), first match wins; `metadata={"hocon": "-"}` skips a field.
+  A field whose key is absent uses its dataclass default; without a default
+  it is an error. Extra config keys are ignored.
+- **Pydantic v2 models** (any class with `model_validate` — pydantic is never
+  imported) receive the decoded plain object wholesale and validate it
+  themselves.
+- **Supported hints**: nested dataclasses, `list[T]` (S15 numeric-keyed
+  objects included), `dict[str, T]`, `Optional[T]` / `T | None`, `Any`,
+  `str` / `bool` / `int` / `float`, `Enum` (by value, then by name),
+  `datetime.timedelta` (HOCON durations, e.g. `"10s"`), `Period`, and
+  `Config` (keeps a subtree dynamic). `cls` itself may be any supported
+  expression, e.g. `cfg.decode(list[Server], path="servers")`.
+- **Coercions** follow the typed getters: `bool` accepts `yes`/`on`,
+  `str` accepts any non-null scalar's raw text, and `int` accepts
+  whole-number floats with wholeness derived from the decimal text
+  (`3.0` → `3`, `2.5` → error). HOCON `null` only decodes into an
+  optional field.
 
 ### Value factories
 
@@ -440,10 +485,8 @@ class ServerConfig:
     port: int
 
 cfg = hocon.parse_file("application.conf")
-server = ServerConfig(
-    host=cfg.get_string("server.host"),
-    port=cfg.get_int("server.port"),
-)   # fails fast on startup if a field is missing or the wrong type
+server = cfg.decode(ServerConfig, path="server")
+# fails fast on startup if a field is missing or the wrong type
 ```
 
 ## Format adapters

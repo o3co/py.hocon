@@ -73,6 +73,20 @@ cfg.get("server.timeout", 30)   # 30 (不在パスの default)
 dict(cfg)                       # config 全体の素の nested dict
 ```
 
+自分の型へ直接 decode することもできます:
+
+```python
+from dataclasses import dataclass
+
+@dataclass
+class Database:
+    url: str
+    pool_size: int   # ← `pool-size` にマッチ
+
+db = cfg.decode(Database, path="database")
+db.pool_size                    # 10、静的に型が付く
+```
+
 ## なぜ HOCON？
 
 | | `.env` | JSON | YAML | HOCON |
@@ -113,6 +127,10 @@ attrs 等) に委ねます。HOCON はそれらを仕様に組み込んでおり
   `with_fallback` → `resolve()`
 - `Config` は `collections.abc.Mapping`: `cfg[path]`、`path in cfg`、
   `cfg.get(path, default)`、イテレーション、`len`、`dict(cfg)`、`**cfg`
+- 型付き decode: `cfg.decode(MyDataclass)` — dataclass の再帰構築
+  (kebab-case / camelCase のキーマッチ、default、`Optional`、`list[T]` /
+  `dict[str, T]`、`timedelta` duration、`Enum`) と Pydantic v2 への
+  `model_validate` 委譲
 - 外部 runtime 依存ゼロ (pure stdlib)、型付き (`py.typed`)
 
 ## API リファレンス
@@ -160,6 +178,7 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 | `get_config(path)` | `Config` | 不在・オブジェクトでない・未解決 |
 | `get_list(path)` | `list` | 不在・配列でない・未解決 |
 | `get_value(path)` | `HoconValue \| None` | サブツリー未解決 |
+| `decode(cls, path=None)` | `cls` のインスタンス | パス/フィールド欠落・型不一致・未解決 |
 | `has(path)` | `bool` | — |
 | `keys()` | `list[str]` | — |
 | `with_fallback(fallback)` | `Config` | — |
@@ -180,6 +199,31 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
 `dict` と等しい)、空 config は falsy、`Config` は unhashable。明示的な HOCON
 `null` は「存在する値」です — `cfg.get(path, default)` は `None` を返し、
 `path in cfg` は `True` になります。
+
+### 型付き decode
+
+`cfg.decode(cls, path=None)` は config 全体 (または `path` の値) から `cls` の
+インスタンスを構築します。go.hocon の `Unmarshal` / `UnmarshalPath` と同じ契約です:
+
+- **dataclass** は型ヒントから再帰的に構築します。HOCON キーはフィールドごとに
+  `field(metadata={"hocon": key})` alias → 完全一致 → kebab-case
+  (`pool_size` → `pool-size`) → camelCase (`poolSize`) の順で照合し、最初の
+  一致を使います。`metadata={"hocon": "-"}` はフィールドを skip します。
+  キーが不在のフィールドは dataclass の default を使い、default がなければ
+  エラー。config 側の余分なキーは無視します。
+- **Pydantic v2 モデル** (`model_validate` を持つ任意のクラス — pydantic を
+  import はしない) には decode 済みの素のオブジェクトを丸ごと渡し、検証は
+  モデル側に任せます。
+- **対応ヒント**: ネストした dataclass、`list[T]` (S15 数値キーオブジェクト
+  含む)、`dict[str, T]`、`Optional[T]` / `T | None`、`Any`、
+  `str` / `bool` / `int` / `float`、`Enum` (値 → 名前の順)、
+  `datetime.timedelta` (HOCON duration、例 `"10s"`)、`Period`、`Config`
+  (サブツリーを動的なまま保持)。`cls` 自体も任意の対応式でよく、
+  `cfg.decode(list[Server], path="servers")` のように使えます。
+- **coercion** は型付き getter に従います: `bool` は `yes`/`on` を受理、
+  `str` は非 null スカラーの raw テキストを受理、`int` は整数値の float を
+  受理し、整数性は 10 進テキストから判定します (`3.0` → `3`、`2.5` → エラー)。
+  HOCON `null` は optional なフィールドにしか decode されません。
 
 ### 値ファクトリ
 
@@ -409,10 +453,8 @@ class ServerConfig:
     port: int
 
 cfg = hocon.parse_file("application.conf")
-server = ServerConfig(
-    host=cfg.get_string("server.host"),
-    port=cfg.get_int("server.port"),
-)   # フィールド欠落や型不一致は起動時に fail する
+server = cfg.decode(ServerConfig, path="server")
+# フィールド欠落や型不一致は起動時に fail する
 ```
 
 ## フォーマットアダプタ

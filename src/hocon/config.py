@@ -12,7 +12,7 @@ import math
 import re
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from ._internal.resolver.resolver import (
     build_partial_hocon_from_res_obj,
@@ -45,6 +45,8 @@ from .numeric_array import numeric_object_to_array
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue, ScalarValueType
 
 __all__ = ["Config", "Period"]
+
+T = TypeVar("T")
 
 
 @dataclass(frozen=True)
@@ -388,6 +390,39 @@ class Config(Mapping[str, Any]):
 
     def to_object(self) -> Any:
         return _hocon_to_py(self._root)
+
+    def decode(self, cls: type[T], path: str | None = None) -> T:
+        """Decode the whole config — or the value at ``path`` — into ``cls``.
+
+        ``cls`` may be a dataclass (constructed recursively, honouring type
+        hints, field defaults, and ``field(metadata={"hocon": key})`` aliases),
+        a class exposing ``model_validate`` (Pydantic v2 — the decoded plain
+        object is delegated wholesale), or any supported type expression such
+        as ``list[Server]`` or ``dict[str, int]`` when ``path`` points at a
+        non-object node. Mirrors go.hocon ``Unmarshal`` / ``UnmarshalPath``:
+        a field without a default whose key is absent is an error, extra keys
+        are ignored, and int fields accept whole-number floats (wholeness
+        derived from the decimal text). ``timedelta`` fields parse HOCON
+        durations; :class:`Period` fields parse periods.
+
+        Raises :class:`NotResolvedError` when the decoded subtree still
+        contains unresolved substitutions, and :class:`ConfigError` on a
+        missing path, a missing required field, or a type mismatch.
+        """
+        from .decode import decode_node
+
+        if path is None:
+            node: HoconValue = self._root
+        else:
+            found = self._lookup_node(path)
+            if found is None:
+                if not self._resolved and self._subtree_has_placeholders(path):
+                    raise NotResolvedError(path)
+                raise ConfigError(f"path not found: {path}", path)
+            node = found
+        if not self._resolved and self._subtree_has_placeholders(path or ""):
+            raise NotResolvedError(path or "")
+        return cast("T", decode_node(node, cls, path or ""))
 
     def _render_json_for_test(self) -> str:
         """Test-only: render this resolved Config as canonical JSON (sorted keys,

@@ -18,6 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Config.get(path, default=None)` — the `default` is returned when the path is
   absent. An explicit HOCON `null` is a present value and decodes to `None`
   (it does not fall back to the default), matching `dict.get`.
+- `Config.decode(cls, path=None)` — typed decoding into user-defined types,
+  mirroring go.hocon `Unmarshal` / `UnmarshalPath`. Dataclasses are built
+  recursively from type hints with per-field key matching
+  (`field(metadata={"hocon": key})` alias → exact → kebab-case → camelCase;
+  `"-"` skips), dataclass defaults for absent keys, an error for an absent
+  key without a default, and extra keys ignored. Classes exposing
+  `model_validate` (Pydantic v2) receive the decoded plain object wholesale.
+  Supported hints: nested dataclasses, `list[T]` (S15 numeric-keyed objects
+  included), `dict[str, T]`, `Optional[T]`, `Any`, `str` / `bool` / `int` /
+  `float`, `Enum`, `datetime.timedelta` (HOCON durations), `Period`, and
+  `Config`. `int` fields accept whole-number floats with wholeness derived
+  from the decimal text (xx.hocon#56); HOCON `null` only decodes into
+  optional fields (S17.6). Decoding an unresolved subtree raises
+  `NotResolvedError`.
 
 ### Changed
 
