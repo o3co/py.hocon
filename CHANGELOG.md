@@ -26,9 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain `dict`) instead of identity-based, an empty config is now falsy, and
   `Config` is now unhashable — all matching `dict` semantics.
 - `Config.has(path)` (and the new membership/indexing operations) now check the
-  literal top-level key before path traversal. Behaviour only differs on a
-  document that defines both a quoted top-level key containing a dot and the
-  equivalent nested path.
+  literal top-level key before path traversal. This changes behaviour for
+  documents with a quoted top-level key containing a dot: given `"a.b" = 1`,
+  `has("a.b")` was previously `False` (the argument was interpreted purely as
+  a path) and is now `True`; when both the literal key and the equivalent
+  nested path are defined, the literal key wins.
 
 ## [1.12.0] - 2026-07-31
 

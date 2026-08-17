@@ -53,6 +53,17 @@ def test_getitem_missing_raises_keyerror(cfg: Config) -> None:
         cfg["server.nope"]
 
 
+def test_non_str_keys_behave_like_dict(cfg: Config) -> None:
+    with pytest.raises(KeyError):
+        cfg[42]  # type: ignore[call-overload]  # KeyError, not TypeError
+    assert cfg.get(42, "fallback") == "fallback"  # type: ignore[arg-type]
+
+
+def test_has_finds_literal_dotted_key() -> None:
+    # pre-Mapping has() interpreted the argument purely as a path → False
+    assert parse_string('"a.b" = 1').has("a.b") is True
+
+
 def test_getitem_explicit_null_is_present(cfg: Config) -> None:
     assert cfg["empty-marker"] is None
 
