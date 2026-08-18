@@ -130,6 +130,25 @@ class TestS21_2PowersOfTen:
     def test_large_units_recognised(self, value: str, expected: float) -> None:
         assert _bytes(value) == expected
 
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            # Binary long/short forms of the new large units; counts chosen to
+            # stay under the 2^53 guard (get_bytes rounds the byte result).
+            ("1PiB", 1024**5),
+            ("1pebibyte", 1024**5),
+            ("1pebibytes", 1024**5),
+            ("0.001EiB", round(1e-3 * 1024**6)),
+            ("0.001exbibyte", round(1e-3 * 1024**6)),
+            ("0.000001ZiB", round(1e-6 * 1024**7)),
+            ("0.000001zebibytes", round(1e-6 * 1024**7)),
+            ("0.000000001YiB", round(1e-9 * 1024**8)),
+            ("0.000000001yobibyte", round(1e-9 * 1024**8)),
+        ],
+    )
+    def test_large_binary_units_recognised(self, value: str, expected: float) -> None:
+        assert _bytes(value) == expected
+
     def test_magnitude_past_the_guard_overflows(self) -> None:
         with pytest.raises(OverflowError):
             _bytes("1EB")
@@ -149,6 +168,15 @@ class TestS21_3TwoLetterBinaryPrefixes:
     )
     def test_two_letter_forms(self, unit: str, power: int) -> None:
         assert _bytes(f"1{unit}") == 1024**power
+
+    @pytest.mark.parametrize(
+        ("value", "power", "count"),
+        [("0.001Ei", 6, 1e-3), ("0.000001Zi", 7, 1e-6), ("0.000000001Yi", 8, 1e-9)],
+    )
+    def test_two_letter_large_forms(self, value: str, power: int, count: float) -> None:
+        # Ei/Zi/Yi at count 1 exceed the 2^53 guard; fractional counts pin
+        # unit recognition (get_bytes rounds the byte result).
+        assert _bytes(value) == round(count * 1024**power)
 
     def test_matches_full_spelling(self) -> None:
         assert _bytes("1Ki") == _bytes("1KiB") == 1024

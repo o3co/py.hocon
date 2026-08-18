@@ -225,7 +225,11 @@ _BYTE_UNITS: dict[str, float] = {
     "E": 1_024 ** 6, "e": 1_024 ** 6,
     "Z": 1_024 ** 7, "z": 1_024 ** 7,
     "Y": 1_024 ** 8, "y": 1_024 ** 8,
-    # lowercase short-form aliases
+    # lowercase short-form aliases — a ts-port leniency Lightbend does NOT
+    # share (its multi-letter units are strictly case-sensitive: `kB` parses,
+    # `KB`/`kb` are errors). Deliberately NOT extended to the S21.2 units
+    # added above (`pb`/`eb`/… stay rejected, matching Lightbend); whether the
+    # legacy leniency below survives at all is a queued cross-impl triage.
     "b": 1,
     "kb": 1_000, "kib": 1_024,
     "mb": 1_000_000, "mib": 1_048_576,
@@ -234,6 +238,9 @@ _BYTE_UNITS: dict[str, float] = {
 }
 
 _OUTPUT_BYTE_UNITS: dict[str, float] = {
+    # Deliberately narrower than the INPUT table above: `output_unit` is a
+    # py-side convenience (ts parity), and results at or above 2^53 bytes are
+    # unrepresentable anyway, so PB+ output denominations are not offered.
     "B": 1, "KB": 1_000, "KiB": 1_024, "MB": 1_000_000, "MiB": 1_048_576,
     "GB": 1_000_000_000, "GiB": 1_073_741_824, "TB": 1_000_000_000_000, "TiB": 1_099_511_627_776,
 }
