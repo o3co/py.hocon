@@ -55,6 +55,10 @@ testdata:
 	cp -R "$$tmpdir/testdata/hocon" "$(TESTDATA_DIR)/hocon"; \
 	cp -R "$$tmpdir/expected/hocon" "$(TESTDATA_DIR)/expected"; \
 	cp -R "$$tmpdir/testdata/format-ingestion" "$(TESTDATA_DIR)/format-ingestion"; \
+	if [ -d "$$tmpdir/testdata/emitter-roundtrip" ]; then \
+	  rm -rf "$(TESTDATA_DIR)/emitter-roundtrip"; \
+	  cp -R "$$tmpdir/testdata/emitter-roundtrip" "$(TESTDATA_DIR)/emitter-roundtrip"; \
+	fi; \
 	printf '%s\n' "$$sha" > .xx-hocon-version; \
 	echo "Done. Fetched $$sha"
 

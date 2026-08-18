@@ -137,6 +137,9 @@ making it a strong fit for anything beyond flat key-value config.
   construction (kebab-case/camelCase key matching, defaults, `Optional`,
   `list[T]` / `dict[str, T]`, `timedelta` durations, `Enum`) and Pydantic v2
   delegation via `model_validate`
+- HOCON emitter: `cfg.render_hocon()` renders a resolved config back to
+  HOCON text with a round-trip guarantee (parsing the output reproduces the
+  value tree)
 - Zero runtime dependencies (pure stdlib), fully typed (`py.typed`)
 
 ## API Reference
@@ -192,6 +195,7 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `resolve_with(source, *, ...)` | `Config` | source unresolved, or unresolvable substitution |
 | `is_resolved()` | `bool` | — |
 | `to_object()` | `dict / list / scalar` | — |
+| `render_hocon()` | `str` (HOCON text) | unresolved |
 
 `get_boolean` also accepts `yes`/`no` and `on`/`off`. `get_number` returns an
 `int` for integral lexemes and a `float` otherwise.
@@ -260,6 +264,30 @@ node = cfg.get_value("server")      # HoconValue
 as_object(node)                     # dict[str, HoconValue] | None
 is_scalar(cfg.get_value("server.port"))   # True
 ```
+
+### Rendering HOCON
+
+`render_hocon()` emits a resolved config back as HOCON text. The guarantee is
+the round trip, not the byte format: parsing the output reproduces the value
+tree exactly, so a scalar is quoted whenever leaving it bare would re-parse as
+a different type (`{"port": "8080"}` renders as `port = "8080"`, keeping it a
+string). Root fields are braceless, nested objects render as `key { … }`, and
+an unresolved config raises `NotResolvedError`:
+
+```python
+from hocon import from_map
+
+cfg = from_map({"server": {"host": "localhost", "port": 8080}})
+print(cfg.render_hocon())
+# server {
+#   host = localhost
+#   port = 8080
+# }
+```
+
+Substitutions and comments are not represented — a resolved value tree does
+not carry them. Same contract as go.hocon `RenderHOCON`, ts.hocon
+`renderHocon()`, and rs.hocon `render_hocon()`.
 
 ### Deferred resolution
 
