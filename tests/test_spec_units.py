@@ -1,10 +1,13 @@
-"""Spec verification wave — duration/byte unit items (S18.3, S19.1/S19.2/
-S19.5/S19.6/S19.7, S21.2).
+"""Spec verification wave — duration/byte unit items (S18.3, S19.1–S19.7,
+S21.2/S21.3/S21.4).
 
-Ports the sibling pins for rows this repo carried as 🤷: go.hocon
-``spec_phase5_test.go`` (S18.3, S19.x alias batteries) and the S21.2
-powers-of-10 table from HOCON.md L1382. ``get_duration`` returns
-milliseconds as float (rs Duration parity — see tests/test_units_default.py).
+Ports the sibling pins for rows this repo carried as 🤷 (S18.3, S19.1/S19.2/
+S19.5–S19.7, S21.2) and completes the ⚠️ remainders of S19.3/S19.4 (full
+alias batteries) and S21.3/S21.4 (two-letter and single-letter binary
+ladders). Sources: go.hocon ``spec_phase5_test.go`` and the HOCON.md unit
+tables (L1307–L1385), with Lightbend probes for the contested spellings.
+``get_duration`` returns milliseconds as float (rs Duration parity — see
+tests/test_units_default.py).
 """
 
 import pytest
@@ -37,8 +40,9 @@ class TestS18_3UnitNameLettersOnly:
 
 
 class TestS19DurationAliases:
-    """S19.1 / S19.2 / S19.5 / S19.6 / S19.7 — every documented alias for
-    nanoseconds, microseconds, minutes, hours, and days."""
+    """S19.1–S19.7 — every documented alias for nanoseconds, microseconds,
+    milliseconds, seconds, minutes, hours, and days (plus the `sec`/`secs`
+    rejection Lightbend enforces)."""
 
     @pytest.mark.parametrize("unit", ["ns", "nano", "nanos", "nanosecond", "nanoseconds"])
     def test_s19_1_nanosecond_aliases(self, unit: str) -> None:
