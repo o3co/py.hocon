@@ -220,7 +220,10 @@ def _fold_self_ref_inner(
     if isinstance(v, HoconArray):
         return HoconArray(
             _hv_list(
-                [_fold_self_ref_inner(item, full_key, replacement, allow_prefix) for item in v.items]
+                [
+                    _fold_self_ref_inner(item, full_key, replacement, allow_prefix)
+                    for item in v.items
+                ]
             )
         )
     if isinstance(v, HoconObject):
