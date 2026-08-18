@@ -481,6 +481,7 @@ merged = cfg.with_fallback(base).resolve()
 | `hocon.adapters.properties` | — | `java.util.Properties`。`include` と構文層を共有 |
 | `hocon.adapters.env` | — | prefix 付き名前空間をまとめてマウント。`.env` も読める |
 | `hocon.adapters.jsonc` | — | コメントと trailing comma 付き JSON |
+| `hocon.adapters.json5` | — | JSON5 1.0.0、手書き scanner |
 | `hocon.adapters.toml` | — | Python 3.11 同梱の `tomllib` 経由 |
 | `hocon.adapters.yaml` | `pip install hocon-parser[yaml]` | `ruamel.yaml` 経由 |
 
@@ -522,6 +523,13 @@ subtree だけが完全に見えてしまうためです。prefix の外側は�
 **jsonc — コメントはトークンを分割する。** コメントは空白に置き換えて除去されるため、
 `{"a": 1/*x*/2}` は `{"a": 12}` ではなく構文エラーになります。`//` コメントは LF
 だけでなく CR でも終わります (VS Code が読む方言に合わせています)。
+
+**json5 — 方言の所有者は reference implementation。** 文法は `json5` npm パッケージが
+読む JSON5 1.0.0 です。そのため U+2028/U+2029 は `//` コメントを**終端します**
+(jsonc とは意図的に異なります — あちらの所有者はコメントを素通しします)。マッピング
+仕様の方が厳しい箇所は仕様が勝ちます: `Infinity`/`NaN` はどの綴りでもエラー、16 進・
+10 進の整数は int64 に収まる必要があり、対にならない `\uXXXX` サロゲートはエラー、
+重複キーは HOCON 流 (オブジェクト同士は merge、それ以外は後勝ち) です。
 
 **properties — すべてのキーが普通のキー。** `__proto__` / `constructor` /
 `prototype` も他のキーと同じく値ごと保持されます。Python の `dict` に汚染される

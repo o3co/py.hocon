@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from hocon.adapters import AdapterError, env, jsonc, properties, toml, yaml
+from hocon.adapters import AdapterError, env, json5, jsonc, properties, toml, yaml
 from hocon.config import Config
 
 _ROOT = Path(__file__).parent / "conformance" / "testdata" / "format-ingestion"
@@ -46,6 +46,8 @@ def _ingest(case: dict[str, Any]) -> Config:
     origin = case["id"]
     if fmt == "jsonc":
         return jsonc.parse(text, origin)
+    if fmt == "json5":
+        return json5.parse(text, origin)
     if fmt == "properties":
         return properties.parse(text, origin)
     if fmt == "toml":
