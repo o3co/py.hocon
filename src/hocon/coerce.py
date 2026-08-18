@@ -191,8 +191,13 @@ def parse_period(value: str) -> tuple[int, int, int] | None:
 ByteUnit = str  # 'B' | 'KB' | 'KiB' | 'MB' | 'MiB' | 'GB' | 'GiB' | 'TB' | 'TiB'
 
 _BYTE_UNITS: dict[str, float] = {
-    "B": 1, "byte": 1, "bytes": 1,
-    "KB": 1_000, "kilobyte": 1_000, "kilobytes": 1_000,
+    # S21.1–S21.4 — the EXACT Lightbend unit set (1.4.6 probe, 2026-08-18).
+    # Multi-letter units are case-sensitive: the kilo-decimal spelling is
+    # `kB` (KB/kb are errors), binary prefixes are capital-first (`Ki`, never
+    # `ki`), long forms are lowercase only. Only the bare byte unit (B/b) and
+    # the single-letter -Xmx forms accept both cases.
+    "B": 1, "b": 1, "byte": 1, "bytes": 1,
+    "kB": 1_000, "kilobyte": 1_000, "kilobytes": 1_000,
     "KiB": 1_024, "kibibyte": 1_024, "kibibytes": 1_024,
     "MB": 1_000_000, "megabyte": 1_000_000, "megabytes": 1_000_000,
     "MiB": 1_048_576, "mebibyte": 1_048_576, "mebibytes": 1_048_576,
@@ -225,16 +230,6 @@ _BYTE_UNITS: dict[str, float] = {
     "E": 1_024 ** 6, "e": 1_024 ** 6,
     "Z": 1_024 ** 7, "z": 1_024 ** 7,
     "Y": 1_024 ** 8, "y": 1_024 ** 8,
-    # lowercase short-form aliases — a ts-port leniency Lightbend does NOT
-    # share (its multi-letter units are strictly case-sensitive: `kB` parses,
-    # `KB`/`kb` are errors). Deliberately NOT extended to the S21.2 units
-    # added above (`pb`/`eb`/… stay rejected, matching Lightbend); whether the
-    # legacy leniency below survives at all is a queued cross-impl triage.
-    "b": 1,
-    "kb": 1_000, "kib": 1_024,
-    "mb": 1_000_000, "mib": 1_048_576,
-    "gb": 1_000_000_000, "gib": 1_073_741_824,
-    "tb": 1_000_000_000_000, "tib": 1_099_511_627_776,
 }
 
 _OUTPUT_BYTE_UNITS: dict[str, float] = {
@@ -273,9 +268,9 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
         if abs(num_bytes) > _MAX_SAFE_INTEGER:
             raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
         return num_bytes / divisor
+    # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
+    # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
     mult = _BYTE_UNITS.get(unit)
-    if mult is None:
-        mult = _BYTE_UNITS.get(unit.lower())
     if mult is None:
         return math.nan
     num_bytes_f = num * mult

@@ -162,6 +162,25 @@ class TestS21_2PowersOfTen:
         assert _bytes("1K") == 1024
         assert _bytes("1kB") == 1000
 
+    @pytest.mark.parametrize(
+        "bad",
+        ["1KB", "1kb", "1Kb", "1mB", "1Kilobyte", "1MEGABYTES", "1kiB", "1ki", "1Byte", "1pb"],
+    )
+    def test_lightbend_case_sensitivity_rejections(self, bad: str) -> None:
+        # Lightbend's unit table is case-sensitive: `kB` parses, every case
+        # variant here is an error (probe 2026-08-18). The ts-port
+        # case-insensitive fallback and lowercase alias rows were removed in
+        # the four-impl units audit.
+        with pytest.raises(ConfigError):
+            _bytes(bad)
+
+    def test_two_case_exceptions_kept(self) -> None:
+        # The bare byte unit and the single-letter -Xmx forms accept both
+        # cases, exactly as Lightbend does.
+        assert _bytes("1B") == 1
+        assert _bytes("1b") == 1
+        assert _bytes("1K") == _bytes("1k") == 1024
+
 
 class TestS21_3TwoLetterBinaryPrefixes:
     """S21.3 — Ki/Mi/Gi/... two-letter forms equal their KiB/MiB/... spellings."""
