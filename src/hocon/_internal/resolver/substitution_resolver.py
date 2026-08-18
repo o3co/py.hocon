@@ -36,10 +36,6 @@ from .utils import (
 __all__ = ["SubstitutionResolver"]
 
 
-def _null_scalar() -> HoconScalar:
-    return HoconScalar("null", "null")
-
-
 class SubstitutionResolver:
     def __init__(self, root: ResObj, opts: ResolveOptions) -> None:
         self.root = root

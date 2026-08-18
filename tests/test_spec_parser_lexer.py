@@ -144,8 +144,9 @@ class TestS9TripleQuoted:
         assert parse('x = """\nhello"""').get_string("x") == "\nhello"
 
     def test_s9_3_unicode_escapes_not_interpreted(self) -> None:
-        # Lightbend probe: """aA\n""" → the six characters aA plus
-        # literal backslash-n — escapes stay literal inside triple quotes.
+        # Lightbend probe: escapes stay literal inside triple quotes — the
+        # backslash-u0041 and backslash-n sequences are not decoded, so the
+        # value is the nine source characters verbatim.
         assert parse('x = """a\\u0041\\n"""').get_string("x") == "a\\u0041\\n"
 
     def test_s9_4_trailing_extra_quotes_are_content(self) -> None:

@@ -46,8 +46,8 @@ Status legend follows the shared convention: ✅ test passes / ⚠️ partial /
 ## Item-level matrix
 
 Snapshot: 2026-08-18 (post spec-verification wave — the final 70 🤷 rows were
-pinned by the tests/test_spec_*.py battery, taking 🤷 to **0**; suite: 912
-passed / 1 skipped / 4 xfailed). The wave also fixed four gaps it surfaced
+resolved, taking 🤷 to **0**: 69 pinned by the tests/test_spec_*.py battery
+and S13a.10 reclassified ➖; suite: 924 passed / 1 skipped / 4 xfailed). The wave also fixed four gaps it surfaced
 (triple-quote leading-newline strip S9.2, optional-undefined array element
 S13.12, missing duration aliases S19.1–S19.3, missing byte units S21.2–S21.4)
 and resolved the S13a.10 posture (➖, ts/go rationale). Expected values were

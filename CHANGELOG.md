@@ -23,7 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `get_bytes` now accepts the full spec unit set (S21.2–S21.4): decimal
   `PB`/`EB`/`ZB`/`YB` with their long forms, binary `PiB`–`YiB` with long
   forms, two-letter `Ki`–`Yi`, and single-letter `Z`/`z`/`Y`/`y`. Magnitudes
-  at or above 2^53 bytes still raise the documented overflow guard.
+  at or above 2^53 bytes still raise the documented overflow guard — note the
+  exception-type shift for those spellings: values like `"1EB"` previously
+  raised `ConfigError` (unknown unit) and now raise `OverflowError` (the
+  guard), which is not a `ConfigError` subclass.
 
 - **BREAKING (spec fix, S13a.12): a substitution whose target lies inside the
   field being defined (`foo : ${foo.a}`) now resolves against the field's
