@@ -786,7 +786,7 @@ per-impl here (no period accessor); rs is the reference sibling.
   status: ⚠️ — the bytes-as-base-unit interpretation and the positive-only accessor invariant are pinned; the literal `B`/`b`/`byte`/`bytes` unit spellings are not exercised by any consumed fixture (rs pins them via its `"100 B"` per-impl unit test)
 - **S21.2** Powers of 10 (kB, MB, GB, TB, PB, EB, ZB, YB + long forms) — §Size in bytes format (L1365)
   tests: tests/test_spec_units.py (TestS21_2PowersOfTen: kB–PB at count 1; EB/ZB/YB pinned with fractional counts under the 2^53 guard, short and long forms)
-  status: ✅ — PB/EB/ZB/YB and their long forms were missing from the ported table; added in this branch (Lightbend recognises every unit — its own long-range ceiling mirrors our 2^53 guard).
+  status: ✅ — PB/EB/ZB/YB and their long forms were added in the verification wave; the four-impl units audit (2026-08-18) then aligned the case rules to Lightbend exactly: the kilo-decimal spelling is `kB` (`KB`/`kb` and the old lowercase alias rows are errors), long forms are lowercase only. tests/test_spec_units.py pins both the accepted and rejected sets.
 - **S21.3** Powers of 2 (K/Ki/KiB, M/Mi/MiB, ...) — §Size in bytes format (L1376)
   tests: smoke: test_duration_and_bytes (`1K` → 1024); tests/test_spec_units.py (TestS21_3TwoLetterBinaryPrefixes: Ki–Pi, and Ki == KiB)
   status: ✅ — the two-letter `Ki`/`Mi`/… forms were missing from the ported table (Lightbend accepts `1Pi`/`1Ei` — probe 2026-08-18); added through `Yi` in this branch

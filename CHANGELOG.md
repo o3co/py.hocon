@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BREAKING (spec fix, S21.2–S21.4): byte-unit case now matches the
+  Lightbend reference exactly.** The kilo-decimal spelling is `kB` — `KB`,
+  `kb` and every other case variant the old case-insensitive fallback and
+  lowercase alias rows accepted (`Megabytes`, `mB`, `kiB`, …) are now
+  errors, matching typesafe-config's case-sensitive table (probe
+  2026-08-18). The bare byte unit (`B`/`b`) and single-letter `-Xmx` forms
+  keep both cases, as Lightbend does. Part of the four-impl units audit.
+
 - **BREAKING (spec fix, S9.2): a triple-quoted string whose content starts
   with a newline now preserves it** (`"""<LF>hello"""` → `"\nhello"`, was
   `"hello"`). The ported lexer stripped the leading newline; the Lightbend
