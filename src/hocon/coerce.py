@@ -85,9 +85,12 @@ def coerce_number(value: str) -> float | int | None:
 DurationUnit = str  # 'ns' | 'us' | 'ms' | 's' | 'm' | 'h' | 'd'
 
 _DURATION_UNITS: dict[str, float] = {
-    "ns": 1e-6, "nanosecond": 1e-6, "nanoseconds": 1e-6,
-    "us": 1e-3, "microsecond": 1e-3, "microseconds": 1e-3,
-    "ms": 1, "millisecond": 1, "milliseconds": 1,
+    # S19.1–S19.3: the bare "nano"/"micro"/"milli" (+plural) aliases are part
+    # of the spec's unit lists (HOCON.md L1307–L1309) and accepted by
+    # Lightbend (typesafe-config 1.4.6 probe, 2026-08-18).
+    "ns": 1e-6, "nano": 1e-6, "nanos": 1e-6, "nanosecond": 1e-6, "nanoseconds": 1e-6,
+    "us": 1e-3, "micro": 1e-3, "micros": 1e-3, "microsecond": 1e-3, "microseconds": 1e-3,
+    "ms": 1, "milli": 1, "millis": 1, "millisecond": 1, "milliseconds": 1,
     "s": 1_000, "second": 1_000, "seconds": 1_000,
     "m": 60_000, "minute": 60_000, "minutes": 60_000,
     "h": 3_600_000, "hour": 3_600_000, "hours": 3_600_000,
@@ -197,6 +200,22 @@ _BYTE_UNITS: dict[str, float] = {
     "GiB": 1_073_741_824, "gibibyte": 1_073_741_824, "gibibytes": 1_073_741_824,
     "TB": 1_000_000_000_000, "terabyte": 1_000_000_000_000, "terabytes": 1_000_000_000_000,
     "TiB": 1_099_511_627_776, "tebibyte": 1_099_511_627_776, "tebibytes": 1_099_511_627_776,
+    # S21.2: the spec's powers-of-10 list runs through yottabyte (HOCON.md
+    # L1365); Lightbend recognises every unit (magnitudes past the Java long
+    # range raise its own out-of-range error, matching our 2^53 guard below).
+    "PB": 10**15, "petabyte": 10**15, "petabytes": 10**15,
+    "PiB": 1_024**5, "pebibyte": 1_024**5, "pebibytes": 1_024**5,
+    "EB": 10**18, "exabyte": 10**18, "exabytes": 10**18,
+    "EiB": 1_024**6, "exbibyte": 1_024**6, "exbibytes": 1_024**6,
+    "ZB": 10**21, "zettabyte": 10**21, "zettabytes": 10**21,
+    "ZiB": 1_024**7, "zebibyte": 1_024**7, "zebibytes": 1_024**7,
+    "YB": 10**24, "yottabyte": 10**24, "yottabytes": 10**24,
+    "YiB": 1_024**8, "yobibyte": 1_024**8, "yobibytes": 1_024**8,
+    # S21.3 — two-letter binary prefixes (Ki = KiB = 1024; HOCON.md L1376).
+    # Lightbend probe (1.4.6, 2026-08-18): `1Pi`/`1Ei` parse; Zi/Yi follow the
+    # same table (magnitudes past the long range only raise its range error).
+    "Ki": 1_024, "Mi": 1_024 ** 2, "Gi": 1_024 ** 3, "Ti": 1_024 ** 4,
+    "Pi": 1_024 ** 5, "Ei": 1_024 ** 6, "Zi": 1_024 ** 7, "Yi": 1_024 ** 8,
     # S21.4 — single-letter abbreviations → powers of two (java -Xmx convention).
     "K": 1_024, "k": 1_024,
     "M": 1_024 ** 2, "m": 1_024 ** 2,
@@ -204,6 +223,8 @@ _BYTE_UNITS: dict[str, float] = {
     "T": 1_024 ** 4, "t": 1_024 ** 4,
     "P": 1_024 ** 5, "p": 1_024 ** 5,
     "E": 1_024 ** 6, "e": 1_024 ** 6,
+    "Z": 1_024 ** 7, "z": 1_024 ** 7,
+    "Y": 1_024 ** 8, "y": 1_024 ** 8,
     # lowercase short-form aliases
     "b": 1,
     "kb": 1_000, "kib": 1_024,
