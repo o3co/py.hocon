@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BREAKING (spec fix, S9.2): a triple-quoted string whose content starts
+  with a newline now preserves it** (`"""<LF>hello"""` → `"\nhello"`, was
+  `"hello"`). The ported lexer stripped the leading newline; the Lightbend
+  reference preserves every character between the quotes (probe 2026-08-18).
+- **BREAKING (spec fix, S13.12): an undefined optional substitution in array
+  element position is now omitted** (`[1, ${?missing}, 3]` → `[1, 3]`, was
+  `[1, None, 3]`). Spec HOCON.md L635 and the Lightbend reference both drop
+  the element. A literal `null` element is unaffected.
+- `get_duration` now accepts the bare `nano`/`nanos`, `micro`/`micros`, and
+  `milli`/`millis` unit aliases (S19.1–S19.3) — part of the spec's unit lists
+  and accepted by Lightbend, previously missing from the table.
+- `get_bytes` now accepts the full spec unit set (S21.2–S21.4): decimal
+  `PB`/`EB`/`ZB`/`YB` with their long forms, binary `PiB`–`YiB` with long
+  forms, two-letter `Ki`–`Yi`, and single-letter `Z`/`z`/`Y`/`y`. Magnitudes
+  at or above 2^53 bytes still raise the documented overflow guard.
+
 - **BREAKING (spec fix, S13a.12): a substitution whose target lies inside the
   field being defined (`foo : ${foo.a}`) now resolves against the field's
   "below" value — the merge of the stack beneath the substitution — instead of

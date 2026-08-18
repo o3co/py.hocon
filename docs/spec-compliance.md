@@ -45,11 +45,15 @@ Status legend follows the shared convention: ✅ test passes / ⚠️ partial /
 
 ## Item-level matrix
 
-Snapshot: 2026-07-16 (post conformance-expansion — error-fixture,
-units-default, deferred-resolution, properties-conflict and include-package
-harnesses landed; suite: 306 passed / 1 skipped / 4 xfailed). 🤷 rows are
-behavior ported from ts.hocon (with rs-gap fixes) not yet pinned by a py-side
-test or consumed fixture; they burn down as further expansion waves land.
+Snapshot: 2026-08-18 (post spec-verification wave — the final 70 🤷 rows were
+pinned by the tests/test_spec_*.py battery, taking 🤷 to **0**; suite: 912
+passed / 1 skipped / 4 xfailed). The wave also fixed four gaps it surfaced
+(triple-quote leading-newline strip S9.2, optional-undefined array element
+S13.12, missing duration aliases S19.1–S19.3, missing byte units S21.2–S21.4)
+and resolved the S13a.10 posture (➖, ts/go rationale). Expected values were
+verified against sibling pins and, for every case the wave found ambiguous or
+divergent, against the Lightbend oracle directly (typesafe-config 1.4.6
+probes, 2026-08-18).
 
 In this matrix ⚠️ means **coverage-partial** — a named py test/fixture pins a
 strict subset of the item's surface, with the remainder pending — not a known
@@ -143,8 +147,8 @@ Citation shorthand used on `tests:` lines:
   tests: tests/conformance/test_conformance.py::test_empty_file_parses_to_empty (empty-file/ef01–ef06, `{}` sidecars normative; group also in the main corpus); smoke: test_empty_input_parses_to_empty; tests/test_include_package_fixtures.py::test_package_empty_variant_content_contributes_empty; adapter: test_cli_empty_file_emits_empty_object
   status: ✅ — Corrected 2026-07-23 (xx.hocon E10). The item previously read "Empty file is invalid" — a misreading of the L130-132 JSON baseline as HOCON-normative; the L134 brace-omission relaxation makes an empty document the empty object. The ported `assert_non_empty_document` guard is removed (`_internal/parser/empty_check.py` deleted); empty documents parse to `{}` uniformly at top level and on every include path.
 - **S3.2** Root non-object/non-array is invalid (when explicitly enclosed) — §Omit root braces (L131)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by per-impl unit tests only
+  tests: tests/test_spec_parser_lexer.py (TestS3_2RootScalar: bare string / bare number roots rejected)
+  status: ✅
 - **S3.3** Implicit `{}` when file does not start with `[` or `{` — §Omit root braces (L134)
   tests: corpus: virtually every group fixture is a brace-less root (incidental; e.g. subst-tokenize/st01, numeric-obj-array/na01, key-hyphen-position/kh01)
   status: ✅
@@ -176,38 +180,38 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: every multi-line fixture (incidental; e.g. test04, test05 — comma-less newline-separated fields)
   status: ✅
 - **S5.2** Single trailing comma is allowed and ignored — §Commas (L155)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); no consumed fixture contains a trailing comma (siblings pin via unit tests)
+  tests: tests/test_spec_parser_lexer.py (TestS5CommaRules: trailing comma in array and object)
+  status: ✅
 - **S5.3** Two trailing commas (`[1,2,3,,]`) is invalid — §Commas (L160)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
+  tests: tests/test_spec_parser_lexer.py (TestS5CommaRules: double trailing comma rejected, array and object)
+  status: ✅
 - **S5.4** Leading comma (`[,1,2,3]`) is invalid — §Commas (L161)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
+  tests: tests/test_spec_parser_lexer.py (TestS5CommaRules: leading comma rejected, array and object)
+  status: ✅
 - **S5.5** Two consecutive commas (`[1,,2,3]`) is invalid — §Commas (L162)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
+  tests: tests/test_spec_parser_lexer.py (TestS5CommaRules: consecutive commas rejected)
+  status: ✅
 - **S5.6** Same comma rules apply to object fields — §Commas (L163)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
+  tests: tests/test_spec_parser_lexer.py (TestS5CommaRules: object-field variants of every rule)
+  status: ✅
 
 ### S6. Whitespace
 
 - **S6.1** Unicode Zs/Zl/Zp category characters are whitespace — §Whitespace (L170)
-  tests: —
-  status: 🤷 — ported (ts `isHoconWhitespace` predicate, Phase 6 #1 parity), pending dedicated test (conformance expansion)
+  tests: tests/test_spec_parser_lexer.py (TestS6Whitespace: U+2003/U+2028/U+2029 separate tokens, lexer-level)
+  status: ✅
 - **S6.2** Non-breaking spaces (0x00A0, 0x2007, 0x202F) are whitespace — §Whitespace (L171)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_parser_lexer.py (TestS6Whitespace: U+00A0/U+2007/U+202F separate tokens)
+  status: ✅
 - **S6.3** BOM (0xFEFF) treated as whitespace — §Whitespace (L173)
   tests: corpus: bom (root fixture)
   status: ✅ — start-of-input BOM pinned by fixture; mid-stream BOM-as-whitespace ported but unpinned
 - **S6.4** ASCII control whitespace (tab, vtab, FF, CR, FS, GS, RS, US) — §Whitespace (L174)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_parser_lexer.py (TestS6Whitespace: tab/vtab/FF/CR/FS/GS/RS/US separate tokens)
+  status: ✅
 - **S6.5** "newline" means specifically 0x000A (LF) — §Whitespace (L183)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); no CR/CRLF fixture in the consumed corpus
+  tests: tests/test_spec_parser_lexer.py (TestS6Whitespace: LF separates fields, CRLF works, lone CR emits no newline token)
+  status: ✅
 
 ### S7. Duplicate keys and object merging
 
@@ -224,8 +228,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: test06 (`y=${d}` merged with `{hello:world, foo:10}` → `foo=10`)
   status: ✅
 - **S7.5** Merge: object field in both → recursive merge — §Duplicate keys (L203)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); no consumed fixture has an object-typed field present in both duplicates one level down
+  tests: tests/test_spec_concat_paths.py (TestS7_5RecursiveMerge)
+  status: ✅
 - **S7.6** Intermediate non-object value breaks merge with later object — §Duplicate keys (L207)
   tests: corpus: test09 (`a.q.r.s=${b}` object broken by intermediate `a=${y}`=5; final `a.q` = 10, not an object)
   status: ✅
@@ -251,8 +255,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: unquoted-starts/us01–us14, us16–us30 (29 consumed fixtures — E8 Lightbend-aligned value-position reading); key-hyphen-position/kh01–kh08 (E13 — S8.6 not enforced on key path segments)
   status: ✅ — post-E8 amendment, mirroring rs: value-start `-foo` accepted as unquoted, digit-leading runs coerced at the value layer. Known cross-impl gap us15 (`1e+x`, Lightbend value-parser error): the `+`-reservation mid-unquoted-run is enforced by NO sibling — py consumes the fixture as a strict-xfail tripwire (error: unquoted-starts/us15, `xfail(strict=True)`), mirroring ts.hocon#73 `it.fails` and rs.hocon's `#[should_panic]`; an XPASS fails the run the moment the gap closes.
 - **S8.7** No escape sequences in unquoted strings — §Unquoted strings (L253)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via lexer unit tests
+  tests: tests/test_spec_parser_lexer.py (TestS8_7NoUnquotedEscapes: backslash rejected, never decoded)
+  status: ✅
 - **S8.8** Unquoted strings allow characters outside the forbidden set — §Unquoted strings (L280)
   tests: corpus: unquoted-parens/up01–up06; key-hyphen-position/kh05, kh07 (hyphen-start segments)
   status: ✅
@@ -260,20 +264,20 @@ Citation shorthand used on `tests:` lines:
 ### S9. Multi-line strings
 
 - **S9.1** `"""..."""` triple-quoted string — §Multi-line strings (L291)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by equiv05/triple-quotes.conf, which the py corpus does not consume (no shared expected sidecar)
+  tests: tests/test_spec_parser_lexer.py (TestS9TripleQuoted; expected values Lightbend-probe-verified 2026-08-18)
+  status: ✅
 - **S9.2** Newlines and whitespace preserved literally — §Multi-line strings (L293)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_parser_lexer.py (TestS9TripleQuoted: inner whitespace AND the leading newline preserved)
+  status: ✅ — the ported ts lexer stripped a leading newline (spec deviation; Lightbend preserves it — probe 2026-08-18); the strip was removed in this branch. ts/rs still carry it (cross-impl follow-up).
 - **S9.3** Unicode escapes NOT interpreted inside triple-quoted — §Multi-line strings (L294)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_parser_lexer.py (TestS9TripleQuoted: backslash-u stays literal)
+  status: ✅
 - **S9.4** Scala-style trailing extra quotes are part of string — §Multi-line strings (L300)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_parser_lexer.py (TestS9TripleQuoted: 4- and 5-quote closers put extras in content)
+  status: ✅
 - **S9.5** Unterminated `"""` raises an error — §Multi-line strings (L291-293, by analogy with quoted strings)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_parser_lexer.py (TestS9TripleQuoted: unterminated forms raise ParseError)
+  status: ✅
 
 ### S10. Value concatenation
 
@@ -302,11 +306,11 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: key-hyphen-position/kh01–kh03, kh08 (`foo -bar = 1` → key `"foo -bar"`); path-expr-whitespace/pw04 (`a b.c d = 1`)
   status: ✅
 - **S10.9** `true`/`false` stringify to `"true"`/`"false"` in concat — §String value concatenation (L363)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by equiv01/unquoted.conf (not consumed by py)
+  tests: tests/test_spec_concat_paths.py (TestS10ConcatStringify)
+  status: ✅
 - **S10.10** `null` stringifies to `"null"` in concat — §String value concatenation (L364)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); same missing-fixture gap as S10.9
+  tests: tests/test_spec_concat_paths.py (TestS10ConcatStringify: concat stringifies, single null keeps type)
+  status: ✅
 - **S10.11** Numbers stringify as written in the source file — §String value concatenation (L366)
   tests: smoke: test_substitution (`${a}px` with `a = 1` → `"1px"`); corpus: unquoted-starts/us10, us11 (digit-leading runs keep source form)
   status: ✅
@@ -320,11 +324,11 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: self-ref-lookback/sr07, sr08; env-var-list/ev06–ev08; numeric-obj-array/na03a–na03c
   status: ✅
 - **S10.15** Quoted whitespace between obj/array substitutions is an error — §Concatenation with whitespace (L442)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
+  tests: tests/test_spec_concat_paths.py (TestS10_15QuotedWhitespaceBetweenContainers: array and object variants raise)
+  status: ✅
 - **S10.16** Non-newline whitespace in arrays is concat, not separator — §Arrays without commas or newlines (L447)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); pinned in siblings by equiv01/no-commas.conf (not consumed by py)
+  tests: tests/test_spec_concat_paths.py (TestS10_16WhitespaceInArrays)
+  status: ✅
 - **S10.17** Substitution resolving to an array participates in array concat (`${arr} [x]`) — §Array and object concatenation (L387)
   tests: corpus: env-var-list/ev06, ev07; self-ref-lookback/sr08; numeric-obj-array/na03b
   status: ✅
@@ -347,11 +351,11 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: test11 (quoted numeric keys, `"10"`/`"-10"`), test12 (very long numeric keys)
   status: ✅
 - **S11.4** `10.0foo` → path `[10, 0foo]` — §Path expressions (L496)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
+  tests: tests/test_spec_concat_paths.py (TestS11Paths: 10.0foo → {"10": {"0foo": …}})
+  status: ✅
 - **S11.5** `foo10.0` → path `[foo10, 0]` — §Path expressions (L498)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
+  tests: tests/test_spec_concat_paths.py (TestS11Paths: foo10.0 → {"foo10": {"0": …}})
+  status: ✅
 - **S11.6** Empty path element must be quoted (`a."".b` ok) — §Path expressions (L515)
   tests: corpus: test02 (`"" : { "" : { "" : 42 } }` + `${""."".""}`); subst-tokenize/st09
   status: ✅
@@ -359,14 +363,14 @@ Citation shorthand used on `tests:` lines:
   tests: error: subst-tokenize/st-err08 (`${}` empty path), st-err09 (`${.foo}`), st-err10 (`${foo.}`), st-err11 (`${foo..bar}`); error: path-expr-whitespace/pw06 (trailing dot in key path, `a b. = 1`); error: path-empty-segment/pe01–pe06, pe08 (key-position `a..b` / `.a` / `a...c`); `tests/test_issue68_path_empty_segment.py`
   status: ✅ — the substitution path lexer always enforced this; the key path parser silently dropped empty segments (`a..b: 3` → `{"a":{"b":3}}`) until [xx.hocon#68](https://github.com/o3co/xx.hocon/issues/68).
 - **S11.8** Path expression always stringifies (single `true` → `"true"`) — §Path expressions (L504)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
+  tests: tests/test_spec_concat_paths.py (TestS11Paths: `true` key stringifies)
+  status: ✅
 - **S11.9** Substitutions not allowed inside path expressions — §Path expressions (L479)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
+  tests: tests/test_spec_concat_paths.py (TestS11Paths: subst-only and embedded-subst keys rejected)
+  status: ✅
 - **S11.10** Quoted path segments respected in getter API (e.g. `config.get("foo.\"bar.baz\"")`) — §Path expressions (L485)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); test02 pins the parse side of quoted segments, but this item is about the getter API, which the corpus tree-compare does not exercise
+  tests: tests/test_spec_concat_paths.py (TestS11Paths: get('foo."bar.baz"') hits the quoted segment; unquoted spelling misses)
+  status: ✅
 
 ### S12. Paths as keys
 
@@ -395,14 +399,14 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: subst-tokenize/st15–st17; test05 (`${?play.path}`)
   status: ✅
 - **S13.3** `${?` is exactly 3 chars (no whitespace before `?`) — §Substitutions (L584)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
+  tests: tests/test_spec_substitutions.py (TestS13SubstitutionSyntax: both env states rejected)
+  status: ✅
 - **S13.4** Resolver MAY consult external sources (env vars, system properties) for unresolved substitutions — §Substitutions (L588) (concrete env behavior → S26)
   tests: corpus: env-var-list/ev01 (env consulted via `.env` sidecar); include-env-fallback/iev01
   status: ✅
 - **S13.5** Substitutions are NOT parsed inside quoted strings — §Substitutions (L593)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); no consumed fixture carries `${` inside a quoted string
+  tests: tests/test_spec_substitutions.py (TestS13SubstitutionSyntax)
+  status: ✅
 - **S13.6** Substitution paths are absolute (rooted at config root) — §Substitutions (L603)
   tests: corpus: test02 (`${a.b.c}`, `${""."".""}`); subst-tokenize/st05, st18
   status: ✅
@@ -413,8 +417,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: test06 (`x=${a}` / `x=${b}` delayed merge); self-ref-lookback/sr11 (`foo.d = 4` override seen by `bar.a`)
   status: ✅
 - **S13.9** `null` in config blocks env var lookup — §Substitutions (L618)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests + the Lightbend `ProbeS13_9` canon (tree keeps explicit null)
+  tests: tests/test_spec_substitutions.py (TestS13EnvAndArrayElements: config null wins over env value)
+  status: ✅
 - **S13.10** Required substitution undefined → error — §Substitutions (L627)
   tests: error: test13-reference-bad-substitutions (root fixture)
   status: ✅
@@ -422,8 +426,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: subst-tokenize/st15 (`x=${?missing}` → `{}`); include-env-fallback/iev01 (unset env optional leaves prior default intact)
   status: ✅
 - **S13.12** Optional undefined in array element → element not added — §Substitutions (L635)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); no consumed fixture has `[${?missing}]` in element position (env-variables.conf covers it but has no expected sidecar)
+  tests: tests/test_spec_substitutions.py (TestS13EnvAndArrayElements: [1, ${?missing}, 3] → [1, 3])
+  status: ✅ — the ported resolver nulled the element ([1, null, 3]; Lightbend probe 2026-08-18 yields [1, 3]); fixed in this branch by dropping None-resolved elements. ts/rs share the bug — their ✅ cites equiv04, which contains no array-element case (cross-impl follow-up).
 - **S13.13** Optional undefined in string concat → empty string — §Substitutions (L636)
   tests: corpus: test05 (`module.crud = ${?play.path}/modules/crud` → `"/modules/crud"`); self-ref-lookback/sr01–sr03
   status: ✅
@@ -434,8 +438,8 @@ Citation shorthand used on `tests:` lines:
   tests: dr: dr28 (`a = ${?x}${?y}`, both undefined → field omitted, expected tree `{}`)
   status: ✅
 - **S13.16** Substitutions only in field values / array elements — §Substitutions (L644)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
+  tests: tests/test_spec_substitutions.py (TestS13SubstitutionSyntax: key-position substitution rejected)
+  status: ✅
 - **S13.17** Single-substitution value preserves type — §Substitutions (L648)
   tests: smoke: test_substitution (`get_int("b") == 1` through `${a}`); corpus: subst-tokenize/st01
   status: ✅
@@ -464,20 +468,20 @@ Citation shorthand used on `tests:` lines:
   tests: dr: dr22 (same-source: `foo = ${nonexist}` overridden by `foo = 42` → no error), dr23 (across layers: receiver `foo = 42` hides fallback `foo = ${nonexist}`)
   status: ✅
 - **S13a.6** Cycle inside object `a : { b : ${a} }` → error — §Self-Referential (L688)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); the root `cycle` error fixture is now consumed by the error harness but exercises a circular *include* (`include "cycle.conf"`), not the in-object substitution cycle, so it does not pin this row
+  tests: tests/test_spec_substitutions.py (TestS13aCycles)
+  status: ✅
 - **S13a.7** Cycle inside array `a : [${a}]` → error — §Self-Referential (L689)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_substitutions.py (TestS13aCycles)
+  status: ✅
 - **S13a.8** Two-step cycle `bar : ${foo}; foo : ${bar}` → error — §Self-Referential (L857)
   tests: smoke: test_circular_substitution_raises
   status: ✅
 - **S13a.9** Multi-step cycle `a→b→c→a` → error — §Self-Referential (L862)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_substitutions.py (TestS13aCycles)
+  status: ✅
 - **S13a.10** Substitution memoized by instance, not by path — §Self-Referential (L885)
   tests: —
-  status: 🤷 — ported (ts resolver architecture), pending decision + test: ts/go mark this ➖ (not externally observable through their APIs) while rs pins the observable equal-values constraint with a dedicated test; py has adopted neither posture yet
+  status: ➖ — decision (this wave): py adopts the ts/go posture. The resolver is the ts.hocon architecture port, and memoization-by-instance is not externally observable through the black-box public API (rs pins an observable equal-values constraint its own architecture exposes; py has no equivalent surface).
 - **S13a.11** Object can refer to its own descendant (`bar : { foo : 42, baz : ${bar.foo} }`) — §Self-Referential (L806)
   tests: corpus: test09 (`c = ${x}` then `c = { d: 600, e: ${a}, f: ${b} }` delayed-merge), test10
   status: ✅
@@ -502,11 +506,11 @@ Citation shorthand used on `tests:` lines:
   tests: smoke: test_self_append (`a = [1]; a += 2; a += 3` → `[1, 2, 3]`)
   status: ✅
 - **S13b.2** `+=` on non-array prior value → error — §`+=` field separator (L732)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case, siblings pin via unit tests
+  tests: tests/test_spec_substitutions.py (TestS13bPlusEquals: += on scalar prior raises)
+  status: ✅
 - **S13b.3** `+=` works on first mention of key (no prior `=`) — §`+=` field separator (L734)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
+  tests: tests/test_spec_substitutions.py (TestS13bPlusEquals: no-prior += → [1]; chained → [1, 2])
+  status: ✅
 
 #### S13c. List values from environment variables
 
@@ -551,17 +555,17 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: include-reservation/ir07 (`foo.include = 1`), ir08 (`a = include` value position)
   status: ✅
 - **S14a.7** Whitespace allowed between `include` and resource name (incl. newlines) — §Include syntax (L952)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via unit tests
+  tests: tests/test_spec_includes.py (TestS14aIncludeSyntax: newline and multi-space separators)
+  status: ✅
 - **S14a.8** No value concatenation on include argument — §Include syntax (L957)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_includes.py (TestS14aIncludeSyntax)
+  status: ✅
 - **S14a.9** No substitutions in include argument — §Include syntax (L959)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_includes.py (TestS14aIncludeSyntax)
+  status: ✅
 - **S14a.10** Include argument must be quoted string — §Include syntax (L958)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_includes.py (TestS14aIncludeSyntax: unquoted rejected, quoted accepted)
+  status: ✅
 - **S14a.11** `"include"` (quoted) is just a normal key — §Include syntax (L977)
   tests: corpus: include-reservation/ir06, ir11, ir14 (`"include" = "v"` + `${include}` lookup)
   status: ✅
@@ -577,11 +581,11 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: file-include (`base` + included `foo` + nested-included `bar` merge into one root); include-env-fallback/iev01
   status: ✅
 - **S14b.3** Earlier-in-including value + included → merged/overridden — §Include semantics: merging (L1000)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); no consumed fixture has a same-key conflict between including and included files
+  tests: tests/test_spec_includes.py (TestS14bIncludeMergeOrder: include overrides earlier value; objects merge)
+  status: ✅
 - **S14b.4** Later-in-including value overrides included — §Include semantics: merging (L1004)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); same missing-conflict-fixture gap as S14b.3
+  tests: tests/test_spec_includes.py (TestS14bIncludeMergeOrder)
+  status: ✅
 
 #### S14c. Include semantics: substitution
 
@@ -589,8 +593,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: test10 (test09.conf included under `foo { }` and `bar.nested { }` — its `${x}`/`${y}`/`${a}`/`${b}` references resolve in the nested scopes)
   status: ✅
 - **S14c.2** Original (non-relativized) path also tried as fallback — §Include semantics: substitution (L1048)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); the sibling pin (Lightbend test03) is held out of the py corpus as a JVM-system-property xfail
+  tests: tests/test_spec_includes.py (TestS14c2OriginalPathFallback: root fallback on relativized miss; local hit wins)
+  status: ✅
 
 #### S14d. Include semantics: missing / required
 
@@ -598,23 +602,23 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: file-include (`file("subdir/baz.conf")` and nested `file("bar-file.conf")` unresolved from cwd → silently ignored; expected tree has no `baz`/`bar-file` keys)
   status: ✅
 - **S14d.2** Missing `required(...)` include → error — §Include semantics: missing files (L1057)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_includes.py (TestS14dRequiredInclude: required() miss raises, plain miss silent)
+  status: ✅
 - **S14d.3** Non-missing IO errors NOT swallowed — §Include semantics: missing files (L1069)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); error case
+  tests: tests/test_spec_includes.py (TestS14dRequiredInclude: directory-as-include propagates OSError)
+  status: ✅
 
 #### S14e. Include semantics: file formats & extensions
 
 - **S14e.1** Extensionless basename probes multiple extensions — §Include semantics: file formats (L1080)
-  tests: —
-  status: 🤷 — ported (loader probes `.properties`/`.json`/`.conf`), pending dedicated test (conformance expansion)
+  tests: tests/test_spec_includes.py (TestS14eExtensionlessInclude)
+  status: ✅
 - **S14e.2** Multiple matching extensions all loaded — §Include semantics: file formats (L1088)
-  tests: —
-  status: 🤷 — ported (loader deep-merges all found extensions), pending dedicated test (conformance expansion)
+  tests: tests/test_spec_includes.py (TestS14eExtensionlessInclude: all three extensions merge)
+  status: ✅
 - **S14e.3** Load order: `.properties` → `.json` → `.conf` — §Include semantics: file formats (L1091)
-  tests: —
-  status: 🤷 — ported (loader iterates in exactly this order, last wins), pending dedicated test (conformance expansion)
+  tests: tests/test_spec_includes.py (TestS14eExtensionlessInclude: .conf over .json over .properties)
+  status: ✅
 - **S14e.4** URL include: no extension probing (exact URL only) — §Include semantics: file formats (L1103)
   out-of-scope: URL include unsupported; see S14a.2.
   tests: —
@@ -637,8 +641,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: file-include (nested chain — `subdir/foo.conf`'s `include "bar.conf"` resolves inside `subdir/`, while pytest cwd is the repo root)
   status: ✅
 - **S14f.4** Filesystem: absolute path preserved — §Include semantics: locating (L1152)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); the shared corpus cannot carry absolute paths
+  tests: tests/test_spec_includes.py (TestS14f4AbsolutePath: via parse base_dir and parse_file)
+  status: ✅
 - **S14f.5** Filesystem: fall back to classpath on not-found — §Include semantics: locating (L1158)
   out-of-scope: classpath is JVM-only; see S14a.4.
   tests: —
@@ -658,8 +662,8 @@ Citation shorthand used on `tests:` lines:
 ### S15. Numerically-indexed objects to arrays
 
 - **S15.1** `{"0":"a","1":"b"}` → `["a","b"]` when array context — §Conversion (L1191)
-  tests: —
-  status: 🤷 — ported (`numeric_array.py` wired into `get_list`), pending dedicated test (conformance expansion); the consumed na01 fixture pins only the unconverted tree — the accessor-side conversion assertion lives in sibling per-impl tests
+  tests: tests/test_spec_numeric_conversion.py (TestS15NumericObjectToArray)
+  status: ✅
 - **S15.2** Conversion is lazy (only on type-required access) — §Conversion (L1204)
   tests: corpus: numeric-obj-array/na01, na02 (resolved tree keeps the numeric-keyed object — no eager conversion)
   status: ⚠️ — the "no eager conversion" half is pinned by the tree-compare; the "converts on `get_list` access" half is pending a py accessor test
@@ -667,17 +671,17 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: numeric-obj-array/na03a–na03e; concat-errors/ce09
   status: ✅
 - **S15.4** Empty object NOT converted — §Conversion (L1212)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); accessor-level (na04 pins only the tree side)
+  tests: tests/test_spec_numeric_conversion.py (TestS15NumericObjectToArray: empty object raises on get_list)
+  status: ✅
 - **S15.5** Non-integer keys ignored during conversion — §Conversion (L1214)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); accessor-level (na05 pins only the tree side)
+  tests: tests/test_spec_numeric_conversion.py (TestS15NumericObjectToArray)
+  status: ✅
 - **S15.6** Missing indices compacted in resulting array — §Conversion (L1216)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); accessor-level (na06 pins only the tree side)
+  tests: tests/test_spec_numeric_conversion.py (TestS15NumericObjectToArray)
+  status: ✅
 - **S15.7** Sorted by integer key value — §Conversion (L1216)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); accessor-level (na07 pins only the tree side)
+  tests: tests/test_spec_numeric_conversion.py (TestS15NumericObjectToArray)
+  status: ✅
 
 ### S16. MIME Type
 
@@ -689,17 +693,17 @@ Citation shorthand used on `tests:` lines:
 ### S17. Automatic type conversions
 
 - **S17.1** number → string (JSON-valid form) — §Automatic type conversions (L1235)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); accessor-level coercion untested in py
+  tests: tests/test_spec_numeric_conversion.py (TestS17TypeConversion: int and float to string)
+  status: ✅
 - **S17.2** boolean → string ("true" / "false") — §Automatic type conversions (L1237)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_numeric_conversion.py (TestS17TypeConversion)
+  status: ✅
 - **S17.3** string → number (JSON rules) — §Automatic type conversions (L1238)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_numeric_conversion.py (TestS17TypeConversion: get_int/get_number/get_float on quoted numbers)
+  status: ✅
 - **S17.4** string → bool: `true`/`yes`/`on`/`false`/`no`/`off` — §Automatic type conversions (L1239)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_numeric_conversion.py (TestS17TypeConversion: all six spellings)
+  status: ✅
 - **S17.5** `"null"` → null when null requested — §Automatic type conversions (L1244)
   out-of-scope: none of the sibling implementations (nor py.hocon) has a `get_null()`-equivalent typed accessor; spec L1244 is structurally inapplicable to their API models.
   tests: —
@@ -711,8 +715,8 @@ Citation shorthand used on `tests:` lines:
   tests: period: test_period_non_scalar_rejected
   status: ⚠️ — only `get_period` is pinned; the object-rejection sweep across the other typed accessors is pending
 - **S17.8** array → other (except numeric-indexed): error — §Automatic type conversions (L1255)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_numeric_conversion.py (TestS17TypeConversion: get_string/get_number/get_boolean/get_config on array raise)
+  status: ✅
 
 ### S18. Units format
 
@@ -723,8 +727,8 @@ Citation shorthand used on `tests:` lines:
   tests: period: test_period_leading_trailing_ws, test_period_units (spaced forms); units: ud02–ud04 (leading / trailing / both outer ws), ud08 (ws between number and unit), ub02 (ws-padded bytes); smoke: test_duration_and_bytes (`5s`, `1K` no-space forms)
   status: ✅ — grammar pinned across the period, duration and bytes families in both spaced and no-space forms
 - **S18.3** Unit name letters-only (Unicode L* / `isLetter`) — §Units format (L1287)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings pin via s18_3-style unit tests
+  tests: tests/test_spec_units.py (TestS18_3UnitNameLettersOnly: digit and symbol in unit rejected)
+  status: ✅
 - **S18.4** String with no unit → interpreted with default unit — §Units format (L1290)
   tests: period: test_period_bare_integer_string (up01 scenario), test_period_leading_trailing_ws (up02 scenario); units: ud01–ud06 (duration: bare / ws / fractional / negative no-unit strings → ms default), ub01–ub04 (bytes: bare / ws / fractional-truncated / negative no-unit strings → byte default)
   status: ✅ — ud06 caveat: py returns signed −500 ms for `"-500"` (Lightbend `java.time.Duration` / go.hocon-faithful); rs pins `Err` only because `std::time::Duration` is unsigned (rs-side constraint, documented in rs's CHANGELOG) — the literal rs expectation is kept as a strict-xfail tripwire in `tests/test_units_default.py`, not a py violation
@@ -732,26 +736,26 @@ Citation shorthand used on `tests:` lines:
 ### S19. Duration format
 
 - **S19.1** `ns` / `nano` / `nanos` / `nanosecond` / `nanoseconds` — §Duration format (L1307)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_units.py (TestS19DurationAliases: all five aliases)
+  status: ✅ — the bare `nano`/`nanos` aliases were missing from the ported table (Lightbend accepts them — probe 2026-08-18); added in this branch.
 - **S19.2** `us` / `micro` / `micros` / `microsecond` / `microseconds` — §Duration format (L1308)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_units.py (TestS19DurationAliases: all five aliases)
+  status: ✅ — the bare `micro`/`micros` aliases were missing from the ported table; added in this branch.
 - **S19.3** `ms` / `milli` / `millis` / `millisecond` / `milliseconds` — §Duration format (L1309)
-  tests: units: ud07 (`500ms`, no-space), ud08 (`500 ms`, spaced)
-  status: ✅ — pinned via the `ms` short form in both grammar positions, the same representative pin rs.hocon cites for its ✅ (`"500 ms"`); the `milli`/`millis`/`millisecond`/`milliseconds` long forms are not separately exercised
+  tests: units: ud07 (`500ms`, no-space), ud08 (`500 ms`, spaced); tests/test_spec_units.py (TestS19DurationAliases: all five aliases)
+  status: ✅ — the bare `milli`/`millis` aliases were missing from the ported table (Lightbend accepts them — probe 2026-08-18); added in this branch, and the full alias battery is now exercised
 - **S19.4** `s` / `second` / `seconds` — §Duration format (L1310)
-  tests: smoke: test_duration_and_bytes (`5s` → 5000.0 ms)
-  status: ⚠️ — only the `s` short form is pinned; `second`/`seconds` long forms pending
+  tests: smoke: test_duration_and_bytes (`5s` → 5000.0 ms); tests/test_spec_units.py (TestS19DurationAliases: s/second/seconds, and `sec`/`secs` rejected per Lightbend)
+  status: ✅
 - **S19.5** `m` / `minute` / `minutes` — §Duration format (L1311)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_units.py (TestS19DurationAliases)
+  status: ✅
 - **S19.6** `h` / `hour` / `hours` — §Duration format (L1312)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_units.py (TestS19DurationAliases)
+  status: ✅
 - **S19.7** `d` / `day` / `days` — §Duration format (L1313)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_units.py (TestS19DurationAliases)
+  status: ✅
 - **S19.8** Duration unit names are case sensitive (lowercase only) — §Duration format (L1304)
   tests: period: test_period_uppercase_unit_rejected (`7D`, `7 Days`, `1Y`, `3 Months` rejected); units: ud07, ud08 (positive guard: lowercase `ms` keeps parsing)
   status: ⚠️ — the L1304 lowercase-only rule is pinned on the period accessor, and the lowercase-accepted side of the duration path is now guarded by ud07/ud08; the duration-side uppercase *rejection* (`"5 MS"`, `"100 Seconds"`) is still unpinned
@@ -781,14 +785,14 @@ per-impl here (no period accessor); rs is the reference sibling.
   tests: units: ub01–ub03 (bare / ws-padded / fractional no-unit strings → byte counts via the default unit), ub04 (accessor invariant: negative byte size rejected at `get_bytes`, positive-only per Lightbend)
   status: ⚠️ — the bytes-as-base-unit interpretation and the positive-only accessor invariant are pinned; the literal `B`/`b`/`byte`/`bytes` unit spellings are not exercised by any consumed fixture (rs pins them via its `"100 B"` per-impl unit test)
 - **S21.2** Powers of 10 (kB, MB, GB, TB, PB, EB, ZB, YB + long forms) — §Size in bytes format (L1365)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_units.py (TestS21_2PowersOfTen: kB–PB at count 1; EB/ZB/YB pinned with fractional counts under the 2^53 guard, short and long forms)
+  status: ✅ — PB/EB/ZB/YB and their long forms were missing from the ported table; added in this branch (Lightbend recognises every unit — its own long-range ceiling mirrors our 2^53 guard).
 - **S21.3** Powers of 2 (K/Ki/KiB, M/Mi/MiB, ...) — §Size in bytes format (L1376)
-  tests: smoke: test_duration_and_bytes (`1K` → 1024)
-  status: ⚠️ — only the `K` entry of the powers-of-2 table is pinned; `Ki`/`KiB` and the higher prefixes are pending
+  tests: smoke: test_duration_and_bytes (`1K` → 1024); tests/test_spec_units.py (TestS21_3TwoLetterBinaryPrefixes: Ki–Pi, and Ki == KiB)
+  status: ✅ — the two-letter `Ki`/`Mi`/… forms were missing from the ported table (Lightbend accepts `1Pi`/`1Ei` — probe 2026-08-18); added through `Yi` in this branch
 - **S21.4** Single-letter abbreviations → powers of 2 (java -Xmx convention) — §Size in bytes format (L1385)
   tests: smoke: test_duration_and_bytes (`1K` → 1024, binary not decimal); units: ub05 (`1024K` → 1_048_576 — Lightbend binary ground truth, NOT SI-decimal 1_024_000)
-  status: ⚠️ — the binary rule is pinned for `K` only (now at accessor level via ub05 in addition to smoke); M/G/T/P/E and fractional single-letter cases pend a bsl-style accessor test (the consumed byte-single-letter/bsl01–bsl09 fixtures pin the parse side only — their expected JSON carries the raw strings, `get_bytes` conversion is accessor-level)
+  status: ✅ — the full single-letter ladder is now pinned at accessor level (tests/test_spec_units.py TestS21_4SingleLetterBinary: K–P at count 1, E/Z/Y via fractional counts under the 2^53 guard; `Z`/`z`/`Y`/`y` were missing from the ported table and added in this branch)
 - **S21.5** Fractional values supported (`0.5M`) — §Units format (L1281-1294) + §Size in bytes (L1335-1342)
   tests: units: ub03 (`"1024.5"` → 1024 — fractional accepted, truncated toward zero per Lightbend `BigDecimal.toBigInteger`, NOT rounded), ud05 (duration side: `"500.5"` → 500.5 ms / 500_500_000 ns)
   status: ⚠️ — fractional acceptance and the truncation rule are pinned at accessor level; the fractional-times-multiplier form (`0.5M`/`0.5K` → 512·…) remains accessor-unpinned (bsl09 `0.5K` is consumed parse-side only; rs pins it via its fractional-binary unit tests)
@@ -802,8 +806,8 @@ per-impl here (no period accessor); rs is the reference sibling.
   tests: dr: dr10 (scalar in fallback1 blocks fallback2's object from merging into the receiver object), dr30 (receiver scalar blocks fallback object — barrier in the receiver itself)
   status: ✅
 - **S22.3** Setting key to null clears earlier object value — §Config object merging (L1436)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); the consumed E12 deferred-resolution corpus (dr01–dr30) carries no null-over-object scenario, so this row stays unpinned
+  tests: tests/test_spec_substitutions.py (TestS22_3NullClearsObject: with_fallback both directions + in-document)
+  status: ✅
 
 ### S23. Java properties mapping
 
@@ -811,8 +815,8 @@ per-impl here (no period accessor); rs is the reference sibling.
   tests: pc: pc01, pc02 (shallow `a.b` split), pc03, pc04 (deep `a.b.c` split into nested objects)
   status: ⚠️ — dotted-key splitting into nested objects is pinned via the properties-conflict fixtures; the empty-segment edge (`a..b` → preserved empty-string element) is not exercised by any consumed fixture
 - **S23.2** Empty path elements (leading/trailing) preserved — §Java properties (L1456)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion)
+  tests: tests/test_spec_concat_paths.py (TestS23_2EmptyPathElements: .properties `a.=hello` via include)
+  status: ✅
 - **S23.3** Properties values are always strings — §Java properties (L1471)
   tests: pc: pc01–pc04 (all four expected trees carry string-typed leaves end-to-end; the harness `_norm` distinguishes str from num)
   status: ⚠️ — pinned only for the plain-word values the pc fixtures carry; the discriminating case (a numeric-looking value like `port=8080` staying the string `"8080"`) is pending a dedicated fixture
@@ -857,17 +861,17 @@ per-impl here (no period accessor); rs is the reference sibling.
   tests: —
   status: ➖
 - **S26.4** Env vars always become strings (with auto type conversion) — §Substitution fallback (L1563)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); consumed `.env` sidecars carry only non-numeric values, so string-typing is not distinguishable in the expected trees
+  tests: tests/test_spec_substitutions.py (TestS26_4EnvVarsBecomeStrings: string stored, typed getters convert)
+  status: ✅
 
 ---
 
-Status tally (210 items): ✅ 105 · ⚠️ 16 · ❌ 0 · 🤷 71 · ➖ 18.
-Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **53.8%**;
-in-scope `(✅ + ⚠️·0.5) / (210 − 18)` = **58.9%**. The 🤷 mass (ported but
-unpinned) is the burn-down list for the conformance-fixture expansion; it
-contributes 0 by policy until pinned. The first expansion wave (error-fixture,
-units-default, deferred-resolution, properties-conflict and include-package
-harnesses) burned 🤷 from 95 to 72; the remainder is dominated by items
-siblings pin via per-impl unit tests and by equiv-only fixtures the shared
-corpus does not sidecar.
+Status tally (210 items): ✅ 180 · ⚠️ 13 · ❌ 0 · 🤷 0 · ➖ 17.
+Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **88.8%**;
+in-scope `(✅ + ⚠️·0.5) / (210 − 17)` = **96.6%**. The 🤷 mass is fully burned:
+the first expansion wave (error-fixture, units-default, deferred-resolution,
+properties-conflict and include-package harnesses) took it 95 → 72, and the
+2026-08-18 spec-verification wave (tests/test_spec_*.py) pinned the rest —
+flipping 69 rows to ✅, three ⚠️ rows (S19.4/S21.3/S21.4) to ✅, and settling
+S13a.10 as ➖. The remaining ⚠️ 13 are coverage-partial rows whose remainders
+are named on each row.
