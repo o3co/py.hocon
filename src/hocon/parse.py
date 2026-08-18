@@ -29,7 +29,12 @@ _ResolveFrom = str | list[str] | None
 
 
 def _default_read_file_sync(path: str) -> str:
-    with open(path, encoding="utf-8-sig") as f:
+    # newline="" disables Python's universal-newline translation: a lone CR or
+    # a CRLF inside a triple-quoted string is content the parser must see
+    # verbatim (S9.2; fixture tq04). The default text mode folds both to LF
+    # before the lexer runs, silently corrupting such values — the sibling
+    # implementations read bytes and never had this hazard.
+    with open(path, encoding="utf-8-sig", newline="") as f:
         return f.read()
 
 

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`parse_file` no longer folds CR/CRLF to LF.** Python's default
+  universal-newline text mode translated every lone CR and CRLF to LF before
+  the lexer ran, silently corrupting triple-quoted string content read from
+  files (S9.2 requires it verbatim; the sibling implementations read bytes
+  and never had this hazard). The reader now opens with `newline=""`.
+  Surfaced by the shared tq04 fixture.
+
+### Fixed
+
 - **BREAKING (spec fix, S21.2–S21.4): byte-unit case now matches the
   Lightbend reference exactly.** The kilo-decimal spelling is `kB` — `KB`,
   `kb` and every other case variant the old case-insensitive fallback and
