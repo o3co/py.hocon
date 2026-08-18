@@ -81,6 +81,7 @@ _ROUND_TRIP_CASES: dict[str, dict[str, Any]] = {
     # Keys that cannot be bare.
     "awkward-keys": {
         "a.b": "dotted key",
+        "include": "reserved word must be quoted to round-trip",
         "has space": 1,
         "": "empty key",
         "a=b": True,

@@ -41,7 +41,7 @@ testdata:
 	  exit 1; \
 	fi; \
 	if [ -f .xx-hocon-version ] && [ -d "$(TESTDATA_DIR)/hocon" ] && [ -d "$(TESTDATA_DIR)/expected" ] && \
-	   [ -d "$(TESTDATA_DIR)/format-ingestion" ] && \
+	   [ -d "$(TESTDATA_DIR)/format-ingestion" ] && [ -d "$(TESTDATA_DIR)/emitter-roundtrip" ] && \
 	   [ "$$sha" = "$$(cat .xx-hocon-version)" ]; then \
 	  echo "Conformance corpus up to date ($$sha)"; \
 	  exit 0; \
