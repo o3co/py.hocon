@@ -206,8 +206,6 @@ class _Lexer:
                     value += self._advance()
                 if not closed:
                     raise ParseError("unterminated triple-quoted string", sl, sc)
-                if value.startswith("\n"):
-                    value = value[1:]
                 self._push("triple_string", value, sl, sc, True)
                 continue
 
