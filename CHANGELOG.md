@@ -16,8 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and never had this hazard). The reader now opens with `newline=""`.
   Surfaced by the shared tq04 fixture.
 
-### Fixed
-
 - **BREAKING (spec fix, S21.2–S21.4): byte-unit case now matches the
   Lightbend reference exactly.** The kilo-decimal spelling is `kB` — `KB`,
   `kb` and every other case variant the old case-insensitive fallback and
