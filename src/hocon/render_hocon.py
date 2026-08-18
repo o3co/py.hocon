@@ -102,6 +102,12 @@ _SAFE_UNQUOTED_KEY_RE = re.compile(r"[A-Za-z0-9_-]+")
 
 
 def _render_key(k: str) -> str:
+    # ``include`` is reserved unquoted at the start of a key (S12.5/S14a) —
+    # the parser (and Lightbend: "include keyword is not followed by a quoted
+    # string") rejects ``include = 1``, so the key must be quoted to
+    # round-trip.
+    if k == "include":
+        return _quote_string(k)
     if _SAFE_UNQUOTED_KEY_RE.fullmatch(k):
         return k
     return _quote_string(k)
@@ -124,8 +130,9 @@ def _render_string(s: str) -> str:
 def _quote_string(s: str) -> str:
     # A string containing newlines is triple-quoted when that is unambiguous
     # and lossless: no embedded `"""`, no trailing `"`, and no carriage return
-    # (the parser normalizes CRLF inside triple quotes, which would drop the
-    # `\r`, so those fall through to escaped double quotes below).
+    # (this lexer preserves a CR verbatim — as does Lightbend, probe
+    # 2026-08-19 — but an invisible raw CR inside triple quotes is ambiguous
+    # to readers and editors, so CR strings take the escaped form below).
     if "\n" in s and "\r" not in s and '"""' not in s and not s.endswith('"'):
         return f'"""{s}"""'
     out = ['"']
