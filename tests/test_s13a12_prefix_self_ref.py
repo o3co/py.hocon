@@ -107,3 +107,11 @@ def test_regression_sibling_ref_in_deeper_prior_sees_final_tree() -> None:
         "bar { nested { x = { q: 10 }\na = " + D + "{bar.nested.x}\na = { c: 3 } } }"
     ).to_object()
     assert v["bar"]["nested"]["a"] == {"q": 10, "c": 3}
+
+
+def test_interior_sibling_ref_stays_lazy_final_tree() -> None:
+    # ${a.p.v} sits INSIDE a's object literal — an object-interior sibling
+    # reference, not a value-stack layer. It must keep S13a.14 lazy final-tree
+    # semantics (the allow_prefix narrowing), not fold to a below value.
+    v = parse("a = { p : { v : 1 }, x : " + D + "{a.p.v} }\na = { y : 2 }").to_object()
+    assert v["a"] == {"p": {"v": 1}, "x": 1, "y": 2}
