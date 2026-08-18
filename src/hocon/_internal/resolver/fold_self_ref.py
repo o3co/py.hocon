@@ -184,7 +184,9 @@ def _contains_self_ref_inner(v: ResolverValue, full_key: str, allow_prefix: bool
         return any(_contains_self_ref_inner(f, full_key, False) for f in v.fields.values())
     if isinstance(v, HoconArray):
         return any(_contains_self_ref_inner(item, full_key, allow_prefix) for item in v.items)
-    if isinstance(v, HoconObject):
+    if isinstance(v, HoconObject):  # pragma: no cover — phase 1 converts every
+        # object literal to ResObj (_ast_to_resolver_value), so an unresolved
+        # value never contains a raw HoconObject; kept for walk symmetry.
         return any(_contains_self_ref_inner(f, full_key, False) for f in v.fields.values())
     return False
 
@@ -229,7 +231,7 @@ def _fold_self_ref_inner(
                 ]
             )
         )
-    if isinstance(v, HoconObject):
+    if isinstance(v, HoconObject):  # pragma: no cover — see _contains_self_ref_inner
         return HoconObject(
             _hv_dict(
                 {
@@ -361,7 +363,7 @@ def _fold_optional_self_ref_absent_inner(
                 return None
             items.append(folded)
         return HoconArray(_hv_list(items))
-    if isinstance(v, HoconObject):
+    if isinstance(v, HoconObject):  # pragma: no cover — see _contains_self_ref_inner
         obj_fields: dict[str, ResolverValue] = {}
         for key, value in v.fields.items():
             folded = _fold_optional_self_ref_absent_inner(value, full_key, False)
