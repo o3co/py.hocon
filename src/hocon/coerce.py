@@ -188,6 +188,10 @@ def parse_period(value: str) -> tuple[int, int, int] | None:
     return None
 
 
+# ByteUnit names the OUTPUT-unit tokens accepted by get_bytes(path, unit=...).
+# These are API enum tokens ('KB' = "report the result in kilobytes"), a
+# deliberately separate namespace from the config-text unit SPELLINGS below,
+# which are Lightbend case-sensitive ("kB" parses, "KB" is an error).
 ByteUnit = str  # 'B' | 'KB' | 'KiB' | 'MB' | 'MiB' | 'GB' | 'GiB' | 'TB' | 'TiB'
 
 _BYTE_UNITS: dict[str, float] = {
@@ -233,9 +237,11 @@ _BYTE_UNITS: dict[str, float] = {
 }
 
 _OUTPUT_BYTE_UNITS: dict[str, float] = {
-    # Deliberately narrower than the INPUT table above: `output_unit` is a
-    # py-side convenience (ts parity), and results at or above 2^53 bytes are
-    # unrepresentable anyway, so PB+ output denominations are not offered.
+    # OUTPUT-unit API tokens (see the ByteUnit note above) — not config-text
+    # spellings, so 'KB' here is intentional and unaffected by the S21 case
+    # alignment. Deliberately narrower than the INPUT table: `output_unit` is
+    # a py-side convenience (ts parity), and results at or above 2^53 bytes
+    # are unrepresentable anyway, so PB+ output denominations are not offered.
     "B": 1, "KB": 1_000, "KiB": 1_024, "MB": 1_000_000, "MiB": 1_048_576,
     "GB": 1_000_000_000, "GiB": 1_073_741_824, "TB": 1_000_000_000_000, "TiB": 1_099_511_627_776,
 }
