@@ -107,3 +107,129 @@ def test_regression_sibling_ref_in_deeper_prior_sees_final_tree() -> None:
         "bar { nested { x = { q: 10 }\na = " + D + "{bar.nested.x}\na = { c: 3 } } }"
     ).to_object()
     assert v["bar"]["nested"]["a"] == {"q": 10, "c": 3}
+
+
+def test_interior_sibling_ref_stays_lazy_final_tree() -> None:
+    # ${a.p.v} sits INSIDE a's object literal — an object-interior sibling
+    # reference, not a value-stack layer. It must keep S13a.14 lazy final-tree
+    # semantics (the allow_prefix narrowing), not fold to a below value.
+    v = parse("a = { p : { v : 1 }, x : " + D + "{a.p.v} }\na = { y : 2 }").to_object()
+    assert v["a"] == {"p": {"v": 1}, "x": 1, "y": 2}
+
+
+# --- prior-fold recursion at a save site whose key has no below value ---
+# First definition of `foo` contains a self-ref and is then overwritten:
+# fold_or_skip_prior runs with old=None, so the optional-absent fold walks
+# the container (concat / array / object literal / merged object). Optional
+# self-refs fold to known-absent placeholders; a required one drops the
+# whole prior (nothing "below" can ever satisfy it).
+
+
+def test_first_def_concat_optional_selfref_prior_folds() -> None:
+    got = foo('foo : "x "' + D + "{?foo.a}\nfoo : { a : 1 }")
+    assert got == {"a": 1}
+
+
+def test_first_def_concat_required_selfref_prior_skipped() -> None:
+    got = foo('foo : "x "' + D + "{foo.a}\nfoo : { a : 1 }")
+    assert got == {"a": 1}
+
+
+def test_first_def_array_optional_selfref_prior_folds() -> None:
+    got = foo("foo : [" + D + "{?foo.a}]\nfoo : { a : 1 }")
+    assert got == {"a": 1}
+
+
+def test_first_def_array_required_selfref_prior_skipped() -> None:
+    got = foo("foo : [" + D + "{foo.a}]\nfoo : { a : 1 }")
+    assert got == {"a": 1}
+
+
+def test_first_def_object_interior_optional_exact_selfref_prior_folds() -> None:
+    got = foo("foo : { x : " + D + "{?foo} }\nfoo : 2")
+    assert got == 2
+
+
+def test_first_def_object_interior_required_exact_selfref_prior_skipped() -> None:
+    got = foo("foo : { x : " + D + "{foo} }\nfoo : 2")
+    assert got == 2
+
+
+def test_first_def_merged_obj_optional_selfref_prior_folds() -> None:
+    got = foo("foo : { x : " + D + "{?foo} }\nfoo : { y : 1 }\nfoo : 2")
+    assert got == 2
+
+
+def test_first_def_merged_obj_required_selfref_prior_skipped() -> None:
+    got = foo("foo : { x : " + D + "{foo} }\nfoo : { y : 1 }\nfoo : 2")
+    assert got == 2
+
+
+# --- allow_unresolved keeps the placeholder instead of erroring ---
+
+
+def test_allow_unresolved_keeps_prefix_miss_placeholder() -> None:
+    cfg = parse(
+        "foo : { a : 1 }\nfoo : " + D + "{foo.b}", resolve_substitutions=False
+    ).resolve(allow_unresolved=True)
+    assert "foo" not in cfg.to_object()
+
+
+def test_allow_unresolved_keeps_known_absent_placeholder() -> None:
+    src = "foo : { a : 1 }\nfoo : " + D + "{foo.b}\nfoo : " + D + "{foo.a}"
+    cfg = parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)
+    assert "foo" not in cfg.to_object()
+
+
+# --- `[]`-suffixed substitutions report their own path in the error ---
+# `${foo.b[]}` is surface syntax (the internal form of `+=`), so a REQUIRED
+# list-suffix substitution can reach both undefined-classification errors.
+
+
+def test_required_list_suffix_prefix_miss_error_key() -> None:
+    with pytest.raises(ResolveError, match=r"could not resolve substitution: \$\{foo\.b\[\]\}"):
+        foo("foo : { a : 1 }\nfoo : " + D + "{foo.b[]}")
+
+
+def test_required_list_suffix_known_absent_error_key() -> None:
+    src = "foo : { a : 1 }\nfoo : " + D + "{foo.b[]}\nfoo : " + D + "{foo.a}"
+    with pytest.raises(ResolveError, match=r"could not resolve substitution: \$\{foo\.b\[\]\}"):
+        foo(src)
+
+
+def test_first_def_array_object_literal_optional_selfref_prior_folds() -> None:
+    # Self-ref sits inside an object literal that is itself an array element —
+    # the fold walks array → object interior (exact-match-only there).
+    got = foo("foo : [{ x : " + D + "{?foo} }]\nfoo : { a : 1 }")
+    assert got == {"a": 1}
+
+
+def test_first_def_array_object_literal_required_selfref_prior_skipped() -> None:
+    got = foo("foo : [{ x : " + D + "{foo} }]\nfoo : { a : 1 }")
+    assert got == {"a": 1}
+
+
+def test_prior_fold_leaves_foreign_subst_untouched() -> None:
+    # Prior concat mixes a prefix self-ref with a foreign substitution; the
+    # fold rewrites only the self-ref and passes ${other} through unchanged.
+    src = (
+        "other : 9\nfoo : { a : 1 }\nfoo : "
+        + D
+        + "{foo.a} "
+        + D
+        + "{other}\nfoo : { b : 2 }"
+    )
+    assert foo(src) == {"b": 2}
+
+
+def test_prior_fold_recurses_object_literal_beside_selfref() -> None:
+    # A value-stack self-ref makes the prior foldable; the object literal
+    # sitting beside it is walked (interior refs keep exact-match-only rule).
+    src = (
+        "foo : { a : 1 }\nfoo : ["
+        + D
+        + "{foo.a}, { x : "
+        + D
+        + "{foo} }]\nfoo : { b : 2 }"
+    )
+    assert foo(src) == {"b": 2}

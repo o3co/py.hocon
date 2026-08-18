@@ -154,56 +154,91 @@ def _merge_res_obj_layers(base: ResObj, top: ResObj) -> ResObj:
             out.fields[k] = _merge_res_obj_layers(bv, tv)
         else:
             out.fields[k] = tv
-    out.prior_values = dict(base.prior_values)
-    out.reset_keys = set(base.reset_keys)
+    # Carry BOTH layers' bookkeeping: top's prior_values (its keys' own
+    # delayed-merge chains) win per key over base's, and reset_keys union so
+    # reset markers from either layer survive the splice.
+    out.prior_values = {**base.prior_values, **top.prior_values}
+    out.reset_keys = set(base.reset_keys) | set(top.reset_keys)
     return out
 
 
 def contains_self_ref(v: ResolverValue, full_key: str) -> bool:
+    return _contains_self_ref_inner(v, full_key, True)
+
+
+def _contains_self_ref_inner(v: ResolverValue, full_key: str, allow_prefix: bool) -> bool:
+    """``allow_prefix`` narrows the S13a.12 prefix rule to value-stack
+    positions: it stays true through concat nodes and array elements (the
+    value chain of the field itself) but turns false when descending into
+    object interiors — a substitution nested inside an object literal that
+    references a sibling branch of the same field (``a = { x = ${a.p.v} }``)
+    is a lazy final-tree lookup (S13a.14), NOT a below-lookback."""
     if is_subst(v):
         return not v.known_absent and (
             subst_full_key(v) == full_key
-            or prefix_self_ref_remainder(v, full_key) is not None
+            or (allow_prefix and prefix_self_ref_remainder(v, full_key) is not None)
         )
     if is_concat(v):
-        return any(contains_self_ref(n, full_key) for n in v.nodes)
+        return any(_contains_self_ref_inner(n, full_key, allow_prefix) for n in v.nodes)
     if is_res_obj(v):
-        return any(contains_self_ref(f, full_key) for f in v.fields.values())
+        return any(_contains_self_ref_inner(f, full_key, False) for f in v.fields.values())
     if isinstance(v, HoconArray):
-        return any(contains_self_ref(item, full_key) for item in v.items)
-    if isinstance(v, HoconObject):
-        return any(contains_self_ref(f, full_key) for f in v.fields.values())
+        return any(_contains_self_ref_inner(item, full_key, allow_prefix) for item in v.items)
+    if isinstance(v, HoconObject):  # pragma: no cover — phase 1 converts every
+        # object literal to ResObj (_ast_to_resolver_value), so an unresolved
+        # value never contains a raw HoconObject; kept for walk symmetry.
+        return any(_contains_self_ref_inner(f, full_key, False) for f in v.fields.values())
     return False
 
 
 def fold_self_ref(
     v: ResolverValue, full_key: str, replacement: ResolverValue
 ) -> ResolverValue:
+    return _fold_self_ref_inner(v, full_key, replacement, True)
+
+
+def _fold_self_ref_inner(
+    v: ResolverValue, full_key: str, replacement: ResolverValue, allow_prefix: bool
+) -> ResolverValue:
+    """See :func:`_contains_self_ref_inner` for the ``allow_prefix`` rule."""
     if is_subst(v):
         if subst_full_key(v) == full_key:
             return replacement
-        remainder = prefix_self_ref_remainder(v, full_key)
-        if remainder is not None:
-            return _fold_prefix_self_ref(v, replacement, remainder)
+        if allow_prefix:
+            remainder = prefix_self_ref_remainder(v, full_key)
+            if remainder is not None:
+                return _fold_prefix_self_ref(v, replacement, remainder)
         return v
     if is_concat(v):
         return ConcatPlaceholder(
-            [fold_self_ref(n, full_key, replacement) for n in v.nodes], v.line, v.col
+            [_fold_self_ref_inner(n, full_key, replacement, allow_prefix) for n in v.nodes],
+            v.line,
+            v.col,
         )
     if is_res_obj(v):
         out = ResObj()
         for k, val in v.fields.items():
-            out.fields[k] = fold_self_ref(val, full_key, replacement)
+            out.fields[k] = _fold_self_ref_inner(val, full_key, replacement, False)
         out.prior_values = dict(v.prior_values)
         out.reset_keys = set(v.reset_keys)
         return out
     if isinstance(v, HoconArray):
         return HoconArray(
-            _hv_list([fold_self_ref(item, full_key, replacement) for item in v.items])
+            _hv_list(
+                [
+                    _fold_self_ref_inner(item, full_key, replacement, allow_prefix)
+                    for item in v.items
+                ]
+            )
         )
-    if isinstance(v, HoconObject):
+    if isinstance(v, HoconObject):  # pragma: no cover — see _contains_self_ref_inner
         return HoconObject(
-            _hv_dict({k: fold_self_ref(val, full_key, replacement) for k, val in v.fields.items()})
+            _hv_dict(
+                {
+                    k: _fold_self_ref_inner(val, full_key, replacement, False)
+                    for k, val in v.fields.items()
+                }
+            )
         )
     return v
 
@@ -280,8 +315,16 @@ def fold_or_skip_prior(
 def _fold_optional_self_ref_absent(
     v: ResolverValue, full_key: str
 ) -> ResolverValue | None:
+    return _fold_optional_self_ref_absent_inner(v, full_key, True)
+
+
+def _fold_optional_self_ref_absent_inner(
+    v: ResolverValue, full_key: str, allow_prefix: bool
+) -> ResolverValue | None:
+    """See :func:`_contains_self_ref_inner` for the ``allow_prefix`` rule."""
     if is_subst(v) and (
-        subst_full_key(v) == full_key or prefix_self_ref_remainder(v, full_key) is not None
+        subst_full_key(v) == full_key
+        or (allow_prefix and prefix_self_ref_remainder(v, full_key) is not None)
     ):
         if not v.optional:
             return None
@@ -297,7 +340,7 @@ def _fold_optional_self_ref_absent(
     if is_concat(v):
         nodes: list[ResolverValue] = []
         for node in v.nodes:
-            folded = _fold_optional_self_ref_absent(node, full_key)
+            folded = _fold_optional_self_ref_absent_inner(node, full_key, allow_prefix)
             if folded is None:
                 return None
             nodes.append(folded)
@@ -305,7 +348,7 @@ def _fold_optional_self_ref_absent(
     if is_res_obj(v):
         out = ResObj()
         for key, value in v.fields.items():
-            folded = _fold_optional_self_ref_absent(value, full_key)
+            folded = _fold_optional_self_ref_absent_inner(value, full_key, False)
             if folded is None:
                 return None
             out.fields[key] = folded
@@ -315,15 +358,15 @@ def _fold_optional_self_ref_absent(
     if isinstance(v, HoconArray):
         items: list[ResolverValue] = []
         for item in v.items:
-            folded = _fold_optional_self_ref_absent(item, full_key)
+            folded = _fold_optional_self_ref_absent_inner(item, full_key, allow_prefix)
             if folded is None:
                 return None
             items.append(folded)
         return HoconArray(_hv_list(items))
-    if isinstance(v, HoconObject):
+    if isinstance(v, HoconObject):  # pragma: no cover — see _contains_self_ref_inner
         obj_fields: dict[str, ResolverValue] = {}
         for key, value in v.fields.items():
-            folded = _fold_optional_self_ref_absent(value, full_key)
+            folded = _fold_optional_self_ref_absent_inner(value, full_key, False)
             if folded is None:
                 return None
             obj_fields[key] = folded
