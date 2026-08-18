@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-08-19
+
 ### Fixed
 
 - **`parse_file` no longer folds CR/CRLF to LF.** Python's default
