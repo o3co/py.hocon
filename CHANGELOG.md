@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **BREAKING (spec fix, S13a.12): a substitution whose target lies inside the
+  field being defined (`foo : ${foo.a}`) now resolves against the field's
+  "below" value — the merge of the stack beneath the substitution — instead of
+  the final tree.** The spec example `foo:{a:{c:1}}; foo:${foo.a}; foo:{a:2}`
+  now yields `{a:2, c:1}` (was `{a:2}`, dropping `c`), and the two-layer form
+  now resolves instead of erroring. A required prefix self-ref with nothing
+  below errors with the undefined classification; an optional one vanishes
+  transparently. Found by a cross-impl probe — all four siblings shared the
+  gap and the fixes land in lockstep with ts.hocon.
+
 ### Added
 
 - `Config` now implements `collections.abc.Mapping` over its top-level keys:

@@ -482,8 +482,13 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: test09 (`c = ${x}` then `c = { d: 600, e: ${a}, f: ${b} }` delayed-merge), test10
   status: ✅
 - **S13a.12** Self-ref in path expression `${foo.a}` resolves to "below" — §Self-Referential (L791)
-  tests: —
-  status: 🤷 — ported, pending dedicated test (conformance expansion); siblings cite Lightbend test06 here, but that association is indirect (test06 exercises delayed merge, not the L791 `foo : ${foo.a}` shape) — a direct py pin test is preferred over inheriting it
+  tests: tests/test_s13a12_prefix_self_ref.py
+  status: ✅ — Fixed 2026-08-18. The 🤷 recorded here (with its note that the siblings'
+  test06 citation was indirect) turned out exactly right: a cross-impl probe showed the
+  L791 example yielded `{a:2}` (c lost) in all four siblings — the prefix direction
+  (`foo` ⊏ `foo.a`) was missing from self-reference detection everywhere. Fixed in
+  lockstep with ts.hocon (fold-side prefix folding with layer merge; resolve-side prior
+  navigation with undefined semantics on a miss).
 - **S13a.13** `a = ${?a}foo` resolves to `"foo"` (look-back undefined) — §Self-Referential (L841)
   tests: corpus: self-ref-lookback/sr01–sr04, sr06–sr16 (15 consumed fixtures; the required-form error fixture sr05 is consumed by the error harness — see S13a.3)
   status: ✅
