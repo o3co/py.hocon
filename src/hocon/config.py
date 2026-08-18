@@ -42,6 +42,7 @@ from .coerce import (
 )
 from .errors import ConfigError, NotResolvedError
 from .numeric_array import numeric_object_to_array
+from .render_hocon import render_root
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue, ScalarValueType
 
 __all__ = ["Config", "Period"]
@@ -433,6 +434,30 @@ class Config(Mapping[str, Any]):
         if not self._resolved and self._subtree_has_placeholders(path or ""):
             raise NotResolvedError(path or "")
         return decode_node(node, cls, path or "")
+
+    def render_hocon(self) -> str:
+        """Render this resolved Config as HOCON text (E18).
+
+        The output round-trips: parsing it back yields the same value tree.
+        That is the correctness contract, not byte-for-byte formatting — a
+        scalar is quoted whenever leaving it bare would re-parse as a
+        different type (a string ``"8080"`` becomes ``"8080"``, not ``8080``),
+        and left bare only when it provably cannot.
+
+        The Config must be resolved and hold only data (objects, arrays,
+        string / number / boolean / null scalars) — exactly what
+        :func:`~hocon.from_map` and the format adapters produce. An unresolved
+        Config raises :class:`NotResolvedError`; substitutions have no textual
+        round trip through a value tree. Source comments are not represented —
+        a value tree does not carry them.
+
+        The root object's fields are emitted without enclosing braces, nested
+        objects as ``key { … }``, arrays as newline-separated ``[ … ]``,
+        indented two spaces.
+        """
+        if not self._resolved:
+            raise NotResolvedError("")
+        return render_root(self._root)
 
     def _render_json_for_test(self) -> str:
         """Test-only: render this resolved Config as canonical JSON (sorted keys,

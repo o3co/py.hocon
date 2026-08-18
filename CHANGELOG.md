@@ -59,6 +59,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   objects merge, otherwise last-wins (F0.7). U+2028/U+2029 terminate `//`
   comments (deliberately unlike jsonc, whose dialect owner ends comments at
   LF/CR only). Ported in lockstep with go.hocon#193 and the ts/rs siblings.
+- `Config.render_hocon()` — renders a resolved Config back as HOCON text
+  (E18). The correctness contract is the round trip, not the byte format:
+  `parse(render_hocon())` yields the same value tree, with a scalar quoted
+  whenever leaving it bare would re-parse as a different type (a string
+  `"8080"` stays a string, `${…}` look-alikes stay literal). Root fields are
+  emitted braceless, nested objects as `key { … }`, arrays newline-separated,
+  two-space indent; multiline strings are triple-quoted when lossless. An
+  unresolved Config raises `NotResolvedError`. Lockstep with go.hocon v1.11.0
+  `RenderHOCON` (the reference implementation) and the ts.hocon / rs.hocon
+  ports; verified against the shared xx.hocon `emitter-roundtrip` corpus
+  (rt01–rt10, synced by `make testdata`).
 - `Config` now implements `collections.abc.Mapping` over its top-level keys:
   `cfg[path]` (`KeyError` when missing), `path in cfg`, iteration, `len(cfg)`,
   `dict(cfg)`, `**cfg`, and the `items()` / `values()` views. `cfg[path]` and
