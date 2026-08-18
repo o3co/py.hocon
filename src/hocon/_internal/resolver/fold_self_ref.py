@@ -154,8 +154,11 @@ def _merge_res_obj_layers(base: ResObj, top: ResObj) -> ResObj:
             out.fields[k] = _merge_res_obj_layers(bv, tv)
         else:
             out.fields[k] = tv
-    out.prior_values = dict(base.prior_values)
-    out.reset_keys = set(base.reset_keys)
+    # Carry BOTH layers' bookkeeping: top's prior_values (its keys' own
+    # delayed-merge chains) win per key over base's, and reset_keys union so
+    # reset markers from either layer survive the splice.
+    out.prior_values = {**base.prior_values, **top.prior_values}
+    out.reset_keys = set(base.reset_keys) | set(top.reset_keys)
     return out
 
 

@@ -158,9 +158,15 @@ class SubstitutionResolver:
             # fold with no below value at the navigated path) is the spec's
             # "undefined" classification — an error, not a silent
             # disappearance. The `+=` chain-bottom sentinel is always `${?…}`
-            # and keeps the silent path.
+            # and keeps the silent path. allow_unresolved leaves the
+            # placeholder in place; the key keeps the `[]` suffix so `${X[]}`
+            # reports its own path.
             if not s.optional:
+                if self.opts.allow_unresolved:
+                    return cast(HoconValue, s)
                 k = segments_to_key(s.segments)
+                if s.list_suffix:
+                    k = f"{k}[]"
                 raise ResolveError(
                     self._origin_prefix() + f"could not resolve substitution: ${{{k}}}",
                     k,
@@ -196,7 +202,11 @@ class SubstitutionResolver:
                     self.resolving_prefix_priors.discard(guard_key)
             if s.optional:
                 return None
+            if self.opts.allow_unresolved:
+                return cast(HoconValue, s)
             k = segments_to_key(s.segments)
+            if s.list_suffix:
+                k = f"{k}[]"
             raise ResolveError(
                 self._origin_prefix() + f"could not resolve substitution: ${{{k}}}",
                 k,
