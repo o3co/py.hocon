@@ -67,9 +67,104 @@ def subst_full_key(s: SubstPlaceholder) -> str:
     return string_segments_to_key([seg.text for seg in s.segments])
 
 
+def prefix_self_ref_remainder(s: SubstPlaceholder, full_key: str) -> list[str] | None:
+    """S13a.12: remainder segment texts when ``full_key`` is a PROPER
+    segment-wise prefix of the subst's path (``foo`` ⊏ ``foo.a`` → ``["a"]``),
+    else None. Boundary-safe on the dotted keys because both sides share the
+    quoting of :func:`string_segments_to_key` — a literal dotted segment
+    renders quoted and can never string-prefix ``foo.``."""
+    texts = [seg.text for seg in s.segments]
+    if not string_segments_to_key(texts).startswith(full_key + "."):
+        return None
+    for n in range(1, len(texts)):
+        if string_segments_to_key(texts[:n]) == full_key:
+            return texts[n:]
+    return None
+
+
+def navigate_resolver_value(
+    v: ResolverValue, remainder: list[str]
+) -> ResolverValue | None | _Unnavigable:
+    """Structural navigation of ``remainder`` into a resolver value.
+
+    Returns the reached node, None when a segment is missing (or the walk
+    dead-ends in a scalar/array — path semantics treat both as absent), and
+    the :data:`UNNAVIGABLE` sentinel when it hits a node it cannot see
+    through structurally (a substitution or concat placeholder)."""
+    cur: ResolverValue = v
+    for seg in remainder:
+        if is_subst(cur) or is_concat(cur):
+            return UNNAVIGABLE
+        if is_res_obj(cur):
+            nxt = cur.fields.get(seg)
+            if nxt is None:
+                return None
+            cur = nxt
+            continue
+        if isinstance(cur, HoconObject):
+            nxt2 = cur.fields.get(seg)
+            if nxt2 is None:
+                return None
+            cur = nxt2
+            continue
+        return None
+    return cur
+
+
+class _Unnavigable:
+    """Sentinel: navigation hit a live substitution/concat mid-walk."""
+
+
+UNNAVIGABLE = _Unnavigable()
+
+
+def _fold_prefix_self_ref(
+    s: SubstPlaceholder, replacement: ResolverValue, remainder: list[str]
+) -> ResolverValue:
+    """Fold one prefix self-reference against the below value. A missing path
+    folds to the undefined classification (known_absent — disappears when
+    optional, errors at resolve time when required); an unnavigable path
+    leaves the subst unchanged for the resolve-time guard."""
+    navigated = navigate_resolver_value(replacement, remainder)
+    if isinstance(navigated, _Unnavigable):
+        return s
+    if navigated is None:
+        return SubstPlaceholder(
+            [Segment(seg.text, seg.line, seg.col) for seg in s.segments],
+            s.optional,
+            True,
+            s.list_suffix,
+            s.line,
+            s.col,
+            s.prefix_len,
+        )
+    return clone_resolver_value(navigated)
+
+
+def _merge_res_obj_layers(base: ResObj, top: ResObj) -> ResObj:
+    """Prior-layer object merge for the standalone-prefix-self-ref save case
+    (S13a.12): below layer as base, navigated value on top. A local,
+    bookkeeping-free merge — deliberately NOT utils.deep_merge_res_obj_into,
+    which would create an import cycle and re-run prior-save logic."""
+    out = ResObj()
+    out.fields = dict(base.fields)
+    for k, tv in top.fields.items():
+        bv = out.fields.get(k)
+        if bv is not None and is_res_obj(bv) and is_res_obj(tv):
+            out.fields[k] = _merge_res_obj_layers(bv, tv)
+        else:
+            out.fields[k] = tv
+    out.prior_values = dict(base.prior_values)
+    out.reset_keys = set(base.reset_keys)
+    return out
+
+
 def contains_self_ref(v: ResolverValue, full_key: str) -> bool:
     if is_subst(v):
-        return not v.known_absent and subst_full_key(v) == full_key
+        return not v.known_absent and (
+            subst_full_key(v) == full_key
+            or prefix_self_ref_remainder(v, full_key) is not None
+        )
     if is_concat(v):
         return any(contains_self_ref(n, full_key) for n in v.nodes)
     if is_res_obj(v):
@@ -85,7 +180,12 @@ def fold_self_ref(
     v: ResolverValue, full_key: str, replacement: ResolverValue
 ) -> ResolverValue:
     if is_subst(v):
-        return replacement if subst_full_key(v) == full_key else v
+        if subst_full_key(v) == full_key:
+            return replacement
+        remainder = prefix_self_ref_remainder(v, full_key)
+        if remainder is not None:
+            return _fold_prefix_self_ref(v, replacement, remainder)
+        return v
     if is_concat(v):
         return ConcatPlaceholder(
             [fold_self_ref(n, full_key, replacement) for n in v.nodes], v.line, v.col
@@ -152,13 +252,37 @@ def fold_or_skip_prior(
         return clone_resolver_value(prior)
     if old is None:
         return _fold_optional_self_ref_absent(prior, full_key)
+    # S13a.12: a STANDALONE prefix self-ref in field-value position is a merge
+    # LAYER — an object it navigates to merges over the stack below it, so the
+    # saved prior keeps the below layer's other keys. An optional one whose
+    # navigated path is absent vanishes transparently (the below layer itself
+    # survives as the prior). Nested occurrences substitute in place via the
+    # generic fold below.
+    if is_subst(prior):
+        remainder = prefix_self_ref_remainder(prior, full_key)
+        if remainder is not None:
+            navigated = navigate_resolver_value(old, remainder)
+            if navigated is None and prior.optional:
+                return clone_resolver_value(old)
+            if (
+                not isinstance(navigated, _Unnavigable)
+                and navigated is not None
+                and is_res_obj(navigated)
+                and is_res_obj(old)
+            ):
+                return _merge_res_obj_layers(
+                    cast("ResObj", clone_resolver_value(old)),
+                    cast("ResObj", clone_resolver_value(navigated)),
+                )
     return fold_self_ref(prior, full_key, old)
 
 
 def _fold_optional_self_ref_absent(
     v: ResolverValue, full_key: str
 ) -> ResolverValue | None:
-    if is_subst(v) and subst_full_key(v) == full_key:
+    if is_subst(v) and (
+        subst_full_key(v) == full_key or prefix_self_ref_remainder(v, full_key) is not None
+    ):
         if not v.optional:
             return None
         return SubstPlaceholder(

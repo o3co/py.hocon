@@ -50,6 +50,12 @@ class SubstitutionResolver:
         self.resolving_concats: weakref.WeakSet[ConcatPlaceholder] = weakref.WeakSet()
         # Full dotted path of the field currently being assigned (owner gate).
         self.resolving_field_path: list[str] = []
+        # S13a.12 recursion guard: field keys whose prior is currently being
+        # resolved through the prefix-self-ref branch. Saved priors are
+        # prefix-self-ref-free by the fold invariant; re-entry only happens on
+        # a shape the fold could not see through — report it as unresolvable
+        # instead of recursing forever.
+        self.resolving_prefix_priors: set[str] = set()
 
     def _origin_prefix(self) -> str:
         return f"{self.opts.origin_description}: " if self.opts.origin_description else ""
@@ -60,38 +66,59 @@ class SubstitutionResolver:
     def _resolve_res_obj(self, obj: ResObj) -> HoconValue:
         result: dict[str, HoconValue] = {}
         for key, val in obj.fields.items():
+            # The push/pop span covers BOTH the value resolution and the
+            # prior-chain resolution: a prior belongs to this field's value
+            # stack, so a substitution inside it must see the full field path.
+            # With the field popped, a prior's reference into a sibling of
+            # this field would satisfy the S13a.12 prefix-self-ref test
+            # against the truncated path and mis-route to the parent's prior
+            # instead of the final tree.
             self.resolving_field_path.append(key)
             full_cache_key = string_segments_to_key(self.resolving_field_path)
             self.cache.pop(full_cache_key, None)
             try:
                 resolved = self._resolve_val(val, obj)
-            finally:
-                self.resolving_field_path.pop()
-            if resolved is not None:
-                # Delayed merge: if both current and prior resolve to objects, deep merge.
-                if isinstance(resolved, HoconObject):
+                if resolved is not None:
+                    # Delayed merge: if both current and prior resolve to objects, deep merge.
+                    if isinstance(resolved, HoconObject):
+                        prior = obj.prior_values.get(key)
+                        if prior is not None:
+                            prior_resolved = self._resolve_val(prior, obj)
+                            if isinstance(prior_resolved, HoconObject):
+                                final_value = deep_merge_hocon_values(prior_resolved, resolved)
+                                result[key] = final_value
+                                self.cache[full_cache_key] = final_value
+                                self._cache_descendants(full_cache_key, final_value)
+                                continue
+                    result[key] = resolved
+                    self.cache[full_cache_key] = resolved
+                    self._cache_descendants(full_cache_key, resolved)
+                else:
+                    # Unresolved optional substitution: fall back to prior value.
                     prior = obj.prior_values.get(key)
                     if prior is not None:
                         prior_resolved = self._resolve_val(prior, obj)
-                        if isinstance(prior_resolved, HoconObject):
-                            final_value = deep_merge_hocon_values(prior_resolved, resolved)
-                            result[key] = final_value
-                            self.cache[full_cache_key] = final_value
-                            self._cache_descendants(full_cache_key, final_value)
-                            continue
-                result[key] = resolved
-                self.cache[full_cache_key] = resolved
-                self._cache_descendants(full_cache_key, resolved)
-            else:
-                # Unresolved optional substitution: fall back to prior value.
-                prior = obj.prior_values.get(key)
-                if prior is not None:
-                    prior_resolved = self._resolve_val(prior, obj)
-                    if prior_resolved is not None:
-                        result[key] = prior_resolved
-                        self.cache[full_cache_key] = prior_resolved
-                        self._cache_descendants(full_cache_key, prior_resolved)
+                        if prior_resolved is not None:
+                            result[key] = prior_resolved
+                            self.cache[full_cache_key] = prior_resolved
+                            self._cache_descendants(full_cache_key, prior_resolved)
+            finally:
+                # `continue` routes through here too — every exit pops.
+                self.resolving_field_path.pop()
         return HoconObject(result)
+
+    def _navigate_resolved(self, v: HoconValue, remainder: list[str]) -> HoconValue | None:
+        """S13a.12: walk resolved-object fields by segment text. A missing
+        segment or a walk into a scalar/array is path-absent → None."""
+        cur: HoconValue = v
+        for seg in remainder:
+            if not isinstance(cur, HoconObject):
+                return None
+            nxt = cur.fields.get(seg)
+            if nxt is None:
+                return None
+            cur = nxt
+        return cur
 
     def _cache_descendants(self, prefix: str, value: HoconValue) -> None:
         if not isinstance(value, HoconObject):
@@ -127,7 +154,55 @@ class SubstitutionResolver:
 
     def _resolve_subst(self, s: SubstPlaceholder, scope: ResObj) -> HoconValue | None:
         if s.known_absent:
+            # A required substitution folded to known_absent (S13a.12 prefix
+            # fold with no below value at the navigated path) is the spec's
+            # "undefined" classification — an error, not a silent
+            # disappearance. The `+=` chain-bottom sentinel is always `${?…}`
+            # and keeps the silent path.
+            if not s.optional:
+                k = segments_to_key(s.segments)
+                raise ResolveError(
+                    self._origin_prefix() + f"could not resolve substitution: ${{{k}}}",
+                    k,
+                    s.line,
+                    s.col,
+                )
             return None
+
+        # S13a.12 (HOCON.md L791): a substitution whose target lies INSIDE the
+        # field currently being resolved (the field path is a proper prefix of
+        # the target path, e.g. `foo : ${foo.a}` while resolving `foo`) is
+        # self-referential and resolves against the field's "below" value —
+        # its saved prior — never the final tree.
+        rfp = self.resolving_field_path
+        s_texts = [seg.text for seg in s.segments]
+        if (
+            0 < len(rfp) < len(s_texts)
+            and string_segments_to_key(s_texts[: len(rfp)]) == string_segments_to_key(rfp)
+        ):
+            guard_key = string_segments_to_key(rfp)
+            prior = scope.prior_values.get(rfp[-1])
+            if prior is not None and guard_key not in self.resolving_prefix_priors:
+                self.resolving_prefix_priors.add(guard_key)
+                try:
+                    prior_resolved = self._resolve_val(prior, scope)
+                    if prior_resolved is not None:
+                        navigated = self._navigate_resolved(
+                            prior_resolved, s_texts[len(rfp):]
+                        )
+                        if navigated is not None:
+                            return navigated
+                finally:
+                    self.resolving_prefix_priors.discard(guard_key)
+            if s.optional:
+                return None
+            k = segments_to_key(s.segments)
+            raise ResolveError(
+                self._origin_prefix() + f"could not resolve substitution: ${{{k}}}",
+                k,
+                s.line,
+                s.col,
+            )
 
         # Cache key includes listSuffix so ${X} and ${X[]} never collide.
         key = f"{segments_to_key(s.segments)}[]" if s.list_suffix else segments_to_key(s.segments)
