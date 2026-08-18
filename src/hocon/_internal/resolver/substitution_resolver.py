@@ -141,12 +141,17 @@ class SubstitutionResolver:
         if is_res_obj(v):
             return self._resolve_res_obj(v)
         if isinstance(v, HoconArray):
-            return HoconArray(
-                [
-                    (self._resolve_val(item, scope) or _null_scalar())
-                    for item in v.items
-                ]
-            )
+            # S13.12 (HOCON.md L635): an element that resolves to nothing (an
+            # undefined optional substitution) is NOT added — Lightbend yields
+            # [1, 3] for `[1, ${?missing}, 3]`, never [1, null, 3]. A literal
+            # `null` element resolves to a null scalar (not None) and is kept.
+            items: list[HoconValue] = []
+            for item in v.items:
+                resolved = self._resolve_val(item, scope)
+                if resolved is None:
+                    continue
+                items.append(resolved)
+            return HoconArray(items)
         # Exhausted every placeholder/container variant above; v is a resolved
         # HoconValue (scalar or object). TypeGuards don't narrow the negative
         # branch in mypy, so cast to the resolved contract.
