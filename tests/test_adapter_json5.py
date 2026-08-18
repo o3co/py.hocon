@@ -276,5 +276,5 @@ def test_with_fallback_merge() -> None:
 def test_parse_file_uses_path_as_origin(tmp_path: Path) -> None:
     p = tmp_path / "conf.json5"
     p.write_text("{a: [}", encoding="utf-8")
-    with pytest.raises(AdapterError, match="conf.json5"):
+    with pytest.raises(AdapterError, match=r"conf\.json5"):
         json5.parse_file(p)

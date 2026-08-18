@@ -21,7 +21,8 @@ JSON5, the spec wins:
 - Duplicate keys follow HOCON semantics: objects merge, otherwise the later
   value wins (spec F0.7).
 - The document holds exactly one value; whitespace and comments may follow it,
-  anything else is an error (the F3.2 strictness rule).
+  anything else is an error (the strict-EOF rule F3.3 carries over from
+  F3.2/JSONC).
 
 One deliberate divergence from the JSONC adapter: JSON5's LineTerminator set
 includes U+2028 and U+2029, so those *end* a ``//`` comment here, while the
@@ -192,7 +193,7 @@ class _Parser:
 
     def parse_document(self) -> Any:
         """Parse exactly one JSON5 value, allowing only whitespace and
-        comments after it (the F3.2 strictness rule)."""
+        comments after it (the strict-EOF rule F3.3 carries over from F3.2/JSONC)."""
         self.skip_space()
         v = self.parse_value()
         self.skip_space()
