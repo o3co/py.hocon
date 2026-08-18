@@ -48,6 +48,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `hocon.adapters.json5` — JSON5 ingestion (spec F3.3). The accepted grammar is
+  JSON5 1.0.0 as defined by the reference implementation (the `json5` npm
+  package, the dialect owner), read by a hand-rolled scanner and
+  recursive-descent parser — zero new dependencies, so the base install stays
+  pure stdlib. Where the mapping spec is stricter than JSON5, the spec wins:
+  hex and decimal integers must fit in int64 (F0.5), `Infinity`/`NaN` in every
+  spelling are errors (F0.6), an unpaired `\uXXXX` surrogate is an error and a
+  valid pair combines (F3.5), and duplicate keys follow HOCON semantics —
+  objects merge, otherwise last-wins (F0.7). U+2028/U+2029 terminate `//`
+  comments (deliberately unlike jsonc, whose dialect owner ends comments at
+  LF/CR only). Ported in lockstep with go.hocon#193 and the ts/rs siblings.
 - `Config` now implements `collections.abc.Mapping` over its top-level keys:
   `cfg[path]` (`KeyError` when missing), `path in cfg`, iteration, `len(cfg)`,
   `dict(cfg)`, `**cfg`, and the `items()` / `values()` views. `cfg[path]` and

@@ -513,6 +513,7 @@ Deferring resolution matters: the plain `parse` resolves as it goes, so a
 | `hocon.adapters.properties` | — | `java.util.Properties`, sharing the `include` syntax layer |
 | `hocon.adapters.env` | — | Bulk-mounts a prefixed namespace; also reads `.env` |
 | `hocon.adapters.jsonc` | — | JSON with comments and trailing commas |
+| `hocon.adapters.json5` | — | JSON5 1.0.0, hand-rolled scanner |
 | `hocon.adapters.toml` | — | via `tomllib`, which Python 3.11 ships |
 | `hocon.adapters.yaml` | `pip install hocon-parser[yaml]` | via `ruamel.yaml` |
 
@@ -557,6 +558,14 @@ elsewhere cannot break your mount.
 **jsonc — comments separate tokens.** A comment is removed by replacing it with
 whitespace, so `{"a": 1/*x*/2}` is a syntax error rather than `{"a": 12}`. A
 `//` comment ends at LF or CR, matching the dialect VS Code reads.
+
+**json5 — the reference implementation owns the dialect.** The grammar is JSON5
+1.0.0 as the `json5` npm package reads it, so U+2028/U+2029 *end* a `//`
+comment here (deliberately unlike jsonc, whose owner runs comments through
+them). Where the mapping spec is stricter, the spec wins: `Infinity`/`NaN` in
+any spelling are errors, hex and decimal integers must fit in int64, an
+unpaired `\uXXXX` surrogate is an error, and duplicate keys follow HOCON
+semantics — objects merge, otherwise last-wins.
 
 **properties — every key is an ordinary key.** `__proto__`, `constructor` and
 `prototype` are kept with their values like any other key; a Python `dict` has
