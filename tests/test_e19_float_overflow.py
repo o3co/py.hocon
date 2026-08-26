@@ -40,6 +40,24 @@ def test_rejects_overflow_in_array_element() -> None:
         parse("a = [1, 1e999]")
 
 
+def test_rejects_integer_form_beyond_double_range() -> None:
+    # E19 is keyed on the lexeme's value, not its spelling: an integer-form
+    # literal beyond the double range errors too, even though Python's
+    # unbounded int could hold it exactly — ts/rs reject it and go rejects
+    # it far earlier (int64), so accepting it would make py the lone sibling
+    # with an answer. The sub-double band where models genuinely differ is
+    # xx.hocon#99. Copilot review on py#45 surfaced this trade-off.
+    with pytest.raises(ParseError):
+        parse("a = " + "9" * 400)
+
+
+def test_accepts_integer_form_within_double_range_as_exact_int() -> None:
+    # 2**200 is finite as a double, so E19 does not fire; py's unbounded int
+    # keeps the exact value (the #99 band, unchanged by this window).
+    raw = str(2**200)
+    assert parse(f"a = {raw}").get_number("a") == 2**200
+
+
 def test_accepts_underflow_as_zero() -> None:
     assert parse("a = 1e-400").get_number("a") == 0
 

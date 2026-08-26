@@ -599,6 +599,15 @@ class _Parser:
                 # documented divergence. Underflow (`1e-400`) stays accepted
                 # as 0 — a regex-passing raw can never yield NaN, so only the
                 # infinite case is checked.
+                #
+                # Deliberately keyed on the lexeme's VALUE, not its spelling:
+                # an integer-form literal beyond the double range (409 digits)
+                # errors too, even though Python's unbounded int could hold it
+                # exactly — ts/rs reject it (their models cannot hold it) and
+                # go rejects it far earlier (int64), so accepting it here
+                # would make py the lone sibling with an answer. The band
+                # where models genuinely differ below the double range is
+                # xx.hocon#99, a separate posture decision.
                 if math.isinf(float(raw)):
                     raise ParseError(f'invalid float "{raw}"', line, col)
                 return "number"
