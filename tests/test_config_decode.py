@@ -206,6 +206,19 @@ def test_int_exponent_bomb_rejected() -> None:
         parse_string("n = 1e999999").decode(C)
 
 
+def test_int_wide_finite_exponent_rejected_at_decode() -> None:
+    @dataclass
+    class C:
+        n: int
+
+    # Keeps the decode-layer digit-width guard covered now that the 1e999999
+    # bomb above dies at parse time: 1e25 is finite (parses fine) but its
+    # whole value exceeds the siblings' ~i64 digit width, so decode rejects
+    # it without materializing a huge int.
+    with pytest.raises(ConfigError):
+        parse_string("n = 1e25").decode(C)
+
+
 def test_str_accepts_number_scalar_raw() -> None:
     @dataclass
     class C:
