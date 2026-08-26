@@ -16,7 +16,7 @@ from typing import Any, Optional
 
 import pytest
 
-from hocon import Config, ConfigError, NotResolvedError, Period, parse_string
+from hocon import Config, ConfigError, NotResolvedError, ParseError, Period, parse_string
 
 
 @dataclass
@@ -198,7 +198,11 @@ def test_int_exponent_bomb_rejected() -> None:
     class C:
         n: int
 
-    with pytest.raises(ConfigError):
+    # E19 (xx.hocon#97): the overflowing literal is now rejected at parse
+    # time (ParseError), before decode ever sees the value. The decode-layer
+    # guard this test originally exercised remains as defense in depth for
+    # values injected through non-parse paths.
+    with pytest.raises(ParseError):
         parse_string("n = 1e999999").decode(C)
 
 

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **BREAKING (extra-spec E19, xx.hocon#97): a numeric literal whose magnitude
+  overflows the double range (`1e999`) is now a parse error** instead of
+  silently becoming `inf` — a value HOCON cannot render or re-parse as a
+  number (Lightbend's own render → re-parse turns it into the string
+  `"Infinity"`). This aligns py with go, which has always errored here; a
+  deliberate, documented divergence from Lightbend. Underflow (`1e-400`) still
+  reads as `0`. Workaround for configs that carried such a literal as data:
+  quote it (`a = "1e999"` stays a string).
+
 ## [1.13.0] - 2026-08-19
 
 ### Fixed

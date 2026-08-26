@@ -6,6 +6,8 @@ Faithful port; the space-concat / path-whitespace preservation logic in
 
 from __future__ import annotations
 
+import math
+
 from ...coerce import DECIMAL_NUMBER_RE
 from ...errors import ParseError
 from ...value import ScalarValueType
@@ -539,7 +541,9 @@ class _Parser:
                 node = AstScalar(t.value, "string", Pos(t.line, t.col))
             elif t.kind == "unquoted":
                 self._advance()
-                node = AstScalar(t.value, self._scalar_value_type(t.value), Pos(t.line, t.col))
+                node = AstScalar(
+                    t.value, self._scalar_value_type(t.value, t.line, t.col), Pos(t.line, t.col)
+                )
             elif (t.kind == "colon" or t.kind == "equals") and len(parts) > 0:
                 # In value concat context, colon/equals after a part are plain chars.
                 self._advance()
@@ -580,7 +584,7 @@ class _Parser:
         self._advance()
         return AstArray(items, p)
 
-    def _scalar_value_type(self, raw: str) -> ScalarValueType:
+    def _scalar_value_type(self, raw: str, line: int, col: int) -> ScalarValueType:
         if raw == "true" or raw == "false":
             return "boolean"
         if raw == "null":
@@ -588,6 +592,15 @@ class _Parser:
         # Number detection: first char must be 0-9 or '-' (Lightbend-aligned).
         if len(raw) > 0 and (("0" <= raw[0] <= "9") or raw[0] == "-"):
             if DECIMAL_NUMBER_RE.fullmatch(raw):
+                # E19: a numeric literal whose magnitude overflows the double
+                # range (`1e999`) is a parse error. Lightbend admits Infinity
+                # but cannot render or re-parse it as a number; erroring at
+                # the parse (as go always has via strconv.ParseFloat) is the
+                # documented divergence. Underflow (`1e-400`) stays accepted
+                # as 0 — a regex-passing raw can never yield NaN, so only the
+                # infinite case is checked.
+                if math.isinf(float(raw)):
+                    raise ParseError(f'invalid float "{raw}"', line, col)
                 return "number"
         return "string"
 
