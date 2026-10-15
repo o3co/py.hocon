@@ -462,6 +462,25 @@ def test_pydantic_timedelta_overflow_is_a_validation_error() -> None:
         parse_string("t = 1000000000000 days").decode(P)
 
 
+def test_duration_past_the_float_range_is_an_error_in_both_paths() -> None:
+    # E21: never inf, whether the field is read by the dataclass path or by
+    # Pydantic, in the default unit or a finer one.
+    huge = '"1' + "0" * 400 + '.5d"'
+
+    @dataclass
+    class D:
+        v: Annotated[float, Duration()]
+
+    class P(pydantic.BaseModel):
+        v: Annotated[float, Duration("ns")]
+
+    cfg = parse_string(f"v = {huge}")
+    with pytest.raises(ConfigError, match="duration overflows .* at v"):
+        cfg.decode(D)
+    with pytest.raises(pydantic.ValidationError, match="duration overflows"):
+        cfg.decode(P)
+
+
 def test_exponent_form_differs_between_paths() -> None:
     # Pydantic receives plain values, so it reads a number through its value;
     # the getters and dataclass decoding read the literal's source text.

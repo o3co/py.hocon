@@ -282,10 +282,13 @@ class TestE20ExactByteProduct:
             read_bytes("1" + "0" * 1_000_000 + unit)
         assert e.value.problem == "overflow"
 
-    def test_huge_duration_does_not_raise_decimal_overflow(self) -> None:
-        # An astronomically large duration reads as an infinite float, as it
-        # did before the Decimal arithmetic.
-        assert read_duration("1" + "0" * 1_000_000 + "d") == float("inf")
+    @pytest.mark.parametrize("sign", ["", "-"])
+    def test_huge_duration_is_an_overflow_error(self, sign: str) -> None:
+        # E21: a duration past the float range is an error, never ±inf (and
+        # never a bare decimal.Overflow).
+        with pytest.raises(UnitReadError) as e:
+            read_duration(sign + "1" + "0" * 1_000_000 + "d")
+        assert e.value.problem == "overflow"
 
     def test_duration_rounds_once_for_long_inputs(self) -> None:
         # E20: a float result is rounded once, at the end. A 60-digit

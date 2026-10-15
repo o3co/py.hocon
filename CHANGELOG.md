@@ -24,6 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A duration past the float range is an error (extra-spec E21).**
+  `get_duration` (and decoding into `int` / `float` with `Duration`) raises
+  `ConfigError("duration overflows the representable range …")` instead of
+  returning `inf` / `-inf` — for `10^400` days and `"1<400 zeros>.5d"` alike
+  (fixtures ud12 / ud13). Decoding into `timedelta` already raised past its
+  own range.
+
 - **Duration and byte-size conversions are exact in decimal (extra-spec
   E20).** `get_duration` / `get_bytes` (and decoding) compute the unit
   conversion in `Decimal` and round to `float` once, so `1.001s` is `1001.0`
