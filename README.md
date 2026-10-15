@@ -237,8 +237,8 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 
 | Method | Returns | Raises if |
 |--------|---------|-----------|
-| `get(path, default=None)` | value or `default` | — |
-| `config[path]` | value | `KeyError` when missing |
+| `get(path, default=None)` | value or `default` | unresolved (`NotResolvedError`) |
+| `config[path]` | value | `KeyError` when missing, `NotResolvedError` when unresolved |
 | `get_string(path)` | `str` | missing, wrong type, or unresolved |
 | `get_number(path)` | `int \| float` | missing, not numeric, or unresolved |
 | `get_int(path)` | `int` | missing, not numeric, or unresolved |
@@ -257,7 +257,7 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `resolve(*, allow_unresolved=False, use_system_environment=True)` | `Config` | unresolvable substitution (unless `allow_unresolved`) |
 | `resolve_with(source, *, ...)` | `Config` | source unresolved, or unresolvable substitution |
 | `is_resolved()` | `bool` | — |
-| `to_object()` | `dict / list / scalar` | — |
+| `to_object()` | `dict / list / scalar` | any part unresolved |
 | `render_hocon()` | `str` (HOCON text) | unresolved |
 
 `get_boolean` also accepts `yes`/`no` and `on`/`off`. `get_number` returns an
@@ -272,6 +272,15 @@ Mapping semantics follow `dict`: equality is value-based (a `Config` compares
 equal to an equivalent `dict`), an empty config is falsy, and `Config` is
 unhashable. An explicit HOCON `null` is a *present* value — `cfg.get(path,
 default)` returns `None` for it, and `path in cfg` is `True`.
+
+On a config that is not fully resolved, the keys are all there and only the
+values wait: iteration, `len` and `keys()` include unresolved keys and
+`path in cfg` is `True` for them, while reading an unresolved value
+(`cfg[path]`, `get`, `items()`, `dict(cfg)`, `==`, `to_object()`) raises
+`NotResolvedError`. `has(path)` never raises: it is `True` for a path whose
+value is unresolved (the cross-implementation rule; Lightbend's `hasPath`
+throws instead). `in` raises for a path below an unresolved value, which
+cannot be answered yet.
 
 ### Typed decoding
 

@@ -231,8 +231,8 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 
 | メソッド | 返り値 | 例外条件 |
 |--------|---------|-----------|
-| `get(path, default=None)` | 値 または `default` | — |
-| `config[path]` | 値 | 不在なら `KeyError` |
+| `get(path, default=None)` | 値 または `default` | 未解決 (`NotResolvedError`) |
+| `config[path]` | 値 | 不在なら `KeyError`、未解決なら `NotResolvedError` |
 | `get_string(path)` | `str` | 不在・型不一致・未解決 |
 | `get_number(path)` | `int \| float` | 不在・非数値・未解決 |
 | `get_int(path)` | `int` | 不在・非数値・未解決 |
@@ -251,7 +251,7 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 | `resolve(*, allow_unresolved=False, use_system_environment=True)` | `Config` | 解決不能な置換 (`allow_unresolved` 時を除く) |
 | `resolve_with(source, *, ...)` | `Config` | source 未解決、または解決不能な置換 |
 | `is_resolved()` | `bool` | — |
-| `to_object()` | `dict / list / scalar` | — |
+| `to_object()` | `dict / list / scalar` | どこかが未解決 |
 | `render_hocon()` | `str` (HOCON テキスト) | 未解決 |
 
 `get_boolean` は `yes`/`no`・`on`/`off` も受け付けます。`get_number` は整数字句なら
@@ -266,6 +266,13 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
 `dict` と等しい)、空 config は falsy、`Config` は unhashable。明示的な HOCON
 `null` は「存在する値」です — `cfg.get(path, default)` は `None` を返し、
 `path in cfg` は `True` になります。
+
+完全には解決されていない config では、キーはすべてそろっていて、値だけが未確定です。
+イテレーション・`len`・`keys()` は未解決のキーも含み、`path in cfg` もそれらに `True` を
+返します。一方、未解決の値を読む操作 (`cfg[path]`、`get`、`items()`、`dict(cfg)`、`==`、
+`to_object()`) は `NotResolvedError` を送出します。`has(path)` は送出せず、値が未解決のパスでも
+`True` を返します (実装横断の規則。Lightbend の `hasPath` は例外を投げる)。未解決の値の下に
+あるパスへの `in` は、まだ答えられないので送出します。
 
 ### 型付き decode
 

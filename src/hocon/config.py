@@ -21,10 +21,8 @@ from ._internal.resolver.resolver import (
     val_contains_placeholders,
 )
 from ._internal.resolver.types import (
-    ConcatPlaceholder,
     ResObj,
     ResolveOptions,
-    SubstPlaceholder,
     is_concat,
     is_res_obj,
     is_subst,
@@ -93,13 +91,20 @@ class Config(Mapping[str, Any]):
         origin_description: str | None = None,
         res_obj_root: ResObj | None = None,
         resolve_opts: ResolveOptions | None = None,
+        pending: ResObj | HoconObject | None = None,
     ) -> None:
         self._root = root
         self._resolved = resolved
         self._parse_base_dir = parse_base_dir
         self._origin_description = origin_description
+        # The unresolved source tree, kept so a later resolve() / with_fallback
+        # can start over from it.
         self._res_obj_root = res_obj_root
         self._resolve_opts = resolve_opts
+        # The tree as it stands now, placeholders included: where the
+        # NotResolvedError checks look. After resolve(allow_unresolved=True)
+        # it differs from _res_obj_root, whose resolved paths are stale.
+        self._pending = pending if pending is not None else res_obj_root
 
     # ─── construction ─────────────────────────────────────────────────────────
 
@@ -140,21 +145,38 @@ class Config(Mapping[str, Any]):
         # leak a TypeError out of the path splitter.
         if not isinstance(path, str):
             raise KeyError(path)
-        v = self._lookup_key_or_path(path)
+        v = self._lookup_resolved(path)
         if v is None:
             raise KeyError(path)
         return _hocon_to_py(v)
 
+    # On an unresolved config the Mapping view lists every key, unresolved ones
+    # included: the key exists, its value does not yet. Reading such a value
+    # ([], get, items(), values(), dict(cfg), ==) raises NotResolvedError, so an
+    # unresolved value never silently disappears.
     def __iter__(self) -> Iterator[str]:
-        return iter(self._root.fields)
+        return iter(self._top_level_fields())
 
     def __len__(self) -> int:
-        return len(self._root.fields)
+        return len(self._top_level_fields())
 
     def __contains__(self, path: object) -> bool:
+        """Whether ``path`` exists. An unresolved value counts as present; a
+        path below an unresolved value cannot be answered yet and raises
+        :class:`NotResolvedError`."""
         if not isinstance(path, str):
             return False
-        return self._lookup_key_or_path(path) is not None
+        if path in self._top_level_fields():  # literal key, resolved or not
+            return True
+        if self._lookup_key_or_path(path) is not None:
+            return True
+        if self._resolved or self._pending is None:
+            return False
+        if self._subtree_has_placeholders(path, literal_first=True):
+            if self._pending_has_key(path):
+                return True
+            raise NotResolvedError(path)
+        return False
 
     # ─── accessors ────────────────────────────────────────────────────────────
 
@@ -166,7 +188,7 @@ class Config(Mapping[str, Any]):
         """
         if not isinstance(path, str):  # dict parity: non-str keys are absent
             return default
-        v = self._lookup_key_or_path(path)
+        v = self._lookup_resolved(path)
         if v is None:
             return default
         return _hocon_to_py(v)
@@ -265,7 +287,9 @@ class Config(Mapping[str, Any]):
             raise ConfigError(f"expected object at {path}", path)
         if not self._resolved and self._subtree_has_placeholders(path):
             raise NotResolvedError(path)
-        return Config(v, resolved=self._resolved)
+        # The subtree was just checked free of placeholders, so it is resolved
+        # even when another part of this config is not.
+        return Config(v, resolved=True)
 
     def get_list(self, path: str) -> list[Any]:
         v = self._lookup_node(path)
@@ -285,16 +309,48 @@ class Config(Mapping[str, Any]):
         return [_hocon_to_py(x) for x in v.items]
 
     def has(self, path: str) -> bool:
+        """Whether ``path`` exists. Never raises for an unresolved value: a path
+        whose value is still a substitution exists, so this is ``True`` (the
+        cross-implementation rule; Lightbend's ``hasPath`` would throw). A path
+        below an unresolved value cannot be confirmed yet and is ``False``.
+        Reading the value is what raises :class:`NotResolvedError`."""
+        if not self._resolved and self._pending is not None:
+            if path in self._pending.fields or self._pending_has_key(path):
+                return True
         return self._lookup_key_or_path(path) is not None
 
     # Pre-Mapping API returned a list; kept for backward compatibility over
     # typeshed's KeysView (iteration / len / `in` work the same on both).
     def keys(self) -> list[str]:  # type: ignore[override]
-        return list(self._root.fields.keys())
+        return list(self._top_level_fields())
+
+    def _top_level_fields(self) -> dict[str, Any]:
+        """Top-level keys in document order, unresolved ones included."""
+        if self._resolved or self._pending is None:
+            return self._root.fields
+        return self._pending.fields
+
+    def _pending_has_key(self, path: str) -> bool:
+        """Whether ``path`` names an existing key of the unresolved tree."""
+        tree = self._pending
+        if tree is None:
+            return False
+        if path in tree.fields:
+            return True
+        cur: Any = tree
+        for seg in _split_config_path(path):
+            if not isinstance(cur, (ResObj, HoconObject)) or seg not in cur.fields:
+                return False
+            cur = cur.fields[seg]
+        return True
 
     def with_fallback(self, fallback: Config | None) -> Config:
         if fallback is None:
             return self
+        # Merges the unresolved *source* trees: after a partial resolve, the
+        # result starts over from the source, so a path that had resolved reads
+        # as unresolved again until the next resolve(), which gives the same
+        # final values. (Lightbend keeps the partial progress.)
         self_tree = self._res_obj_root or hocon_value_to_res_obj(self._root)
         fb_tree = fallback._res_obj_root or hocon_value_to_res_obj(fallback._root)
         merged = merge_unresolved(self_tree, fb_tree)
@@ -339,6 +395,7 @@ class Config(Mapping[str, Any]):
                 origin_description=self._origin_description,
                 res_obj_root=tree if had_placeholders else None,
                 resolve_opts=resolve_opts if had_placeholders else None,
+                pending=resolved if had_placeholders else None,
             )
 
         return Config(
@@ -388,6 +445,7 @@ class Config(Mapping[str, Any]):
                 origin_description=self._origin_description,
                 res_obj_root=receiver_tree if had_placeholders else None,
                 resolve_opts=resolve_opts if had_placeholders else None,
+                pending=filtered if had_placeholders else None,
             )
 
         return Config(
@@ -398,6 +456,11 @@ class Config(Mapping[str, Any]):
         )
 
     def to_object(self) -> Any:
+        """The whole config as plain Python data. Raises
+        :class:`NotResolvedError` while any substitution is unresolved, rather
+        than dropping the unresolved paths."""
+        if not self._resolved:
+            raise NotResolvedError("")
         return _hocon_to_py(self._root)
 
     # The Any overload keeps typing expressions that are not `type` objects
@@ -490,6 +553,21 @@ class Config(Mapping[str, Any]):
             origin_description=self._origin_description,
         )
 
+    def _lookup_resolved(self, path: str) -> HoconValue | None:
+        """``_lookup_key_or_path``, raising :class:`NotResolvedError` when the
+        path is unresolved instead of reporting it absent (or partial)."""
+        if not self._resolved and self._pending is not None and path in self._pending.fields:
+            # The literal key wins even while its value is unresolved (it is
+            # then missing from _root, and the dotted-path fallback below
+            # would read an unrelated nested value instead).
+            if val_contains_placeholders(self._pending.fields[path]):
+                raise NotResolvedError(path)
+        v = self._lookup_key_or_path(path)
+        if not self._resolved and (v is None or not isinstance(v, HoconScalar)):
+            if self._subtree_has_placeholders(path, literal_first=True):
+                raise NotResolvedError(path)
+        return v
+
     def _lookup_key_or_path(self, path: str) -> HoconValue | None:
         """Literal top-level key first, then dotted-path traversal.
 
@@ -514,21 +592,28 @@ class Config(Mapping[str, Any]):
             current = nxt
         return current
 
-    def _subtree_has_placeholders(self, path: str) -> bool:
-        tree = self._res_obj_root
+    def _subtree_has_placeholders(self, path: str, *, literal_first: bool = False) -> bool:
+        """Whether ``path`` (or an ancestor on the way to it) is unresolved.
+
+        ``literal_first`` mirrors ``_lookup_key_or_path``: a literal top-level
+        key wins over path traversal. The typed getters traverse only.
+        """
+        tree = self._pending
         if tree is None:
             return False
-        segments = _split_config_path(path)
-        cur: ResObj = tree
-        for seg in segments:
+        if literal_first and path in tree.fields:
+            return val_contains_placeholders(tree.fields[path])
+        cur: Any = tree
+        for seg in _split_config_path(path):
+            if not isinstance(cur, (ResObj, HoconObject)):
+                # A placeholder (or an array holding one) where an object
+                # should be: the path below it is unresolved, not absent.
+                return val_contains_placeholders(cur)
             val = cur.fields.get(seg)
             if val is None:
                 return False
-            if is_res_obj(val):
-                cur = val
-            else:
-                return val_contains_placeholders(val)
-        return contains_placeholders(cur)
+            cur = val
+        return val_contains_placeholders(cur)
 
     def _require_scalar(self, path: str) -> HoconScalar:
         v = self._lookup_node(path)
@@ -626,16 +711,19 @@ def _res_obj_to_key_shape(tree: ResObj) -> HoconObject:
 
 
 def _strip_placeholder_fields(v: HoconObject) -> tuple[HoconObject, bool]:
+    """``v`` without its unresolved values, and whether it had any. An object
+    keeps its resolved fields; any other value that holds a placeholder
+    anywhere (an array element, an object inside an array) is dropped whole."""
     fields: dict[str, HoconValue] = {}
     had_placeholders = False
     for k, val in v.fields.items():
-        if isinstance(val, (SubstPlaceholder, ConcatPlaceholder)):
-            had_placeholders = True
-        elif isinstance(val, HoconObject):
+        if isinstance(val, HoconObject):
             inner, inner_had = _strip_placeholder_fields(val)
             if inner_had:
                 had_placeholders = True
             fields[k] = inner
+        elif val_contains_placeholders(val):
+            had_placeholders = True
         else:
             fields[k] = val
     return HoconObject(fields), had_placeholders

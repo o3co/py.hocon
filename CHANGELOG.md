@@ -43,6 +43,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a number (`15`); `get_number` on such text raises `ConfigError` as for any
   string.
 
+- **Unresolved paths raise `NotResolvedError` everywhere (E12 decision 12).**
+  - After `resolve(allow_unresolved=True)`, a subtree that did resolve now
+    reads normally: `get_config` / `get_value` used the pre-resolve tree and
+    raised for it while another part stayed unresolved.
+  - A substitution left inside an array (`a = [1, ${y}]`) is now seen:
+    `is_resolved()` was `True` after a partial resolve and the getters
+    crashed with `AttributeError`.
+  - **BREAKING:** on an unresolved config, `get(path)`, `config[path]` and
+    `to_object()` raise `NotResolvedError` for an unresolved path instead of
+    treating it as absent (`get` returned the default, `to_object()` dropped
+    the key). Absent paths still return the default / raise `KeyError`.
+  - **BREAKING:** the Mapping view of an unresolved config lists every key:
+    iteration, `len`, `keys()` and `in` include unresolved keys (they used to
+    vanish, so `cfg == {...}` could compare equal without them), and reading
+    their values — `items()`, `values()`, `dict(cfg)`, `==` — raises
+    `NotResolvedError`. `has(path)` is `True` for a path whose value is
+    unresolved and never raises (the cross-implementation rule; Lightbend's
+    `hasPath` throws); `in` raises for a path below an unresolved value.
+
 - **A duration past the float range is an error (extra-spec E21).**
   `get_duration` (and decoding into `int` / `float` with `Duration`) raises
   `ConfigError("duration overflows the representable range …")` (a

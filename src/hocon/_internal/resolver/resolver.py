@@ -55,6 +55,8 @@ def val_contains_placeholders(v: ResolverValue) -> bool:
         return True
     if is_res_obj(v):
         return contains_placeholders(v)
+    if isinstance(v, HoconObject):  # value form, e.g. an object inside an array
+        return any(val_contains_placeholders(item) for item in v.fields.values())
     if isinstance(v, HoconArray):
         return any(val_contains_placeholders(item) for item in v.items)
     return False
