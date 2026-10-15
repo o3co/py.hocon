@@ -232,8 +232,8 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 | `get_int(path)` | `int` | 不在・非数値・未解決 |
 | `get_float(path)` | `float` | 不在・非数値・未解決 |
 | `get_boolean(path)` | `bool` | 不在・型不一致・未解決 |
-| `get_duration(path, unit=None)` | `float` | 不在・型不一致・不正な duration |
-| `get_bytes(path, unit=None)` | `float` (bytes では `int`) | 不在・型不一致・不正な byte size |
+| `get_duration(path, unit=None)` | `float` | 不在・型不一致・不正な duration・float の範囲外 (E21) |
+| `get_bytes(path, unit=None)` | `float` (bytes では `int`) | 不在・型不一致・不正または負の byte size・2^53 bytes 以上 |
 | `get_period(path)` | `Period` | 不在・型不一致・不正な period |
 | `get_config(path)` | `Config` | 不在・オブジェクトでない・未解決 |
 | `get_list(path)` | `list` | 不在・配列でない・未解決 |
@@ -314,7 +314,8 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
 ```
 
 - `Bytes(unit="B")` は `int` / `float` に、`Duration(unit="ms")` は `int` /
-  `float` / `timedelta` に付けます。`int` フィールドは結果が整数でなければ
+  `float` / `timedelta` に付けます。`unit` は出力単位の token です (`kB` ではなく
+  `KB`。[Duration / Period / Byte サイズ](#duration--period--byte-サイズ) を参照)。`int` フィールドは結果が整数でなければ
   エラーです (`"512B"` を `KiB` で読む場合など)。`Optional`、`list[...]`、
   `dict[str, ...]` の中でも使えます。
 - エラーにはキーのパスが入ります (`invalid byte size at server.max-body:
@@ -330,6 +331,10 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
   書きます。`__init__` を override したモデルには validation context が
   渡らない (Pydantic の制約) ため、その中の marker は働きません。`__init__` の
   override ではなく `model_validator` を使ってください。
+- kebab-case / camelCase でのキーの照合は dataclass の機能です。Pydantic モデルには
+  キーが書いたとおりに渡るので、HOCON のキー `max-body` には field の alias
+  (`Field(alias="max-body")`) か同じ名前の field が必要です。ないと Pydantic は
+  その field を missing と報告します。
 - Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
   読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
   getter と dataclass の decode ではエラーです。単位を付けて書いた値は、
@@ -475,7 +480,25 @@ Lightbend の表どおり大文字小文字を区別します: `B`/`b`、`kB` (1
 小文字の両方 (`K`/`k`、S21.4)。計算は正確な 10 進数で行います (E20): `1.001s` は
 ちょうど `1001` ms、小数の byte サイズは正確な積を 0 方向に切り捨てます
 (`1.0009kB` は `1000` bytes)。float の範囲を超える duration はエラーで、`inf` には
-なりません (E21)。
+なりません (E21)。byte サイズは 2^53 bytes (約 9 PB) 未満でなければなりません。
+`8PB` は読めますが、`10PB` や `1YB` は `ConfigError` になるので、最大級の単位は
+小数でしか収まりません (`0.000000001YiB`)。
+
+**出力単位は、別の短い token の集合です。** `get_duration` / `get_bytes` と
+`hocon.Duration` / `hocon.Bytes` marker の `unit` 引数は *結果* の単位を指定し、
+次の token だけを受け付けます:
+
+| 結果 | `unit` の token | 既定 |
+|---|---|---|
+| `get_duration`、`hocon.Duration` | `ns`、`us`、`ms`、`s`、`m`、`h`、`d` | `ms` |
+| `get_bytes`、`hocon.Bytes` | `B`、`KB`、`KiB`、`MB`、`MiB`、`GB`、`GiB`、`TB`、`TiB` | `B` |
+
+これは config に書く綴りとは違います。ここでの `KB` は 1000 bytes の意味で、config
+では `kB` と書きます (config で `KB` と書くとエラー)。`seconds` のような長形式も
+受け付けません。marker は未知の token を構築時に拒否します (`hocon.Bytes("kB")` は
+`ValueError`)。getter は不正な値として報告する (`get_bytes("v", "kB")` は
+`invalid byte size at v`) ので、正しそうな値が拒否されたら、まず token を確認して
+ください。
 
 `get_period` (仕様 S20.1–S20.4) は `Period(years, months, days)` (frozen
 dataclass、rs.hocon の `Period` struct 準拠) を返します。単位: `d`/`day`/`days`

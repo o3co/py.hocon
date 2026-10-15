@@ -113,7 +113,11 @@ class _UnitMarker:
 @dataclass(frozen=True)
 class Bytes(_UnitMarker):
     """Read a HOCON byte size (``64KiB``) in ``unit`` (default bytes), with
-    :meth:`Config.get_bytes`' rules. Annotate ``int`` or ``float``."""
+    :meth:`Config.get_bytes`' rules. Annotate ``int`` or ``float``.
+
+    ``unit`` is an output-unit token (``B`` / ``KB`` / ``KiB`` / ``MB`` /
+    ``MiB`` / ``GB`` / ``GiB`` / ``TB`` / ``TiB``), not a config spelling:
+    ``Bytes("kB")`` raises ``ValueError``."""
 
     unit: ByteUnit = "B"
 
@@ -132,7 +136,11 @@ class Bytes(_UnitMarker):
 class Duration(_UnitMarker):
     """Read a HOCON duration (``30m``) with :meth:`Config.get_duration`' rules.
     Annotate ``int`` / ``float`` for a number in ``unit`` (default ms), or
-    ``timedelta`` (``unit`` then has no effect)."""
+    ``timedelta`` (``unit`` then has no effect).
+
+    ``unit`` is an output-unit token (``ns`` / ``us`` / ``ms`` / ``s`` / ``m``
+    / ``h`` / ``d``), not a config spelling: ``Duration("seconds")`` raises
+    ``ValueError``."""
 
     unit: DurationUnit = "ms"
 

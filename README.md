@@ -241,8 +241,8 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `get_int(path)` | `int` | missing, not numeric, or unresolved |
 | `get_float(path)` | `float` | missing, not numeric, or unresolved |
 | `get_boolean(path)` | `bool` | missing, wrong type, or unresolved |
-| `get_duration(path, unit=None)` | `float` | missing, wrong type, or invalid duration |
-| `get_bytes(path, unit=None)` | `float` (`int` in bytes) | missing, wrong type, or invalid byte size |
+| `get_duration(path, unit=None)` | `float` | missing, wrong type, invalid duration, or past the float range (E21) |
+| `get_bytes(path, unit=None)` | `float` (`int` in bytes) | missing, wrong type, invalid or negative byte size, or 2^53 bytes or more |
 | `get_period(path)` | `Period` | missing, wrong type, or invalid period |
 | `get_config(path)` | `Config` | missing, not an object, or unresolved |
 | `get_list(path)` | `list` | missing, not an array, or unresolved |
@@ -325,7 +325,9 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
 ```
 
 - `Bytes(unit="B")` annotates `int` or `float`; `Duration(unit="ms")`
-  annotates `int`, `float`, or `timedelta`. An `int` field rejects a
+  annotates `int`, `float`, or `timedelta`. `unit` is an output-unit token
+  (`KB`, not `kB`; see [Durations, Periods, and Byte
+  Sizes](#durations-periods-and-byte-sizes)). An `int` field rejects a
   fractional result (`"512B"` in `KiB`). `Optional`, `list[...]` and
   `dict[str, ...]` positions work.
 - Errors carry the key path (`invalid byte size at server.max-body: '64KB'`);
@@ -339,6 +341,10 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   in HOCON form (`"1.5m"`). A model that overrides `__init__` does not
   receive the validation context (a Pydantic limitation), so markers inside it
   do not act — use a `model_validator` instead of overriding `__init__`.
+- Key matching by kebab-case / camelCase is a dataclass feature. A Pydantic
+  model receives the keys as written, so a HOCON key `max-body` needs a field
+  alias (`Field(alias="max-body")`) or a field of that name; otherwise
+  Pydantic reports the field as missing.
 - Pydantic models receive plain values, so there a number is read through its
   value rather than its source text: a bare number in exponent form (`1e3`)
   reads as `1000`, while the getters and dataclass decoding reject it. Values
@@ -523,7 +529,25 @@ forms (`kilobytes`, `mebibytes`, …), and single-letter powers of two in both
 cases (`K`/`k`, S21.4). Arithmetic is exact decimal (E20): `1.001s` is exactly
 `1001` ms, and a fractional byte size truncates toward zero after the exact
 product (`1.0009kB` is `1000` bytes). A duration past the float range is an
-error (E21), never `inf`.
+error (E21), never `inf`. A byte size must stay below 2^53 bytes (about 9 PB):
+`8PB` reads, `10PB` and `1YB` raise `ConfigError`, so the largest units only
+fit as fractions (`0.000000001YiB`).
+
+**Output units are a separate, short set of tokens.** The `unit` argument of
+`get_duration` / `get_bytes` and of the `hocon.Duration` / `hocon.Bytes`
+markers names the unit of the *result*, and takes only these tokens:
+
+| Result of | `unit` tokens | Default |
+|---|---|---|
+| `get_duration`, `hocon.Duration` | `ns`, `us`, `ms`, `s`, `m`, `h`, `d` | `ms` |
+| `get_bytes`, `hocon.Bytes` | `B`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` | `B` |
+
+They are not the config spellings: `KB` here means 1000 bytes, which config
+text spells `kB` (where `KB` is an error), and long forms such as `seconds` are
+not accepted. A marker rejects an unknown token when it is constructed
+(`hocon.Bytes("kB")` raises `ValueError`); a getter reports it as an invalid
+value (`get_bytes("v", "kB")` raises `invalid byte size at v`), so check the
+token first when a value that looks right is rejected.
 
 `get_period` (spec S20.1–S20.4) returns a `Period(years, months, days)` value —
 a frozen dataclass mirroring rs.hocon's `Period` struct. Supported units:
