@@ -5,8 +5,9 @@ errors, whole-float→int coercion derived from the decimal text per xx.hocon#56
 S15 numeric-keyed objects in sequence context, extra keys ignored) and
 rs.hocon's serde integration, adapted to Python typing: nested dataclasses,
 ``list[T]`` / ``dict[str, T]`` / ``Optional[T]`` / ``Any``, ``timedelta`` for
-durations, ``Period``, ``Enum``, nested ``Config``, and duck-typed delegation
-to Pydantic v2's ``model_validate``.
+durations, ``Period``, ``Enum``, nested ``Config``, ``Annotated`` unit markers
+(:mod:`hocon.markers`), and duck-typed delegation to Pydantic v2's
+``model_validate``.
 
 Field-name resolution for dataclass fields: a ``field(metadata={"hocon":
 key})`` alias, when present, is the *only* key consulted (like go.hocon's
@@ -19,18 +20,25 @@ go.hocon's ``hocon:"-"`` tag.
 
 from __future__ import annotations
 
-import math
 from dataclasses import MISSING, is_dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from types import UnionType
-from typing import Any, Union, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Union, get_args, get_origin, get_type_hints
 
-from .coerce import coerce_boolean, coerce_number, parse_duration, parse_period
-from .config import Config, Period, _hocon_to_py, _scalar_to_py
+from .coerce import (
+    UNIT_DURATION,
+    UNIT_PERIOD,
+    coerce_boolean,
+    coerce_number,
+    read_period,
+    read_timedelta,
+)
+from .config import Config, Period, _hocon_to_py, _read_unit_scalar, _scalar_to_py
 from .errors import ConfigError
+from .markers import PYDANTIC_CONTEXT_KEY, _markers_in
 from .numeric_array import numeric_object_to_array
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue
 
@@ -43,6 +51,8 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
         return _hocon_to_py(node)
 
     origin = get_origin(target)
+    if origin is Annotated:
+        return _decode_annotated(node, target, path)
     if origin is Union or origin is UnionType:
         return _decode_optional(node, target, path)
     if origin is list:
@@ -67,21 +77,19 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
         return Config(_as_object(node, target, path))
     if target is Period:
         sc = _as_nonnull_scalar(node, target, path)
-        parsed = parse_period(sc.raw)
-        if parsed is None:
-            raise ConfigError(f"invalid period at {_p(path)}: {sc.raw!r}", path)
-        return Period(*parsed)
+        return Period(*_read_unit_scalar(sc, path, UNIT_PERIOD, read_period))
     if target is timedelta:
         sc = _as_nonnull_scalar(node, target, path)
-        ms = parse_duration(sc.raw)
-        if math.isnan(ms):
-            raise ConfigError(f"invalid duration at {_p(path)}: {sc.raw!r}", path)
-        return timedelta(milliseconds=ms)
+        return _read_unit_scalar(sc, path, UNIT_DURATION, read_timedelta)
 
     # Pydantic v2 (duck-typed so pydantic is never imported): hand the decoded
     # plain object to the model's own validator, which handles its own nesting.
+    # A real Pydantic model gets the validation context under which the unit
+    # markers read HOCON values; any other model_validate gets the object only.
     validate = getattr(target, "model_validate", None)
     if callable(validate):
+        if hasattr(target, "__pydantic_validator__"):
+            return validate(_hocon_to_py(node), context={PYDANTIC_CONTEXT_KEY: True})
         return validate(_hocon_to_py(node))
 
     if issubclass(target, Enum):
@@ -107,6 +115,29 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
     raise ConfigError(f"unsupported target type {target!r} at {_p(path)}", path)
 
 
+def _decode_annotated(node: HoconValue, target: Any, path: str) -> Any:
+    base = get_args(target)[0]
+    markers = _markers_in(target)  # through Optional / nested Annotated
+    if not markers:
+        return decode_node(node, base, path)  # metadata for someone else
+    if len(markers) > 1:
+        raise ConfigError(f"more than one unit marker on {target!r} at {_p(path)}", path)
+    marker = markers[0]
+    if _is_null(node):
+        return decode_node(node, base, path)  # Optional → None, else the null error
+    try:
+        inner = marker.resolve_target(base)
+    except TypeError as e:
+        raise ConfigError(f"{e} at {_p(path)}", path) from None
+    sc = _as_nonnull_scalar(node, base, path)
+    value = _read_unit_scalar(sc, path, marker.what, lambda raw: marker.to_target(raw, inner))
+    if inner is int and not isinstance(value, int):
+        raise ConfigError(f"expected int at {_p(path)}, got {value!r} from {sc.raw!r}", path)
+    if inner is float and isinstance(value, (int, float)):
+        return float(value)
+    return value
+
+
 def _decode_optional(node: HoconValue, target: Any, path: str) -> Any:
     args = get_args(target)
     if _is_null(node) and type(None) in args:
@@ -122,7 +153,7 @@ def _decode_optional(node: HoconValue, target: Any, path: str) -> Any:
 
 def _decode_dataclass(node: HoconValue, target: type, path: str) -> Any:
     obj = _as_object(node, target, path)
-    hints = get_type_hints(target)
+    hints = get_type_hints(target, include_extras=True)
     kwargs: dict[str, Any] = {}
     for f in dataclass_fields(target):
         if not f.init:

@@ -1,5 +1,11 @@
 """Typed coercions for Config accessors: numbers, booleans, durations, byte sizes.
 
+The ``read_*`` functions are the single owner of each unit system's rules:
+the unit grammar plus its invariants (a byte size is non-negative, a period is
+integer-only). The typed getters and ``decode`` both read through them, so
+neither copies the other's checks. ``parse_*`` are the lower-level grammar
+helpers they wrap.
+
 Mirrors ts.hocon ``src/coerce.ts``. Duration unit names are case-sensitive
 (S19.8, HOCON.md L1304). Single-letter byte abbreviations are powers of two
 (S21.4, HOCON.md L1385).
@@ -9,18 +15,33 @@ Standalone module: it must not import :mod:`hocon.value` (value imports this).
 
 from __future__ import annotations
 
+import decimal
 import math
 import re
+from datetime import timedelta
+from decimal import Decimal
+from typing import Literal
 
 __all__ = [
     "DECIMAL_NUMBER_RE",
     "ByteUnit",
     "DurationUnit",
+    "UNIT_BYTE_SIZE",
+    "UNIT_DURATION",
+    "UNIT_PERIOD",
+    "UnitProblem",
+    "UnitReadError",
     "coerce_boolean",
     "coerce_number",
+    "is_byte_unit",
+    "is_duration_unit",
     "parse_bytes",
     "parse_duration",
     "parse_period",
+    "read_bytes",
+    "read_duration",
+    "read_period",
+    "read_timedelta",
 ]
 
 DECIMAL_NUMBER_RE = re.compile(r"-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
@@ -115,17 +136,31 @@ def _leading_numeric_prefix_len(trimmed: str) -> int:
     return i
 
 
+# Unit conversions run in Decimal and round to float once, so a value that is
+# exact in decimal stays exact (`1.001s` is 1001.0 ms, not 1000.9999999999999).
+_EXACT = decimal.Context(prec=60)
+
+
+def _exact_number(text: str) -> Decimal | None:
+    try:
+        d = Decimal(text)
+    except decimal.InvalidOperation:
+        return None
+    return d if d.is_finite() else None
+
+
+def _dec(x: float) -> Decimal:
+    return Decimal(repr(x))  # the table's decimal spelling, not its binary value
+
+
 def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float:
     unit_out = output_unit if output_unit is not None else "ms"
     trimmed = _trim_hocon_ws(value)
     i = _leading_numeric_prefix_len(trimmed)
     if i == 0:
         return math.nan
-    try:
-        num = float(trimmed[:i])
-    except ValueError:
-        return math.nan
-    if math.isnan(num):
+    num = _exact_number(trimmed[:i])
+    if num is None:
         return math.nan
     # S19.8 — unit match is case-sensitive per HOCON.md L1304 (lowercase only).
     unit = _trim_hocon_ws(trimmed[i:])
@@ -134,12 +169,12 @@ def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float
         return math.nan
     # S18.1 + S18.4: bare number (no unit) → treat as default unit (ms).
     if unit == "":
-        return num / divisor
+        return float(_EXACT.divide(num, _dec(divisor)))
     mult = _DURATION_UNITS.get(unit)
     if mult is None:
         return math.nan
-    ms = num * mult
-    return ms / divisor
+    ms = _EXACT.multiply(num, _dec(mult))
+    return float(_EXACT.divide(ms, _dec(divisor)))
 
 
 # S20 — Period format. Values are bounded to i32 like Lightbend
@@ -257,11 +292,8 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     i = _leading_numeric_prefix_len(trimmed)
     if i == 0:
         return math.nan
-    try:
-        num = float(trimmed[:i])
-    except ValueError:
-        return math.nan
-    if math.isnan(num):
+    num = _exact_number(trimmed[:i])
+    if num is None:
         return math.nan
     unit = _trim_hocon_ws(trimmed[i:])
     divisor = _OUTPUT_BYTE_UNITS.get(unit_out)
@@ -270,17 +302,101 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     # S18.1 + S18.4: bare number (no unit) → truncate toward zero (Lightbend
     # BigDecimal.toBigInteger) and treat as default unit (bytes).
     if unit == "":
-        num_bytes = math.trunc(num)
+        num_bytes = int(num)  # toward zero
         if abs(num_bytes) > _MAX_SAFE_INTEGER:
             raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
-        return num_bytes / divisor
+        return float(_EXACT.divide(Decimal(num_bytes), _dec(divisor)))
     # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
     # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
     mult = _BYTE_UNITS.get(unit)
     if mult is None:
         return math.nan
-    num_bytes_f = num * mult
-    if abs(num_bytes_f) > _MAX_SAFE_INTEGER:
+    num_bytes_d = _EXACT.multiply(num, _dec(mult))
+    if abs(num_bytes_d) > _MAX_SAFE_INTEGER:
         raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
-    result = num_bytes_f / divisor
-    return round(result) if unit_out == "B" else result
+    if unit_out == "B":
+        return round(num_bytes_d)  # half-even, like round() on the float before
+    return float(_EXACT.divide(num_bytes_d, _dec(divisor)))
+
+
+UnitProblem = Literal["invalid", "negative", "overflow"]
+
+# The unit systems' names, as they appear in error messages.
+UNIT_DURATION = "duration"
+UNIT_BYTE_SIZE = "byte size"
+UNIT_PERIOD = "period"
+
+
+class UnitReadError(ValueError):
+    """A unit value its reader rejects.
+
+    ``what`` names the unit system (``"duration"`` / ``"byte size"`` /
+    ``"period"``), ``problem`` says why, and ``raw`` is the text that was read.
+    The reader does not know the key path; callers attach it with
+    :meth:`describe`. A ``ValueError`` so that validators which wrap value
+    errors (Pydantic) report it with their own location.
+    """
+
+    def __init__(self, what: str, problem: UnitProblem, raw: str) -> None:
+        self.what = what
+        self.problem: UnitProblem = problem
+        self.raw = raw
+        super().__init__(self.describe())
+
+    def describe(self, path: str | None = None) -> str:
+        at = f" at {path}" if path is not None else ""
+        if self.problem == "negative":
+            return f"{self.what} must be non-negative{at}: {self.raw!r}"
+        if self.problem == "overflow":
+            return f"{self.what} overflows the representable range{at}: {self.raw!r}"
+        return f"invalid {self.what}{at}: {self.raw!r}"
+
+
+def is_duration_unit(unit: str) -> bool:
+    """Whether ``unit`` is an output unit ``read_duration`` accepts."""
+    return unit in _OUTPUT_DURATION_UNITS
+
+
+def is_byte_unit(unit: str) -> bool:
+    """Whether ``unit`` is an output unit ``read_bytes`` accepts."""
+    return unit in _OUTPUT_BYTE_UNITS
+
+
+def read_duration(raw: str, unit: DurationUnit | None = None) -> float:
+    """A HOCON duration in ``unit`` (default ms). Raises :class:`UnitReadError`."""
+    result = parse_duration(raw, unit)
+    if math.isnan(result):
+        raise UnitReadError(UNIT_DURATION, "invalid", raw)
+    return result
+
+
+def read_timedelta(raw: str) -> timedelta:
+    """A HOCON duration as a ``timedelta``. Raises :class:`UnitReadError`,
+    including when the duration is past ``timedelta``'s range."""
+    ms = read_duration(raw)
+    try:
+        return timedelta(milliseconds=ms)
+    except OverflowError:
+        raise UnitReadError(UNIT_DURATION, "overflow", raw) from None
+
+
+def read_bytes(raw: str, unit: ByteUnit | None = None) -> float:
+    """A non-negative HOCON byte size in ``unit`` (default bytes). Raises
+    :class:`UnitReadError`."""
+    try:
+        result = parse_bytes(raw, unit)
+    except OverflowError:
+        raise UnitReadError(UNIT_BYTE_SIZE, "overflow", raw) from None
+    if math.isnan(result):
+        raise UnitReadError(UNIT_BYTE_SIZE, "invalid", raw)
+    if result < 0:
+        raise UnitReadError(UNIT_BYTE_SIZE, "negative", raw)
+    return result
+
+
+def read_period(raw: str) -> tuple[int, int, int]:
+    """A HOCON period as ``(years, months, days)``. Raises :class:`UnitReadError`."""
+    parsed = parse_period(raw)
+    if parsed is None:
+        raise UnitReadError(UNIT_PERIOD, "invalid", raw)
+    return parsed

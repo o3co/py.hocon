@@ -18,6 +18,7 @@ from .errors import (
     ParseError,
     ResolveError,
 )
+from .markers import Bytes, Duration
 from .parse import parse, parse_file, parse_string
 from .value import (
     HoconArray,
@@ -47,8 +48,10 @@ except PackageNotFoundError:  # pragma: no cover — uninstalled source tree
     __version__ = "0.0.0"
 
 __all__ = [
+    "Bytes",
     "Config",
     "ConfigError",
+    "Duration",
     "HoconArray",
     "HoconObject",
     "HoconScalar",

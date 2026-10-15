@@ -45,6 +45,10 @@ dev = [
   # the optional path is actually exercised rather than skipped — a suite that
   # silently skips it would report green while the adapter went untested.
   "ruamel.yaml>=0.18",
+  # Pydantic v2 is never imported by the library, but the unit markers
+  # (hocon.Bytes / hocon.Duration) implement its schema hook. Installed for
+  # development and CI so that path is tested against the real thing.
+  "pydantic>=2",
 ]
 
 [tool.hatch.build.targets.wheel]

@@ -135,7 +135,8 @@ making it a strong fit for anything beyond flat key-value config.
   `cfg.get(path, default)`, iteration, `len`, `dict(cfg)`, `**cfg`
 - Typed decoding: `cfg.decode(MyDataclass)` — recursive dataclass
   construction (kebab-case/camelCase key matching, defaults, `Optional`,
-  `list[T]` / `dict[str, T]`, `timedelta` durations, `Enum`) and Pydantic v2
+  `list[T]` / `dict[str, T]`, `timedelta` durations, `Enum`, byte sizes and
+  durations via `Annotated[int, hocon.Bytes()]` markers) and Pydantic v2
   delegation via `model_validate`
 - HOCON emitter: `cfg.render_hocon()` renders a resolved config back to
   HOCON text with a round-trip guarantee (parsing the output reproduces the
@@ -237,6 +238,55 @@ from the value at `path`), mirroring go.hocon's `Unmarshal` / `UnmarshalPath`:
   whole-number floats with wholeness derived from the decimal text
   (`3.0` → `3`, `2.5` → error). HOCON `null` only decodes into an
   optional field.
+
+#### Unit values: `hocon.Bytes` / `hocon.Duration`
+
+Annotate a field with a unit marker to read a HOCON byte size or duration with
+the same rules as `get_bytes` / `get_duration` (units are case-sensitive, a
+bare number is bytes / ms, byte sizes are non-negative). The marker owns only
+the unit syntax; constraints stay in the type:
+
+```python
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Annotated
+
+import hocon
+from pydantic import BaseModel, Field
+
+@dataclass
+class Server:
+    max_body: Annotated[int, hocon.Bytes()]          # "64KiB" → 65536
+    cache: Annotated[float, hocon.Bytes("MiB")]      # "512KiB" → 0.5
+    timeout: Annotated[timedelta, hocon.Duration()]  # "30m" → 0:30:00
+    retry_s: Annotated[float, hocon.Duration("s")]   # "1.5m" → 90.0
+
+class Limits(BaseModel):  # the same markers work in Pydantic v2 models
+    max_body: Annotated[int, hocon.Bytes(), Field(gt=1024)]
+```
+
+- `Bytes(unit="B")` annotates `int` or `float`; `Duration(unit="ms")`
+  annotates `int`, `float`, or `timedelta`. An `int` field rejects a
+  fractional result (`"512B"` in `KiB`). `Optional`, `list[...]` and
+  `dict[str, ...]` positions work.
+- Errors carry the key path (`invalid byte size at server.max-body: '64KB'`);
+  in a Pydantic model they are validation errors at the field's location.
+- A marker acts only on the values `Config.decode` reads from a config (for
+  Pydantic, through a validation context on decode's `model_validate` call).
+  Constructing a model, a `default_factory`, `model_validate(model.model_dump())`
+  and JSON round-trips see the field as its plain type, so values are not
+  converted twice (`Limits(max_body=65536)` stays `65536`). With
+  `validate_default=True` a default is validated as part of decode, so write it
+  in HOCON form (`"1.5m"`). A model that overrides `__init__` does not
+  receive the validation context (a Pydantic limitation), so markers inside it
+  do not act — use a `model_validator` instead of overriding `__init__`.
+- Pydantic models receive plain values, so there a number is read through its
+  value rather than its source text: a bare number in exponent form (`1e3`)
+  reads as `1000`, while the getters and dataclass decoding reject it. Values
+  written with a unit read the same either way.
+- A plain `timedelta` field in a Pydantic model keeps Pydantic's own parsing
+  (ISO 8601, bare numbers as seconds); use `Annotated[timedelta,
+  hocon.Duration()]` for HOCON durations.
 
 ### Value factories
 
