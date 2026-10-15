@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-10-16
+
 ### Added
 
 - **Exponent forms in unit values (extra-spec E20, xx.hocon#111).** The
@@ -53,7 +55,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a number (`15`); `get_number` on such text raises `ConfigError` as for any
   string.
 
-- **Unresolved paths raise `NotResolvedError` everywhere (E12 decision 12).**
+- **Resolved paths read and unresolved values raise `NotResolvedError` (E12
+  decision 12).**
   - After `resolve(allow_unresolved=True)`, a subtree that did resolve now
     reads normally: `get_config` / `get_value` used the pre-resolve tree and
     raised for it while another part stayed unresolved.
