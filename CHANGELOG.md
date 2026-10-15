@@ -28,12 +28,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   E20).** `get_duration` / `get_bytes` (and decoding) compute the unit
   conversion in `Decimal` and round to `float` once, so `1.001s` is `1001.0`
   ms rather than `1000.9999999999999`, and `1.1MB` read in `KB` is `1100.0`.
+
 - **BREAKING (E20): a fractional byte size truncates toward zero after the
   exact product**, like Lightbend's `BigDecimal.toBigInteger`, instead of
   rounding half-even: `1.0009kB` is `1000` bytes (was `1001`), and
   `0.001EiB` is `1152921504606846` (was `…847`). The truncation now also
   applies before converting to a requested output unit (`get_bytes(p, "KB")`
-  reads `1.0009kB` as `1.0`, was `1.0009`). Fixtures ub07 / ub08.
+  reads `1.0009kB` as `1.0`, was `1.0009`). A byte size read in bytes (the
+  default unit) is now always an `int`; a value without a unit used to come
+  back as a `float` (`1024.0`, now `1024`). The product stays exact for any
+  number of digits, and a count of `1e16` or more is rejected as overflow
+  before any big-number arithmetic. Fixtures ub07 / ub08.
 
 - **`get_bytes` reports an overflowing byte size (`10PB`) as a `ConfigError`
   carrying the key path**, like its other failures, instead of leaking a bare

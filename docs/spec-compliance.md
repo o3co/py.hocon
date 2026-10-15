@@ -731,7 +731,7 @@ Citation shorthand used on `tests:` lines:
   tests: tests/test_spec_units.py (TestS18_3UnitNameLettersOnly: digit and symbol in unit rejected)
   status: ✅
 - **S18.4** String with no unit → interpreted with default unit — §Units format (L1290)
-  tests: period: test_period_bare_integer_string (up01 scenario), test_period_leading_trailing_ws (up02 scenario); units: ud01–ud06 (duration: bare / ws / fractional / negative no-unit strings → ms default), ub01–ub04 (bytes: bare / ws / fractional-truncated / negative no-unit strings → byte default)
+  tests: period: test_period_bare_integer_string (up01 scenario), test_period_leading_trailing_ws (up02 scenario); units: ud01–ud06 (duration: bare / ws / fractional / negative no-unit strings → ms default), ud11 (E20: `"1.001"` → exactly 1.001 ms), ub01–ub04 (bytes: bare / ws / fractional-truncated / negative no-unit strings → byte default)
   status: ✅ — ud06 caveat: py returns signed −500 ms for `"-500"` (Lightbend `java.time.Duration` / go.hocon-faithful); rs pins `Err` only because `std::time::Duration` is unsigned (rs-side constraint, documented in rs's CHANGELOG) — the literal rs expectation is kept as a strict-xfail tripwire in `tests/test_units_default.py`, not a py violation
 
 ### S19. Duration format
@@ -795,8 +795,8 @@ accessors too (ts.hocon#198, go.hocon#199); rs is the reference sibling.
   tests: smoke: test_duration_and_bytes (`1K` → 1024, binary not decimal); units: ub05 (`1024K` → 1_048_576 — Lightbend binary ground truth, NOT SI-decimal 1_024_000)
   status: ✅ — the full single-letter ladder is now pinned at accessor level (tests/test_spec_units.py TestS21_4SingleLetterBinary: K–P at count 1, E/Z/Y via fractional counts under the 2^53 guard; `Z`/`z`/`Y`/`y` were missing from the ported table and added in this branch)
 - **S21.5** Fractional values supported (`0.5M`) — §Units format (L1281-1294) + §Size in bytes (L1335-1342)
-  tests: units: ub03 (`"1024.5"` → 1024 — fractional accepted, truncated toward zero per Lightbend `BigDecimal.toBigInteger`, NOT rounded), ud05 (duration side: `"500.5"` → 500.5 ms / 500_500_000 ns)
-  status: ⚠️ — fractional acceptance and the truncation rule are pinned at accessor level; the fractional-times-multiplier form (`0.5M`/`0.5K` → 512·…) remains accessor-unpinned (bsl09 `0.5K` is consumed parse-side only; rs pins it via its fractional-binary unit tests)
+  tests: units: ub03 (`"1024.5"` → 1024 — fractional accepted, truncated toward zero per Lightbend `BigDecimal.toBigInteger`, NOT rounded), ub07 (`"1.0009kB"` → 1000 — fractional × unit, exact product then truncation, E20), ub08 (`"1.001kB"` → 1001 — exact before truncation, E20), ud05 / ud09 / ud10 (duration side: `"500.5"` → 500.5 ms, `"1.001s"` → 1001 ms, `"2.3h"` → 8280000 ms); spec-units: TestE20ExactByteProduct, the fractional binary-unit counts (`0.001EiB`, `0.001E`, …)
+  status: ✅ — fractional counts with and without a unit are pinned at accessor level, with E20's exact-product-then-truncate rule
 
 ### S22. Config object merging API
 

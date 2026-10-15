@@ -138,7 +138,9 @@ def _leading_numeric_prefix_len(trimmed: str) -> int:
 
 # Unit conversions run in Decimal and round to float once, so a value that is
 # exact in decimal stays exact (`1.001s` is 1001.0 ms, not 1000.9999999999999).
-_EXACT = decimal.Context(prec=60)
+# Unbounded exponents: a huge number reads as an infinite float, never as a
+# decimal.Overflow. 60 digits are plenty for a result that becomes a float.
+_EXACT = decimal.Context(prec=60, Emax=decimal.MAX_EMAX, Emin=decimal.MIN_EMIN)
 
 
 def _exact_number(text: str) -> Decimal | None:
@@ -303,17 +305,25 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     # BigDecimal.toBigInteger), then convert to the output unit, rounding once.
     # S18.1 + S18.4: a bare number (no unit) is bytes.
     if unit == "":
-        num_bytes_d = num
+        mult: float = 1
     else:
         # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
         # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
-        mult = _BYTE_UNITS.get(unit)
-        if mult is None:
+        found = _BYTE_UNITS.get(unit)
+        if found is None:
             return math.nan
-        num_bytes_d = _EXACT.multiply(num, _dec(mult))
-    num_bytes = int(num_bytes_d)  # toward zero: 1.0009kB is 1000, not 1001
-    if abs(num_bytes) > _MAX_SAFE_INTEGER:
+        mult = found
+    # Every unit is at least one byte, so a count of 1e16 or more is past 2^53
+    # whatever the unit: reject it before any arithmetic on a huge number.
+    if num.adjusted() > 15:
         raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
+    # Enough precision for the whole product, so nothing rounds before the
+    # truncation (0.999…9kB with any number of nines is 999 bytes, not 1000).
+    exact = decimal.Context(prec=len(num.as_tuple().digits) + 30)
+    num_bytes_d = exact.multiply(num, _dec(mult))
+    if abs(num_bytes_d) >= _MAX_SAFE_INTEGER + 1:
+        raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
+    num_bytes = int(num_bytes_d)  # toward zero: 1.0009kB is 1000, not 1001
     if unit_out == "B":
         return num_bytes
     return float(_EXACT.divide(Decimal(num_bytes), _dec(divisor)))

@@ -243,3 +243,38 @@ class TestS21_4SingleLetterBinary:
     )
     def test_e_z_y_recognised(self, value: str, power: int, count: float) -> None:
         assert _bytes(value) == _trunc(repr(count), 1024**power)
+
+
+class TestE20ExactByteProduct:
+    """E20 — the byte product is exact before truncation, whatever the number
+    of digits, and huge counts are rejected cheaply as overflow."""
+
+    def test_long_fraction_is_not_rounded_before_truncation(self) -> None:
+        # 65 nines: a 60-digit context would round the product up to 1000.
+        assert _bytes("0." + "9" * 65 + "kB") == 999
+        assert _bytes("0." + "9" * 65 + "KiB") == 1023
+
+    def test_truncation_happens_before_the_sign_check(self) -> None:
+        # -0.5 bytes truncates to 0 and is accepted (Lightbend: toBigInteger,
+        # then signum); -500 bytes is rejected.
+        assert _bytes("-0.0005kB") == 0
+        with pytest.raises(ConfigError, match="non-negative"):
+            _bytes("-0.5kB")
+
+    def test_truncated_product_at_the_guard(self) -> None:
+        # 9007199254740991.9 bytes truncates to 2^53 - 1, which is in range.
+        assert _bytes("9007199254740.9919kB") == 2**53 - 1
+        with pytest.raises(ConfigError, match="overflows"):
+            _bytes("9007199254741kB")
+
+    @pytest.mark.parametrize("unit", ["B", "kB", ""])
+    def test_huge_count_is_an_overflow_error(self, unit: str) -> None:
+        # Rejected by magnitude before any big-number arithmetic (no slow
+        # int conversion, no decimal.Overflow escaping as a bare exception).
+        with pytest.raises(ConfigError, match="overflows"):
+            _bytes("1" + "0" * 1_000_000 + unit)
+
+    def test_huge_duration_does_not_raise_decimal_overflow(self) -> None:
+        # An astronomically large duration reads as an infinite float, as it
+        # did before the Decimal arithmetic.
+        assert _duration_ms("1" + "0" * 1_000_000 + "d") == float("inf")
