@@ -30,11 +30,10 @@ Held out of this harness:
 - **deferred-resolution dr*** — ``<name>-expected.error`` sidecars belong to the
   E12 scenario-YAML lifecycle (parse-with-options → withFallback → resolve);
   they are not single-``.conf`` fixtures and cannot be driven by ``parse_file``.
-- **us15-incomplete-exp (known gap)** — ``a = 1e+x`` carries a Lightbend
-  ``.error`` sidecar ('+' reserved outside quotes) but ts.hocon (``it.fails``,
-  ts.hocon#73) and rs.hocon (``#[should_panic]`` tripwire) both currently accept
-  it; py.hocon accepts it too. Kept in the corpus as a strict xfail tripwire so
-  the run flags the moment py.hocon starts rejecting it.
+
+us15-incomplete-exp (``a = 1e+x``) was a strict-xfail known gap until the lexer
+reserved ``+`` inside unquoted runs (E8 step 4 / S8.1); it is now an ordinary
+error fixture.
 """
 
 from __future__ import annotations
@@ -83,18 +82,10 @@ _IMPL_OVERRIDE_ERRORS = (
     "include-reservation/ir04-include-nested-object",  # E9 — `a = { include.bar = 1 }` (S12.5)
 )
 
-# Cross-impl known gaps: the sidecar demands an error, but every o3co impl
-# currently accepts the input and pins the gap with a tripwire (ts.hocon#73
-# `it.fails`; rs.hocon `s8_6_us15_known_gap_tripwire` #[should_panic]).
-# strict=True is the pytest equivalent: an XPASS (py.hocon starts rejecting)
-# fails the run, surfacing the closed gap for triage.
-_KNOWN_GAPS: dict[str, str] = {
-    "unquoted-starts/us15-incomplete-exp": (
-        "known gap: `a = 1e+x` — '+' reservation mid-unquoted-run is not enforced; "
-        "py.hocon parses it as the string \"1e+x\" like ts.hocon (ts.hocon#73 it.fails) "
-        "and rs.hocon (#[should_panic] tripwire); Lightbend rejects (.error sidecar)"
-    ),
-}
+# Known gaps: the sidecar demands an error, but py.hocon accepts the input.
+# Each is a strict xfail, so an XPASS (the gap closed) fails the run for
+# triage. None at present (us15 closed by the E8 `+` reservation).
+_KNOWN_GAPS: dict[str, str] = {}
 
 # On-disk error-fixture census at the time of writing (guard floor):
 #   13 legacy -expected-error.json  (cycle, test13, st-err01–11)

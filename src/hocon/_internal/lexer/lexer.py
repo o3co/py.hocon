@@ -7,6 +7,8 @@ out of scope for the same reason as ts.hocon.
 
 from __future__ import annotations
 
+import re
+
 from ...errors import ParseError
 from .token import Segment, SubstPayload, Token, TokenKind
 
@@ -85,6 +87,18 @@ def _is_unquoted_start(ch: str) -> bool:
     if ch in '{}[],:=+#"$?!@*&^`\\':
         return False
     return True
+
+
+# A number mantissa followed by its exponent marker (`1e`, `-1.5E`, `1.e`): the
+# only place an unquoted run may carry a `+`, as the exponent's sign.
+_EXPONENT_PREFIX_RE = re.compile(r"-?\d+(?:\.\d*)?[eE]")
+
+
+def _is_exponent_sign(run: str, nxt: str) -> bool:
+    """True when a ``+`` after ``run`` is the sign of a number's exponent
+    (``1e+5``): the run so far is a mantissa plus ``e`` / ``E`` and a digit
+    follows. Any other ``+`` outside quotes is reserved (S8.1, E8)."""
+    return _is_decimal_digit(nxt) and _EXPONENT_PREFIX_RE.fullmatch(run) is not None
 
 
 def _is_unquoted_continue(ch: str, nxt: str) -> bool:
@@ -224,6 +238,16 @@ class _Lexer:
                 while self.pos < len(self.input) and _is_unquoted_continue(
                     self._peek(), self._peek(1)
                 ):
+                    if self._peek() == "+" and not _is_exponent_sign(value, self._peek(1)):
+                        # S8.1 / E8: `+` is reserved outside quotes (the `+=`
+                        # operator); inside a run it may only be an exponent
+                        # sign. `1e+x`, `1+2` and `foo+bar` are errors.
+                        raise ParseError(
+                            "reserved character '+' outside quotes "
+                            "(quote the value to use '+' as text)",
+                            self.line,
+                            self.col,
+                        )
                     value += self._advance()
                 # ts.hocon calls value.trimEnd() here, but it is a no-op: the run
                 # stops at any HOCON whitespace char, and JS's trimEnd set is a

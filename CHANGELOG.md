@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BREAKING (spec fix, S8.1 / E8): `+` is reserved outside quotes.** An
+  unquoted value or key that contains `+` is now a `ParseError`
+  ("reserved character '+' outside quotes"), as in Lightbend and go.hocon,
+  instead of being read as text: `a = 1e+x` (fixture us15, E8 step 4),
+  `a = 1+2`, `a = foo+bar`, `a+b = 1`. The only `+` left in an unquoted run is
+  the sign of a number's exponent (`1e+5`, `-1.5E+3`), and `+=` is unchanged.
+  **Workaround:** quote a value that needs a literal `+` (`a = "foo+bar"`,
+  `"a+b" = 1`).
+
 - **A duration past the float range is an error (extra-spec E21).**
   `get_duration` (and decoding into `int` / `float` with `Duration`) raises
   `ConfigError("duration overflows the representable range …")` (a
