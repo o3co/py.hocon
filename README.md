@@ -120,13 +120,13 @@ In a large codebase, configuration tends to leak: one big file that every team e
 - **Each module owns a namespace and ships its own defaults.** The `auth` module keeps `auth { … }` next to its code, with every default filled in. The application never copies those defaults; it brings them in with one `include`.
 - **The application overrides only what differs.** Later layers deep-merge over earlier ones, so the application states two keys, not the whole block.
 - **Each module reads only its own subtree, through its own schema.** The module asks for `auth` and validates it against the schema it defines. The shape of that section is the module's contract; nothing else in the file is visible to it.
-- **Wiring between modules lives in the application.** A module that needs a database says so with an optional substitution (`${?shared.db}`). The application decides where that value comes from. Modules never reference each other, so dependencies run one way.
+- **Wiring between modules lives in the application.** The module only declares the keys it reads (`auth.db`) and leaves them without a default when the application must supply them. The application connects them to shared values (`auth.db = ${shared.db}`). Modules never reference each other or the application's keys, so dependencies run one way.
 
 ```hocon
 # auth/reference.conf: shipped inside the auth package, owned by the auth team
 auth {
   session { lifetime = 30m, max-body = 64KiB }
-  db = ${?shared.db}
+  # db: no default; the application supplies auth.db
 }
 ```
 
@@ -135,6 +135,7 @@ auth {
 include package("github.com/acme/auth", "reference.conf")
 
 shared.db { host = db.internal, port = 5432 }
+auth.db = ${shared.db}       # wiring lives in the application
 auth.session.lifetime = 2h   # override what differs; the rest stays the module's default
 ```
 
@@ -161,16 +162,16 @@ class Db:
 @dataclass
 class Auth:
     session: Session
-    db: Db | None = None  # wired by the application, or absent
+    db: Db  # no default: the application must supply auth.db
 
 
 def load_auth(config: hocon.Config) -> Auth:
     return config.decode(Auth, "auth")  # reads only its own subtree
 ```
 
-The dataclass fields match the kebab-case keys (`max_body` reads `max-body`), and the unit markers read `2h` and `64KiB` with the getters' rules. Without the application's `shared.db`, `db` decodes as `None`.
+The dataclass fields match the kebab-case keys (`max_body` reads `max-body`), and the unit markers read `2h` and `64KiB` with the getters' rules. If the application does not supply `auth.db`, decoding fails with `ConfigError: missing required field at auth.db`.
 
-`include package(...)` is how a module publishes its defaults without the application knowing where its files live. py.hocon finds a package by a filesystem convention, `<base>/<id>/<file>`, where `<base>` is the first that applies of `resolve_from` (one directory or a list), `base_dir`, the including file's directory, and the working directory; or it uses your own `package_resolver` (see [Parse functions](#parse-functions) and [Known Limitations](#known-limitations)). On the JVM, Lightbend's `reference.conf` convention plays the same role.
+`include package(...)` is not part of HOCON.md: it is a convention shared by the o3co implementations ([E11](https://github.com/o3co/xx.hocon/blob/main/docs/extra-spec-conventions.md#e11)), a non-JVM counterpart to `include classpath(...)`. It is how a module publishes its defaults without the application knowing where its files live. py.hocon finds a package by a filesystem convention, `<base>/<id>/<file>`, where `<base>` is the first that applies of `resolve_from` (one directory or a list), `base_dir`, the including file's directory, and the working directory; or it uses your own `package_resolver` (see [Parse functions](#parse-functions) and [Known Limitations](#known-limitations)). On the JVM, Lightbend's `reference.conf` convention plays the same role.
 
 ## Features
 
