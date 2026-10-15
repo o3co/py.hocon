@@ -595,6 +595,51 @@ V8-backed siblings (go.hocon, rs.hocon, ts.hocon). For typical application confi
 in under 20 ms. If you parse very large configs on a hot path, cache the resulting
 `Config`.
 
+## Comparison
+
+✅ Full support / ⚠️ Partial / ❌ Not supported
+
+### HOCON Implementation
+
+Verified against [pyhocon](https://github.com/chimpler/pyhocon) **v0.3.63** on 2026-10-16.
+
+| Feature | py.hocon | pyhocon v0.3.63 |
+| --- | :---: | :---: |
+| Substitutions (`${path}`, including self-references) | ✅ | ✅ |
+| Optional substitutions (`${?path}`) | ✅ | ✅ |
+| Env variable fallback | ✅ | ✅ |
+| Include (`include "file"` / `file(...)`) | ✅ | ✅ |
+| Extensionless include (`include "app"` → `.conf` / `.json` / `.properties`) | ✅ | ❌ (opens the literal path) |
+| `include required(...)` | ✅ | ✅ |
+| `include url(...)` | ❌ (by design — see [Known Limitations](#known-limitations)) | ✅ |
+| `include package(...)` | ⚠️ (`package("id", "file")` by a filesystem convention; installed Python packages need a custom `package_resolver` — see [Known Limitations](#known-limitations)) | ✅ (`package("pkg:path")`: installed Python packages, found via `importlib`) |
+| Glob includes (`include "conf.d/*.conf"`, not in HOCON.md) | ❌ (the pattern is read as a literal path, so a non-required include loads nothing) | ✅ |
+| `.properties` includes | ✅ | ⚠️ (read as HOCON, so only a file that is also valid HOCON loads) |
+| Circular include detection | ✅ | ❌ (a cycle ends in `RecursionError`) |
+| Object/Array concatenation | ✅ | ✅ |
+| `+=` append | ✅ | ⚠️ (`a += [x]` concatenates instead of appending one element; a scalar operand replaces the value or raises) |
+| Duration parsing (`30s`, `5m`) | ✅ (`get_duration`) | ⚠️ (unquoted whole numbers only, converted at parse time to `timedelta`, or `relativedelta` with `python-dateutil`) |
+| Period parsing (`2w`, `3mo`, `1y`) | ✅ (`get_period`) | ⚠️ (months and years need the `Duration` extra, `python-dateutil`; converted at parse time) |
+| Byte size parsing (`512MB`) | ✅ (`get_bytes`) | ❌ (stays a string) |
+| Deferred resolution (parse / `with_fallback` / resolve) | ✅ | ✅ |
+| Build a config from a `dict` | ✅ (`from_map`) | ✅ (`ConfigFactory.from_dict`) |
+| Dict-style access (`cfg["a.b"]`) | ✅ (read-only `Mapping`) | ✅ (`OrderedDict` subclass) |
+| In-place mutation (`put` / `pop`) | ❌ (`Config` is immutable; layer with `from_map` + `with_fallback`) | ✅ |
+| Typed decoding (dataclasses / Pydantic v2) | ✅ (`cfg.decode(cls)`) | ❌ |
+| Errors with line / column | ✅ (`ParseError` / `ResolveError` carry `.line` / `.col` / `.file`; include errors name the file but not a line) | ⚠️ (syntax errors are pyparsing exceptions with `lineno` / `col`; substitution errors give line / column only in the message) |
+| Render back to HOCON | ✅ (`render_hocon()`) | ✅ (`HOCONConverter.to_hocon`) |
+| Convert to JSON / YAML / .properties | ⚠️ (JSON via `json.dumps(cfg.to_object())`; YAML and .properties via the separate [hocon2](https://github.com/o3co/hocon2) CLI) | ✅ (`HOCONConverter`) |
+| Command-line tool | ❌ (use the separate [hocon2](https://github.com/o3co/hocon2) CLI) | ✅ (`pyhocon`: HOCON → JSON / YAML / .properties / HOCON) |
+| Format adapters (env, `.env`, TOML, YAML, JSON5, JSONC, .properties) | ✅ (see [Format adapters](#format-adapters)) | ❌ |
+| Type hints (`py.typed`) | ✅ | ❌ |
+| Supported Python versions | 3.11+ | 3.7–3.12 (classifiers; no `python_requires`) |
+| Runtime dependencies | None (pure stdlib) | `pyparsing>=3.0.0`, plus `python-dateutil` for the `Duration` extra |
+
+Fixture-level conformance is measured separately. In the 2026-07-15 cross-library
+snapshot ([xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md)),
+pyhocon 0.3.63, the version compared above, passed 106 of 134 spec-corpus fixtures
+(79.1%) and 8/16 of the Lightbend suite; py.hocon, then at v1.8.0, passed 134/134 and 14/16.
+
 ## Spec Compliance
 
 Conformance against the [Lightbend HOCON specification](https://github.com/lightbend/config/blob/main/HOCON.md)
