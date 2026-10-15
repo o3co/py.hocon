@@ -15,6 +15,7 @@ from decimal import Decimal
 import pytest
 
 from hocon import ConfigError, parse
+from hocon.coerce import UnitReadError, read_bytes, read_duration
 
 
 def _duration_ms(value: str) -> float:
@@ -267,14 +268,18 @@ class TestE20ExactByteProduct:
         with pytest.raises(ConfigError, match="overflows"):
             _bytes("9007199254741kB")
 
+    # The huge-count cases call the readers directly: lexing a megabyte of
+    # config text would dominate the test, and the getters' mapping of
+    # UnitReadError to ConfigError is pinned above.
     @pytest.mark.parametrize("unit", ["B", "kB", ""])
     def test_huge_count_is_an_overflow_error(self, unit: str) -> None:
         # Rejected by magnitude before any big-number arithmetic (no slow
         # int conversion, no decimal.Overflow escaping as a bare exception).
-        with pytest.raises(ConfigError, match="overflows"):
-            _bytes("1" + "0" * 1_000_000 + unit)
+        with pytest.raises(UnitReadError) as e:
+            read_bytes("1" + "0" * 1_000_000 + unit)
+        assert e.value.problem == "overflow"
 
     def test_huge_duration_does_not_raise_decimal_overflow(self) -> None:
         # An astronomically large duration reads as an infinite float, as it
         # did before the Decimal arithmetic.
-        assert _duration_ms("1" + "0" * 1_000_000 + "d") == float("inf")
+        assert read_duration("1" + "0" * 1_000_000 + "d") == float("inf")
