@@ -397,6 +397,7 @@ class Config(Mapping[str, Any]):
                 origin_description=self._origin_description,
                 res_obj_root=receiver_tree if had_placeholders else None,
                 resolve_opts=resolve_opts if had_placeholders else None,
+                pending=filtered if had_placeholders else None,
             )
 
         return Config(
@@ -509,7 +510,7 @@ class Config(Mapping[str, Any]):
         path is unresolved instead of reporting it absent (or partial)."""
         v = self._lookup_key_or_path(path)
         if not self._resolved and (v is None or not isinstance(v, HoconScalar)):
-            if self._subtree_has_placeholders(path):
+            if self._subtree_has_placeholders(path, literal_first=True):
                 raise NotResolvedError(path)
         return v
 
@@ -537,16 +538,23 @@ class Config(Mapping[str, Any]):
             current = nxt
         return current
 
-    def _subtree_has_placeholders(self, path: str) -> bool:
+    def _subtree_has_placeholders(self, path: str, *, literal_first: bool = False) -> bool:
+        """Whether ``path`` (or an ancestor on the way to it) is unresolved.
+
+        ``literal_first`` mirrors ``_lookup_key_or_path``: a literal top-level
+        key wins over path traversal. The typed getters traverse only.
+        """
         tree = self._pending
         if tree is None:
             return False
-        if path in tree.fields:  # literal top-level key, as _lookup_key_or_path
+        if literal_first and path in tree.fields:
             return _has_placeholder(tree.fields[path])
         cur: Any = tree
         for seg in _split_config_path(path):
             if not isinstance(cur, (ResObj, HoconObject)):
-                return False
+                # A placeholder (or an array holding one) where an object
+                # should be: the path below it is unresolved, not absent.
+                return _has_placeholder(cur)
             val = cur.fields.get(seg)
             if val is None:
                 return False

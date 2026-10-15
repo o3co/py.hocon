@@ -72,3 +72,31 @@ def test_partial_resolve_can_still_be_completed() -> None:
     ).resolve(allow_unresolved=True)
     done = cfg.with_fallback(parse_string("missing = 7")).resolve()
     assert done.to_object() == {"a": {"x": 1}, "b": {"y": 7}, "v": 1, "missing": 7}
+
+
+def test_typed_getter_traverses_even_when_a_literal_dotted_key_exists() -> None:
+    cfg = parse_string('"a.b" = 1\na.b { x = ${missing} }', resolve_substitutions=False)
+    with pytest.raises(NotResolvedError):
+        cfg.get_config("a.b")  # the nested a.b, which is unresolved
+    assert cfg.get("a.b") == 1  # get() prefers the literal key, as before
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_path_under_an_unresolved_value_is_unresolved_not_absent(partial: bool) -> None:
+    cfg = parse_string("a = ${missing}", resolve_substitutions=False)
+    if partial:
+        cfg = cfg.resolve(allow_unresolved=True)
+    with pytest.raises(NotResolvedError):
+        cfg.get_value("a.b")
+    with pytest.raises(NotResolvedError):
+        cfg.get_int("a.b")
+
+
+def test_resolve_with_partial_keeps_resolved_paths_readable() -> None:
+    receiver = parse_string("a { x = ${v} }\nb = ${missing}", resolve_substitutions=False)
+    cfg = receiver.resolve_with(parse_string("v = 1"), allow_unresolved=True)
+    assert not cfg.is_resolved()
+    assert cfg.get("a") == {"x": 1}
+    assert cfg["a"] == {"x": 1}
+    with pytest.raises(NotResolvedError):
+        cfg.get("b")
