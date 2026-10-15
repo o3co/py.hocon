@@ -127,3 +127,15 @@ def test_has_raises_on_an_unresolved_path_like_lightbend_haspath() -> None:
     assert cfg.has("v")
     assert cfg.has("u.y")
     assert not cfg.has("zz")
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_unresolved_literal_dotted_key_is_not_replaced_by_the_nested_path(partial: bool) -> None:
+    cfg = parse_string('"a.b" = ${missing}\na.b = 1', resolve_substitutions=False)
+    if partial:
+        cfg = cfg.resolve(allow_unresolved=True)
+    with pytest.raises(NotResolvedError):
+        cfg["a.b"]
+    with pytest.raises(NotResolvedError):
+        dict(cfg)
+    assert cfg.get_int("a.b") == 1  # typed getters traverse the path

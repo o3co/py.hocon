@@ -550,6 +550,12 @@ class Config(Mapping[str, Any]):
     def _lookup_resolved(self, path: str) -> HoconValue | None:
         """``_lookup_key_or_path``, raising :class:`NotResolvedError` when the
         path is unresolved instead of reporting it absent (or partial)."""
+        if not self._resolved and self._pending is not None and path in self._pending.fields:
+            # The literal key wins even while its value is unresolved (it is
+            # then missing from _root, and the dotted-path fallback below
+            # would read an unrelated nested value instead).
+            if val_contains_placeholders(self._pending.fields[path]):
+                raise NotResolvedError(path)
         v = self._lookup_key_or_path(path)
         if not self._resolved and (v is None or not isinstance(v, HoconScalar)):
             if self._subtree_has_placeholders(path, literal_first=True):
