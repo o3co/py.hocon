@@ -383,3 +383,30 @@ class TestE20ExponentForms:
     def test_period_stays_integer_only(self) -> None:
         with pytest.raises(ConfigError, match="invalid period"):
             parse('p = "1e2d"').get_period("p")
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            # The unit is the trailing letters (Lightbend getUnits), so an 'e' /
+            # 'E' after the exponent is the exa unit: 1e-3 x 1024**6, truncated.
+            ("1e-3e", 1152921504606846),
+            ("1e-3E", 1152921504606846),
+        ],
+    )
+    def test_trailing_e_after_an_exponent_is_the_exa_unit(self, value: str, expected: int) -> None:
+        assert read_bytes(value) == expected
+
+    @pytest.mark.parametrize(
+        ("value", "problem"),
+        [
+            # 1 EiB is 2**60 bytes, past py's 2**53 - 1 byte cap (Lightbend,
+            # with a 64-bit long, returns 1152921504606846976).
+            ("1E", "overflow"),
+            ("2e1E", "overflow"),
+            ("1e3e3", "invalid"),  # "1e3e3" has no trailing unit: a bad number
+        ],
+    )
+    def test_exa_unit_edges_that_error(self, value: str, problem: str) -> None:
+        with pytest.raises(UnitReadError) as e:
+            read_bytes(value)
+        assert e.value.problem == problem
