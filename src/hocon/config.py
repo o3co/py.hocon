@@ -8,9 +8,8 @@ is already idiomatic Python. Deferred-resolution state (``resolve`` /
 
 from __future__ import annotations
 
-import math
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast, overload
 
@@ -34,11 +33,12 @@ from ._internal.resolver.types import (
 from .coerce import (
     ByteUnit,
     DurationUnit,
+    UnitReadError,
     coerce_boolean,
     coerce_number,
-    parse_bytes,
-    parse_duration,
-    parse_period,
+    read_bytes,
+    read_duration,
+    read_period,
 )
 from .errors import ConfigError, NotResolvedError
 from .numeric_array import numeric_object_to_array
@@ -215,23 +215,11 @@ class Config(Mapping[str, Any]):
 
     def get_duration(self, path: str, unit: DurationUnit | None = None) -> float:
         v = self._require_scalar(path)
-        if v.value_type != "string" and v.value_type != "number":
-            raise ConfigError(f"expected duration at {path}, got {v.value_type}", path)
-        result = parse_duration(v.raw, unit)
-        if math.isnan(result):
-            raise ConfigError(f"invalid duration at {path}: {v.raw!r}", path)
-        return result
+        return _read_unit_scalar(v, path, "duration", lambda raw: read_duration(raw, unit))
 
     def get_bytes(self, path: str, unit: ByteUnit | None = None) -> float:
         v = self._require_scalar(path)
-        if v.value_type != "string" and v.value_type != "number":
-            raise ConfigError(f"expected byte size at {path}, got {v.value_type}", path)
-        result = parse_bytes(v.raw, unit)
-        if math.isnan(result):
-            raise ConfigError(f"invalid byte size at {path}: {v.raw!r}", path)
-        if result < 0:
-            raise ConfigError(f"byte size must be non-negative at {path}: {v.raw!r}", path)
-        return result
+        return _read_unit_scalar(v, path, "byte size", lambda raw: read_bytes(raw, unit))
 
     def get_period(self, path: str) -> Period:
         """Calendar :class:`Period` at ``path`` (S20.1–S20.4). Accepts
@@ -240,12 +228,7 @@ class Config(Mapping[str, Any]):
         integer-only (Lightbend ``Integer.parseInt``): fractional values
         raise, unlike :meth:`get_duration` / :meth:`get_bytes`."""
         v = self._require_scalar(path)
-        if v.value_type != "string" and v.value_type != "number":
-            raise ConfigError(f"expected period at {path}, got {v.value_type}", path)
-        parsed = parse_period(v.raw)
-        if parsed is None:
-            raise ConfigError(f"invalid period at {path}: {v.raw!r}", path)
-        return Period(*parsed)
+        return Period(*_read_unit_scalar(v, path, "period", read_period))
 
     def get_config(self, path: str) -> Config:
         v = self._lookup_node(path)
@@ -574,6 +557,23 @@ def _scalar_to_py(raw: str, value_type: ScalarValueType) -> Any:
         coerced = coerce_number(raw)
         return coerced if coerced is not None else raw
     return raw
+
+
+R = TypeVar("R")
+
+
+def _read_unit_scalar(v: HoconScalar, path: str, what: str, read: Callable[[str], R]) -> R:
+    """Read a unit value (duration / byte size / period) out of a scalar node.
+
+    Shared by the typed getters and ``decode`` so both apply the same type
+    gate, the same reader, and the same path-carrying error messages.
+    """
+    if v.value_type != "string" and v.value_type != "number":
+        raise ConfigError(f"expected {what} at {path or '<root>'}, got {v.value_type}", path)
+    try:
+        return read(v.raw)
+    except UnitReadError as e:
+        raise ConfigError(e.describe(path or "<root>"), path) from None
 
 
 def _hocon_to_py(v: HoconValue) -> Any:

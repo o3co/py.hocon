@@ -1,5 +1,11 @@
 """Typed coercions for Config accessors: numbers, booleans, durations, byte sizes.
 
+The ``read_*`` functions are the single owner of each unit system's rules:
+the unit grammar plus its invariants (a byte size is non-negative, a period is
+integer-only). The typed getters and ``decode`` both read through them, so
+neither copies the other's checks. ``parse_*`` are the lower-level grammar
+helpers they wrap.
+
 Mirrors ts.hocon ``src/coerce.ts``. Duration unit names are case-sensitive
 (S19.8, HOCON.md L1304). Single-letter byte abbreviations are powers of two
 (S21.4, HOCON.md L1385).
@@ -11,16 +17,22 @@ from __future__ import annotations
 
 import math
 import re
+from typing import Literal
 
 __all__ = [
     "DECIMAL_NUMBER_RE",
     "ByteUnit",
     "DurationUnit",
+    "UnitProblem",
+    "UnitReadError",
     "coerce_boolean",
     "coerce_number",
     "parse_bytes",
     "parse_duration",
     "parse_period",
+    "read_bytes",
+    "read_duration",
+    "read_period",
 ]
 
 DECIMAL_NUMBER_RE = re.compile(r"-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
@@ -284,3 +296,58 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
         raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
     result = num_bytes_f / divisor
     return round(result) if unit_out == "B" else result
+
+
+UnitProblem = Literal["invalid", "negative", "overflow"]
+
+
+class UnitReadError(ValueError):
+    """A unit value its reader rejects.
+
+    ``what`` names the unit system (``"duration"`` / ``"byte size"`` /
+    ``"period"``), ``problem`` says why, and ``raw`` is the text that was read.
+    The reader does not know the key path; callers attach it with
+    :meth:`describe`. A ``ValueError`` so that validators which wrap value
+    errors (Pydantic) report it with their own location.
+    """
+
+    def __init__(self, what: str, problem: UnitProblem, raw: str) -> None:
+        self.what = what
+        self.problem: UnitProblem = problem
+        self.raw = raw
+        super().__init__(self.describe())
+
+    def describe(self, path: str | None = None) -> str:
+        at = f" at {path}" if path is not None else ""
+        if self.problem == "negative":
+            return f"{self.what} must be non-negative{at}: {self.raw!r}"
+        if self.problem == "overflow":
+            return f"{self.what} overflows the representable range{at}: {self.raw!r}"
+        return f"invalid {self.what}{at}: {self.raw!r}"
+
+
+def read_duration(raw: str, unit: DurationUnit | None = None) -> float:
+    """A HOCON duration in ``unit`` (default ms). Raises :class:`UnitReadError`."""
+    result = parse_duration(raw, unit)
+    if math.isnan(result):
+        raise UnitReadError("duration", "invalid", raw)
+    return result
+
+
+def read_bytes(raw: str, unit: ByteUnit | None = None) -> float:
+    """A non-negative HOCON byte size in ``unit`` (default bytes). Raises
+    :class:`UnitReadError`."""
+    result = parse_bytes(raw, unit)
+    if math.isnan(result):
+        raise UnitReadError("byte size", "invalid", raw)
+    if result < 0:
+        raise UnitReadError("byte size", "negative", raw)
+    return result
+
+
+def read_period(raw: str) -> tuple[int, int, int]:
+    """A HOCON period as ``(years, months, days)``. Raises :class:`UnitReadError`."""
+    parsed = parse_period(raw)
+    if parsed is None:
+        raise UnitReadError("period", "invalid", raw)
+    return parsed

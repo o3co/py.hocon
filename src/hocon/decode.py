@@ -19,7 +19,6 @@ go.hocon's ``hocon:"-"`` tag.
 
 from __future__ import annotations
 
-import math
 from dataclasses import MISSING, is_dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import timedelta
@@ -28,8 +27,8 @@ from enum import Enum
 from types import UnionType
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
-from .coerce import coerce_boolean, coerce_number, parse_duration, parse_period
-from .config import Config, Period, _hocon_to_py, _scalar_to_py
+from .coerce import coerce_boolean, coerce_number, read_duration, read_period
+from .config import Config, Period, _hocon_to_py, _read_unit_scalar, _scalar_to_py
 from .errors import ConfigError
 from .numeric_array import numeric_object_to_array
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue
@@ -67,16 +66,10 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
         return Config(_as_object(node, target, path))
     if target is Period:
         sc = _as_nonnull_scalar(node, target, path)
-        parsed = parse_period(sc.raw)
-        if parsed is None:
-            raise ConfigError(f"invalid period at {_p(path)}: {sc.raw!r}", path)
-        return Period(*parsed)
+        return Period(*_read_unit_scalar(sc, path, "period", read_period))
     if target is timedelta:
         sc = _as_nonnull_scalar(node, target, path)
-        ms = parse_duration(sc.raw)
-        if math.isnan(ms):
-            raise ConfigError(f"invalid duration at {_p(path)}: {sc.raw!r}", path)
-        return timedelta(milliseconds=ms)
+        return timedelta(milliseconds=_read_unit_scalar(sc, path, "duration", read_duration))
 
     # Pydantic v2 (duck-typed so pydantic is never imported): hand the decoded
     # plain object to the model's own validator, which handles its own nesting.
