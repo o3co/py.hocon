@@ -23,9 +23,10 @@ in both decode paths:
   receive the validation context (a Pydantic limitation), so markers inside
   it do not act.
   Pydantic receives plain values, so a number is read through its value
-  rather than its source text: a bare number in exponent form (``1e3``)
-  reads as ``1000`` there, while the getters and dataclass decoding reject it
-  as an unknown unit ``e3``.
+  rather than its source text. That gives the same result (``1e3`` is 1000
+  in every path) except for an unquoted number with more significant digits
+  than a float holds, which Pydantic sees already rounded, and an unquoted
+  ``-0``, which Pydantic sees as ``0``.
 """
 
 from __future__ import annotations
@@ -196,7 +197,8 @@ def _concrete(target: Any) -> Any:
 
 def _raw_of(value: object, what: str) -> str:
     """The text a plain (Pydantic-side) value reads as. A float is written out
-    positionally (``1e-07`` → ``0.0000001``) so the reader sees digits only."""
+    from its shortest repr in positional form (``1e-07`` → ``0.0000001``); the
+    reader accepts exponents too, so this only keeps the text canonical."""
     if isinstance(value, str):
         return value
     if isinstance(value, bool):

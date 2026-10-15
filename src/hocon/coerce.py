@@ -132,31 +132,61 @@ _OUTPUT_DURATION_UNITS: dict[str, float] = {
 }
 
 
-def _leading_numeric_prefix_len(trimmed: str) -> int:
-    i = 0
-    while i < len(trimmed):
-        ch = trimmed[i]
-        if i == 0 and (ch == "-" or ch == "+"):
-            i += 1
-            continue
-        if ch != "." and not ("0" <= ch <= "9"):
-            break
-        i += 1
-    return i
+# The number part of a unit value (E20 "Exponent forms", Lightbend's Java double
+# grammar without the d / f suffix): `1e+5`, `1.e3`, `.5`, `-.5`, `+2E2`.
+_UNIT_NUMBER_RE = re.compile(
+    r"(?P<mantissa>[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+))(?:[eE](?P<exponent>[+-]?[0-9]+))?"
+)
+
+# |decimal position| past which a unit value is certainly out of every range
+# here, or certainly rounds to zero: float tops out near 1e308 and bottoms out
+# near 5e-324, the unit factors span at most ~1e14 in either direction, and a
+# byte size is capped at 2^53. Such values are decided without big-number work.
+_UNIT_EXPONENT_BOUND = 400
+
+
+def _split_unit_value(value: str) -> tuple[Decimal, str] | None:
+    """``(number, unit)`` from a unit value, or None when the number part is
+    malformed. The unit is the trailing run of letters (Lightbend
+    ``getUnits``); the rest, trimmed, must be a number, exponent allowed.
+
+    A number far past any range comes back as ±Infinity and one that certainly
+    rounds to zero as ±0, so callers never build 10^N for a huge exponent.
+    """
+    trimmed = _trim_hocon_ws(value)
+    end = len(trimmed)
+    while end > 0 and trimmed[end - 1].isalpha():
+        end -= 1
+    unit = trimmed[end:]
+    m = _UNIT_NUMBER_RE.fullmatch(_trim_hocon_ws(trimmed[:end]))
+    if m is None:
+        return None
+    mantissa = Decimal(m["mantissa"])
+    exponent_text = m["exponent"]
+    if exponent_text is None or mantissa.is_zero():
+        return mantissa, unit  # zero stays zero (sign kept), whatever the exponent
+    negative_exponent = exponent_text.startswith("-")
+    # Normalized digits, so zero padding (`1e0000…01`) never reaches int() at
+    # a length past Python's int-conversion limit.
+    digits = exponent_text.lstrip("+-").lstrip("0") or "0"
+    if len(digits) <= 9:
+        exponent = -int(digits) if negative_exponent else int(digits)
+        position = mantissa.adjusted() + exponent
+    else:  # a 10+ digit exponent outweighs any practical mantissa (< ~10^9 digits)
+        exponent = 0
+        position = -(10**10) if negative_exponent else 10**10
+    sign = "-" if mantissa.is_signed() else ""
+    if position > _UNIT_EXPONENT_BOUND:
+        return Decimal(sign + "Infinity"), unit
+    if position < -_UNIT_EXPONENT_BOUND:
+        return Decimal(sign + "0"), unit
+    return mantissa.scaleb(exponent, _context(mantissa, 0)), unit
 
 
 # Unit conversions run in Decimal (E20). A duration is the exact product,
 # rounded to float once (`1.001s` is 1001.0 ms, not 1000.9999999999999); a byte
 # size is the exact product truncated toward zero to whole bytes, then
 # converted to the output unit with one rounding.
-
-
-def _exact_number(text: str) -> Decimal | None:
-    try:
-        d = Decimal(text)
-    except decimal.InvalidOperation:
-        return None
-    return d if d.is_finite() else None
 
 
 def _dec(x: float) -> Decimal:
@@ -184,15 +214,11 @@ def _to_float(value: Decimal) -> float:
 
 def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float:
     unit_out = output_unit if output_unit is not None else "ms"
-    trimmed = _trim_hocon_ws(value)
-    i = _leading_numeric_prefix_len(trimmed)
-    if i == 0:
-        return math.nan
-    num = _exact_number(trimmed[:i])
-    if num is None:
+    split = _split_unit_value(value)
+    if split is None:
         return math.nan
     # S19.8 — unit match is case-sensitive per HOCON.md L1304 (lowercase only).
-    unit = _trim_hocon_ws(trimmed[i:])
+    num, unit = split
     divisor = _OUTPUT_DURATION_UNITS.get(unit_out)
     if divisor is None:
         return math.nan
@@ -315,14 +341,10 @@ _MAX_SAFE_INTEGER = 2 ** 53 - 1
 
 def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     unit_out = output_unit if output_unit is not None else "B"
-    trimmed = _trim_hocon_ws(value)
-    i = _leading_numeric_prefix_len(trimmed)
-    if i == 0:
+    split = _split_unit_value(value)
+    if split is None:
         return math.nan
-    num = _exact_number(trimmed[:i])
-    if num is None:
-        return math.nan
-    unit = _trim_hocon_ws(trimmed[i:])
+    num, unit = split
     divisor = _OUTPUT_BYTE_UNITS.get(unit_out)
     if divisor is None:
         return math.nan
@@ -340,7 +362,9 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
         mult = found
     # Every unit is at least one byte, so a count of 1e16 or more is past 2^53
     # whatever the unit: reject it before any arithmetic on a huge number.
-    if num.adjusted() >= len(str(_MAX_SAFE_INTEGER)):
+    if num.is_infinite() or (
+        not num.is_zero() and num.adjusted() >= len(str(_MAX_SAFE_INTEGER))
+    ):
         raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
     # Enough precision for the whole product, so nothing rounds before the
     # truncation (0.999…9kB with any number of nines is 999 bytes, not 1000).

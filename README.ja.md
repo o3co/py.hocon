@@ -351,9 +351,9 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
   あるいは config のキーを field 名に合わせます (`max_body`)。どちらもないと
   Pydantic はその field を missing と報告します。
 - Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
-  読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
-  getter と dataclass の decode ではエラーです。単位を付けて書いた値は、
-  どちらでも同じに読まれます。
+  読まれます。結果は同じです (`1e3` はどの経路でも `1000`)。違うのは、float が
+  保てる桁数より有効桁の多い非クォートの数値 (Pydantic には丸められた値が渡る) と、
+  非クォートの `-0` (Pydantic には `0` が渡る) だけです。
 - Pydantic モデルで marker のない `timedelta` フィールドは、Pydantic 自身の
   規則 (ISO 8601、単位なしの数値は秒) で読まれます。HOCON の duration として
   読むには `Annotated[timedelta, hocon.Duration()]` を使います。
@@ -527,7 +527,8 @@ Duration 単位: `ns` / `us` / `ms` / `s` / `m` / `h` / `d` (および `seconds`
 Lightbend の表どおり大文字小文字を区別します: `B`/`b`、`kB` (10 の冪。`KB` と `kb`
 はエラー)、`KiB`/`Ki` (2 の冪)、`MB`/`MiB`、`GB`/`GiB`、`TB`/`TiB` から `YB`/`YiB`
 まで、小文字の長形式 (`kilobytes`、`mebibytes` など)、1 文字の 2 の冪は大文字・
-小文字の両方 (`K`/`k`、S21.4)。計算は正確な 10 進数で行います (E20): `1.001s` は
+小文字の両方 (`K`/`k`、S21.4)。数値には指数を付けられます (`1e3ms`、`2E2KiB`、
+`1e-3kB` は 1 byte)。計算は正確な 10 進数で行います (E20): `1.001s` は
 ちょうど `1001` ms、小数の byte サイズは正確な積を 0 方向に切り捨てます
 (`1.0009kB` は `1000` bytes)。float の範囲を超える duration はエラーで、`inf` には
 なりません (E21)。byte サイズは 2^53 bytes (約 9 PB) 未満でなければなりません。

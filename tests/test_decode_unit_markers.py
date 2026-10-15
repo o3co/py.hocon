@@ -487,9 +487,10 @@ def test_duration_past_the_float_range_is_an_error_in_both_paths() -> None:
         cfg.decode(P)
 
 
-def test_exponent_form_differs_between_paths() -> None:
-    # Pydantic receives plain values, so it reads a number through its value;
-    # the getters and dataclass decoding read the literal's source text.
+@pytest.mark.parametrize("text", ["v = 1e3", 'v = "1e3"', 'v = "1e0kB"'])
+def test_exponent_form_reads_the_same_in_every_path(text: str) -> None:
+    # E20 exponent forms (xx.hocon#111): the getters read `1e3` too, so the
+    # dataclass and Pydantic paths agree with them.
     @dataclass
     class D:
         v: Annotated[int, Bytes()]
@@ -497,9 +498,5 @@ def test_exponent_form_differs_between_paths() -> None:
     class P(pydantic.BaseModel):
         v: Annotated[int, Bytes()]
 
-    cfg = parse_string("v = 1e3")
-    with pytest.raises(ConfigError, match="invalid byte size"):
-        cfg.get_bytes("v")
-    with pytest.raises(ConfigError, match="invalid byte size"):
-        cfg.decode(D)
-    assert cfg.decode(P).v == 1000
+    cfg = parse_string(text)
+    assert cfg.get_bytes("v") == cfg.decode(D).v == cfg.decode(P).v == 1000
