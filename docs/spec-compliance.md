@@ -240,8 +240,8 @@ Citation shorthand used on `tests:` lines:
 ### S8. Unquoted strings
 
 - **S8.1** Forbidden characters rejected (``$ " { } [ ] : = , + # ` ^ ? ! @ * & \``) and whitespace — §Unquoted strings (L245). **Parens `(` / `)` are NOT in this set** and appear as ordinary unquoted content (e.g. `a = hello (world)` → `{"a":"hello (world)"}`). They are contextual tokens only inside include resource syntax — see S14a. Cross-impl pins: `testdata/hocon/unquoted-parens/up01-up06`.
-  tests: corpus: unquoted-parens/up01–up06 (parens-not-forbidden clarification), unquoted-forbidden/uf04 (backtick inside quotes is content); error: unquoted-forbidden/uf01–uf03 (backtick in value / key / mid-token); `tests/test_issue68_path_empty_segment.py`
-  status: ✅ — the whole forbidden set is rejected outside quotes. `` ` `` was the last member still leaking through (accepted in key and value position); fixed in [xx.hocon#68](https://github.com/o3co/xx.hocon/issues/68). Parens stay unreserved (xx.hocon#34).
+  tests: corpus: unquoted-parens/up01–up06 (parens-not-forbidden clarification), unquoted-forbidden/uf04 (backtick inside quotes is content); error: unquoted-forbidden/uf01–uf03 (backtick in value / key / mid-token), unquoted-starts/us15 (`1e+x`); `tests/test_issue68_path_empty_segment.py`; `tests/test_e8_plus_reserved.py` (`+` mid-run in value and key position, exponent sign accepted)
+  status: ✅ — the whole forbidden set is rejected outside quotes. `` ` `` leaked through until [xx.hocon#68](https://github.com/o3co/xx.hocon/issues/68); `+` inside an unquoted run (`foo+bar`, `1+2`, `1e+x`) was accepted as text until the E8 `+` reservation fix, and now only survives as a number's exponent sign (`1e+5`). Parens stay unreserved (xx.hocon#34).
 - **S8.2** `//` inside an unquoted string starts a comment — §Unquoted strings (L248)
   tests: corpus: unquoted-starts/us05 (`a = 123// rest of line` → `123`)
   status: ✅
@@ -255,8 +255,8 @@ Citation shorthand used on `tests:` lines:
   tests: corpus: unquoted-starts/us06 (`foo123`), us07; test11 (`foo-bar = bar-baz`)
   status: ✅
 - **S8.6** Unquoted string cannot begin with `0-9` or `-` — §Unquoted strings (L270)
-  tests: corpus: unquoted-starts/us01–us14, us16–us30 (29 consumed fixtures — E8 Lightbend-aligned value-position reading); key-hyphen-position/kh01–kh08 (E13 — S8.6 not enforced on key path segments)
-  status: ✅ — post-E8 amendment, mirroring rs: value-start `-foo` accepted as unquoted, digit-leading runs coerced at the value layer. Known cross-impl gap us15 (`1e+x`, Lightbend value-parser error): the `+`-reservation mid-unquoted-run is enforced by NO sibling — py consumes the fixture as a strict-xfail tripwire (error: unquoted-starts/us15, `xfail(strict=True)`), mirroring ts.hocon#73 `it.fails` and rs.hocon's `#[should_panic]`; an XPASS fails the run the moment the gap closes.
+  tests: corpus: unquoted-starts/us01–us14, us16–us30 (29 consumed fixtures — E8 Lightbend-aligned value-position reading); error: unquoted-starts/us15 (`1e+x`, E8 step 4); `tests/test_e8_plus_reserved.py`; key-hyphen-position/kh01–kh08 (E13 — S8.6 not enforced on key path segments)
+  status: ✅ — post-E8 amendment: value-start `-foo` accepted as unquoted, digit-leading runs coerced at the value layer, and (E8 step 4) a `+` that is not a number's exponent sign is a reserved-character error, so us15 `1e+x` is rejected like Lightbend and go.hocon.
 - **S8.7** No escape sequences in unquoted strings — §Unquoted strings (L253)
   tests: tests/test_spec_parser_lexer.py (TestS8_7NoUnquotedEscapes: backslash rejected, never decoded)
   status: ✅

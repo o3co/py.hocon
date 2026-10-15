@@ -7,6 +7,8 @@ out of scope for the same reason as ts.hocon.
 
 from __future__ import annotations
 
+import re
+
 from ...errors import ParseError
 from .token import Segment, SubstPayload, Token, TokenKind
 
@@ -85,6 +87,53 @@ def _is_unquoted_start(ch: str) -> bool:
     if ch in '{}[],:=+#"$?!@*&^`\\':
         return False
     return True
+
+
+_PLUS_RESERVED = (
+    "reserved character '+' outside quotes (quote the key or value to use '+' as text)"
+)
+
+# Digits are ASCII only ([0-9], never \d): Lightbend's number characters are
+# ASCII, so a Unicode digit is text and a '+' after it is reserved.
+# A number mantissa followed by its exponent marker (`1e`, `-1.5E`, `1.e`,
+# `-.5e`): the only place an unquoted run may carry a `+`, as the exponent's
+# sign. A '.'-leading run (`.5e`) is text, not a number.
+_EXPONENT_PREFIX_RE = re.compile(r"(?:-?[0-9]+(?:\.[0-9]*)?|-\.[0-9]+)[eE]")
+
+
+# E8 step 4 (Lightbend Tokenizer.pullNumber): a run that starts like a number
+# consumes the longest prefix of these characters, and that prefix must parse as
+# a Java long / double. If it does not and it holds a `+`, the `+` is reserved.
+_NUMBER_LEX_CHARS = frozenset("0123456789.eE+-")
+# Same grammar as coerce.DECIMAL_NUMBER_RE (kept local: the lexer must not
+# depend on coerce). Quantifiers do not overlap, so long runs stay linear.
+_JAVA_NUMBER_RE = re.compile(r"-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+
+def _starts_number(run: str) -> bool:
+    """E8: a run that begins with a digit or ``-`` is number-lexed first
+    (Lightbend reads a leading ``-`` as a number start whatever follows)."""
+    return _is_decimal_digit(run[:1]) or run[:1] == "-"
+
+
+def _greedy_number_lex_rejects(run: str) -> bool:
+    """True when ``run`` starts a number and its greedy number-lex prefix holds
+    a ``+`` but is not a number, e.g. ``1e+5e5`` or ``1e+5.2`` (E8 step 4: an
+    error, not a fallback to text)."""
+    if not _starts_number(run):
+        return False
+    end = 0
+    while end < len(run) and run[end] in _NUMBER_LEX_CHARS:
+        end += 1
+    prefix = run[:end]
+    return "+" in prefix and _JAVA_NUMBER_RE.fullmatch(prefix) is None
+
+
+def _is_exponent_sign(run: str, nxt: str) -> bool:
+    """True when a ``+`` after ``run`` is the sign of a number's exponent
+    (``1e+5``): the run so far is a mantissa plus ``e`` / ``E`` and a digit
+    follows. Any other ``+`` outside quotes is reserved (S8.1, E8)."""
+    return _is_decimal_digit(nxt) and _EXPONENT_PREFIX_RE.fullmatch(run) is not None
 
 
 def _is_unquoted_continue(ch: str, nxt: str) -> bool:
@@ -224,7 +273,31 @@ class _Lexer:
                 while self.pos < len(self.input) and _is_unquoted_continue(
                     self._peek(), self._peek(1)
                 ):
+                    if self._peek() == "+" and not _is_exponent_sign(value, self._peek(1)):
+                        # S8.1 / E8: `+` is reserved outside quotes (the `+=`
+                        # operator); inside a run it may only be an exponent
+                        # sign. `1e+x`, `1+2` and `foo+bar` are errors.
+                        raise ParseError(
+                            _PLUS_RESERVED,
+                            self.line,
+                            self.col,
+                        )
                     value += self._advance()
+                # A number run that stops at '+=' (`1+= 2`): Lightbend's greedy
+                # number-lex takes the '+' too, so the run is no number.
+                ends_at_plus = (
+                    self._peek() == "+"
+                    and _starts_number(value)
+                    and all(c in _NUMBER_LEX_CHARS for c in value)
+                )
+                if ends_at_plus:
+                    raise ParseError(_PLUS_RESERVED, self.line, self.col)
+                if _greedy_number_lex_rejects(value):
+                    raise ParseError(
+                        _PLUS_RESERVED,
+                        sl,
+                        sc,
+                    )
                 # ts.hocon calls value.trimEnd() here, but it is a no-op: the run
                 # stops at any HOCON whitespace char, and JS's trimEnd set is a
                 # subset of HOCON_WS, so the value never ends with a char trimEnd
@@ -233,6 +306,8 @@ class _Lexer:
                 self._push("unquoted", value, sl, sc)
                 continue
 
+            if ch == "+":  # a token starting with '+' (not '+='): `+foo`, `${x}+y`
+                raise ParseError(_PLUS_RESERVED, sl, sc)
             raise ParseError(f"unexpected character: {_json_char(ch)}", sl, sc)
 
         self.tokens.append(Token("eof", "", self.line, self.col))
