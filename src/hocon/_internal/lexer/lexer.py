@@ -110,14 +110,17 @@ _NUMBER_LEX_CHARS = frozenset("0123456789.eE+-")
 _JAVA_NUMBER_RE = re.compile(r"-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 
 
+def _starts_number(run: str) -> bool:
+    """E8: a run that begins with a digit or ``-`` is number-lexed first
+    (Lightbend reads a leading ``-`` as a number start whatever follows)."""
+    return _is_decimal_digit(run[:1]) or run[:1] == "-"
+
+
 def _greedy_number_lex_rejects(run: str) -> bool:
-    """True when ``run`` starts a number (a digit, or ``-`` and a digit or ``.``) and
-    its greedy number-lex prefix holds a ``+`` but is not a number, e.g.
-    ``1e+5e5`` or ``1e+5.2`` (E8 step 4: an error, not a fallback to text)."""
-    starts_number = _is_decimal_digit(run[:1]) or (
-        run[:1] == "-" and (_is_decimal_digit(run[1:2]) or run[1:2] == ".")
-    )
-    if not starts_number:
+    """True when ``run`` starts a number and its greedy number-lex prefix holds
+    a ``+`` but is not a number, e.g. ``1e+5e5`` or ``1e+5.2`` (E8 step 4: an
+    error, not a fallback to text)."""
+    if not _starts_number(run):
         return False
     end = 0
     while end < len(run) and run[end] in _NUMBER_LEX_CHARS:
@@ -280,6 +283,15 @@ class _Lexer:
                             self.col,
                         )
                     value += self._advance()
+                # A number run that stops at '+=' (`1+= 2`): Lightbend's greedy
+                # number-lex takes the '+' too, so the run is no number.
+                ends_at_plus = (
+                    self._peek() == "+"
+                    and _starts_number(value)
+                    and all(c in _NUMBER_LEX_CHARS for c in value)
+                )
+                if ends_at_plus:
+                    raise ParseError(_PLUS_RESERVED, self.line, self.col)
                 if _greedy_number_lex_rejects(value):
                     raise ParseError(
                         _PLUS_RESERVED,

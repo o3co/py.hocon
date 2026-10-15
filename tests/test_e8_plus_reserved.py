@@ -182,3 +182,22 @@ def test_long_malformed_run_is_rejected_quickly() -> None:
     with pytest.raises(ParseError):
         parse_string("1" * 8000 + "e+5.2 = 1")
     assert time.perf_counter() - start < 1.0
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ("x = [1]\n1 = [1]\n1+= 2", ParseError),  # the number run takes the '+'
+        ("1e5 = [1]\n1e5+= 2", ParseError),
+        ("1 = [1]\n1 += 2", {"1": [1, 2]}),  # workaround: a space before +=
+        ("a = [1]\na+= 2", {"a": [1, 2]}),  # a text key is not number-lexed
+        ("1x = [1]\n1x+= 2", {"1x": [1, 2]}),  # the number run stops at 'x'
+    ],
+)
+def test_number_key_directly_before_plus_equals(document: str, expected: object) -> None:
+    if expected is ParseError:
+        with pytest.raises(ParseError, match="reserved character '\\+'"):
+            parse_string(document)
+    else:
+        got = parse_string(document).to_object()
+        assert {k: got[k] for k in expected} == expected  # type: ignore[attr-defined]
