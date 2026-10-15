@@ -282,11 +282,6 @@ class TestE20ExactByteProduct:
             read_bytes("1" + "0" * 1_000_000 + unit)
         assert e.value.problem == "overflow"
 
-    def test_huge_duration_does_not_raise_decimal_overflow(self) -> None:
-        # An astronomically large duration reads as an infinite float, as it
-        # did before the Decimal arithmetic.
-        assert read_duration("1" + "0" * 1_000_000 + "d") == float("inf")
-
     def test_duration_rounds_once_for_long_inputs(self) -> None:
         # E20: a float result is rounded once, at the end. A 60-digit
         # intermediate rounding would give 9007199254740996.0 here.
@@ -294,3 +289,22 @@ class TestE20ExactByteProduct:
         assert read_duration(value) == 9007199254740994.0
         # A non-terminating output conversion still rounds once: 7 min in h.
         assert read_duration("7m", "h") == 7 / 60
+
+
+class TestE21DurationOverflow:
+    """E21 — a duration past the float range is an error, never ±inf."""
+
+    @pytest.mark.parametrize("sign", ["", "-"])
+    def test_huge_duration_is_an_overflow_error(self, sign: str) -> None:
+        # Also never a bare decimal.Overflow. The reader is called directly:
+        # lexing a megabyte of config text would dominate the test.
+        with pytest.raises(UnitReadError) as e:
+            read_duration(sign + "1" + "0" * 1_000_000 + "d")
+        assert e.value.problem == "overflow"
+
+    def test_overflow_only_in_the_output_unit(self) -> None:
+        # 1e305 ms is finite; the same value in ns is not.
+        value = "1" + "0" * 305 + "ms"
+        assert read_duration(value) == 1e305
+        with pytest.raises(UnitReadError, match="duration overflows"):
+            read_duration(value, "ns")

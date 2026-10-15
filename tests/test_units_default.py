@@ -11,6 +11,7 @@ Families covered here (the up01–up05 period scenarios are inlined in
 
 - ud01–ud08  duration (bare int, WS variants, fractional, negative, unit regressions)
 - ud09–ud11  duration, E20 exact decimal arithmetic
+- ud12–ud13  duration, E21 overflow is an error (integer and fractional form)
 - ub01–ub06  bytes (bare int, WS, fractional-truncated, negative-accessor, unit, empty)
 - ub07–ub08  bytes, E20 exact product then truncation
 - un01–un03  cross-family negative edge cases (empty, WS-only, unit-only)
@@ -152,6 +153,21 @@ def test_ud11_duration_fractional_exact_no_unit() -> None:
     cfg = _load("ud11-duration-fractional-exact-no-unit.conf")
     assert cfg.get_duration("t") == 1.001
     assert cfg.get_duration("t", "ns") == 1_001_000.0
+
+
+# ud12–ud13 (E21): a duration the implementation cannot represent is an error.
+# py's float output overflows past ~1.8e308 in the requested unit; it must
+# raise rather than return inf, for the integer and the fractional form alike.
+def test_ud12_duration_overflow_rejected() -> None:
+    cfg = _load("ud12-duration-overflow-rejected.conf")
+    with pytest.raises(ConfigError, match="duration overflows"):
+        cfg.get_duration("t")
+
+
+def test_ud13_duration_overflow_fractional_rejected() -> None:
+    cfg = _load("ud13-duration-overflow-fractional-rejected.conf")
+    with pytest.raises(ConfigError, match="duration overflows"):
+        cfg.get_duration("t")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

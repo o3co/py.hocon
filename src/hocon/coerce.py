@@ -387,10 +387,13 @@ def is_byte_unit(unit: str) -> bool:
 
 
 def read_duration(raw: str, unit: DurationUnit | None = None) -> float:
-    """A HOCON duration in ``unit`` (default ms). Raises :class:`UnitReadError`."""
+    """A HOCON duration in ``unit`` (default ms). Raises :class:`UnitReadError`,
+    including when the duration is past the float range (E21: never ±inf)."""
     result = parse_duration(raw, unit)
     if math.isnan(result):
         raise UnitReadError(UNIT_DURATION, "invalid", raw)
+    if math.isinf(result):
+        raise UnitReadError(UNIT_DURATION, "overflow", raw)
     return result
 
 

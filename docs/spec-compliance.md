@@ -78,7 +78,7 @@ Citation shorthand used on `tests:` lines:
   (38 fixtures asserted to raise; error class pinned per family —
   `ResolveError` for concat-errors / env-var-list / self-ref-lookback,
   `ParseError` for include-reservation, any `ConfigError` subclass elsewhere).
-- `units: <ids>` — units-default fixtures (ud01–ud08 / ub01–ub06 / un01–un03)
+- `units: <ids>` — units-default fixtures (ud01–ud13 / ub01–ub08 / un01–un03)
   driven through `get_duration` / `get_bytes` by `tests/test_units_default.py`
   (port of rs.hocon `tests/units_default_test.rs`; the up01–up05 period
   scenarios live in `tests/test_period.py`).

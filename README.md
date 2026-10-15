@@ -463,7 +463,8 @@ two), `MB`/`MiB`, `GB`/`GiB`, `TB`/`TiB` and up to `YB`/`YiB`, lowercase long
 forms (`kilobytes`, `mebibytes`, …), and single-letter powers of two in both
 cases (`K`/`k`, S21.4). Arithmetic is exact decimal (E20): `1.001s` is exactly
 `1001` ms, and a fractional byte size truncates toward zero after the exact
-product (`1.0009kB` is `1000` bytes).
+product (`1.0009kB` is `1000` bytes). A duration past the float range is an
+error (E21), never `inf`.
 
 `get_period` (spec S20.1–S20.4) returns a `Period(years, months, days)` value —
 a frozen dataclass mirroring rs.hocon's `Period` struct. Supported units:
