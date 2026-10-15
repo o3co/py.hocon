@@ -174,7 +174,7 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 | `get_float(path)` | `float` | 不在・非数値・未解決 |
 | `get_boolean(path)` | `bool` | 不在・型不一致・未解決 |
 | `get_duration(path, unit=None)` | `float` | 不在・型不一致・不正な duration |
-| `get_bytes(path, unit=None)` | `float` | 不在・型不一致・不正な byte size |
+| `get_bytes(path, unit=None)` | `float` (bytes では `int`) | 不在・型不一致・不正な byte size |
 | `get_period(path)` | `Period` | 不在・型不一致・不正な period |
 | `get_config(path)` | `Config` | 不在・オブジェクトでない・未解決 |
 | `get_list(path)` | `list` | 不在・配列でない・未解決 |
@@ -410,8 +410,12 @@ c.get_bytes("max-size", "MiB")    # 512.0
 
 Duration 単位: `ns` / `us` / `ms` / `s` / `m` / `h` / `d` (および `seconds` 等の
 長形式)。単位名は **大文字小文字を区別** し小文字のみ (HOCON 仕様 S19.8)。Byte 単位は
-より寛容で、正準形 + 小文字エイリアス (`kb` 等) + 任意ケースの長形式 (`megabytes`) +
-1 文字の 2 の冪 (`K`/`k`、Lightbend 準拠、S21.4) を受け付けます。
+Lightbend の表どおり大文字小文字を区別します: `B`/`b`、`kB` (10 の冪。`KB` と `kb`
+はエラー)、`KiB`/`Ki` (2 の冪)、`MB`/`MiB`、`GB`/`GiB`、`TB`/`TiB` から `YB`/`YiB`
+まで、小文字の長形式 (`kilobytes`、`mebibytes` など)、1 文字の 2 の冪は大文字・
+小文字の両方 (`K`/`k`、S21.4)。計算は正確な 10 進数で行います (E20): `1.001s` は
+ちょうど `1001` ms、小数の byte サイズは正確な積を 0 方向に切り捨てます
+(`1.0009kB` は `1000` bytes)。
 
 `get_period` (仕様 S20.1–S20.4) は `Period(years, months, days)` (frozen
 dataclass、rs.hocon の `Period` struct 準拠) を返します。単位: `d`/`day`/`days`
