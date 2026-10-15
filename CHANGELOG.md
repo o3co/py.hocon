@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`get_bytes` reports an overflowing byte size (`10PB`) as a `ConfigError`
+  carrying the key path**, like its other failures, instead of leaking a bare
+  `OverflowError`. Code that caught `OverflowError` should catch
+  `ConfigError`.
+
 - **BREAKING (extra-spec E19, xx.hocon#97): a numeric literal whose magnitude
   overflows the double range (`1e999`) is now a parse error** instead of
   silently becoming `inf` — a value HOCON cannot render or re-parse as a

@@ -154,8 +154,11 @@ class TestS21_2PowersOfTen:
         assert _bytes(value) == expected
 
     def test_magnitude_past_the_guard_overflows(self) -> None:
-        with pytest.raises(OverflowError):
+        # A ConfigError carrying the key path, like every other get_bytes
+        # failure (it used to leak a bare OverflowError).
+        with pytest.raises(ConfigError, match="byte size overflows .* at b") as e:
             _bytes("1EB")
+        assert e.value.path == "b"
 
     def test_powers_of_ten_distinct_from_powers_of_two(self) -> None:
         # 1K (binary shorthand) is 1024; 1kB (SI) is 1000.

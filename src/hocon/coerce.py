@@ -337,7 +337,10 @@ def read_duration(raw: str, unit: DurationUnit | None = None) -> float:
 def read_bytes(raw: str, unit: ByteUnit | None = None) -> float:
     """A non-negative HOCON byte size in ``unit`` (default bytes). Raises
     :class:`UnitReadError`."""
-    result = parse_bytes(raw, unit)
+    try:
+        result = parse_bytes(raw, unit)
+    except OverflowError:
+        raise UnitReadError("byte size", "overflow", raw) from None
     if math.isnan(result):
         raise UnitReadError("byte size", "invalid", raw)
     if result < 0:
