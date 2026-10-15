@@ -139,3 +139,16 @@ def test_unresolved_literal_dotted_key_is_not_replaced_by_the_nested_path(partia
     with pytest.raises(NotResolvedError):
         dict(cfg)
     assert cfg.get_int("a.b") == 1  # typed getters traverse the path
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_unresolved_literal_key_that_is_not_a_valid_path_is_present(partial: bool) -> None:
+    # A quoted key named `"a` cannot be parsed as a path expression; `in` must
+    # answer from the key set instead of raising a path-syntax ConfigError.
+    cfg = parse_string('"\\"a" = ${missing}\nv = 1', resolve_substitutions=False)
+    if partial:
+        cfg = cfg.resolve(allow_unresolved=True)
+    assert cfg.keys() == ['"a', "v"]
+    assert '"a' in cfg
+    with pytest.raises(NotResolvedError):
+        cfg['"a']

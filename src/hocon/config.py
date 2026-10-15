@@ -166,6 +166,8 @@ class Config(Mapping[str, Any]):
         :class:`NotResolvedError`."""
         if not isinstance(path, str):
             return False
+        if path in self._top_level_fields():  # literal key, resolved or not
+            return True
         if self._lookup_key_or_path(path) is not None:
             return True
         if self._resolved or self._pending is None:
