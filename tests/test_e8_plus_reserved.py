@@ -23,11 +23,22 @@ from hocon import ParseError, parse_string
         "a = 1+2",
         "a = 1+",
         "a = 1e+5e+5",  # second exponent: Lightbend's greedy number-lex fails
+        # E8 step 4: the greedy [0-9.eE+-] prefix holds a '+' but is no number
+        "a = 1e+5e5",
+        "a = 1e+5.2",
+        "a = 1e+5-",
         "a = .5e+3",  # '.'-leading runs are text, so this '+' is not a sign
         "a = foo+bar",  # concat-continuation
         "a = x1e+5",
         "a = [1e+x]",
         "a+b = 1",  # key position
+        "a.1e+5 = 1",  # `1e+5` is not a number when it continues a key run
+        "a = +foo",  # token-start '+': same rule, same message
+        "a = foo +bar",
+        'a = "x"+y',
+        "x = 1\na = ${x}+bar",
+        "a = \u0661e+5",  # Unicode digits are text, not number characters
+        "a = 1\u0665e+5",
     ],
 )
 def test_plus_outside_quotes_is_rejected(text: str) -> None:
@@ -50,8 +61,11 @@ def test_error_points_at_the_plus() -> None:
         ("a = 1.e+5", 100000.0),  # Java Double.parseDouble accepts "1.e+5"
         ("a = 1e+5x", "1e+5x"),  # number, then text: a concatenation
         ("a = 1e-x", "1e-x"),  # no '+': failed number-lex falls back to text
+        ("a = 1e-5e5", "1e-5e5"),  # likewise
         ('a = "foo+bar"', "foo+bar"),  # quoted: '+' is content
         ('a = """1e+x"""', "1e+x"),
+        ('a = "x"1e+5', "x1e+5"),  # a number token starts after the quoted one
+        ("x = foo\na = ${x}1e+5", "foo1e+5"),
     ],
 )
 def test_exponent_sign_and_quoted_plus_are_accepted(text: str, expected: object) -> None:
@@ -60,3 +74,9 @@ def test_exponent_sign_and_quoted_plus_are_accepted(text: str, expected: object)
 
 def test_plus_equals_still_appends() -> None:
     assert parse_string("a = [1]\na += 2\na+=3").get("a") == [1, 2, 3]
+
+
+def test_number_key_with_exponent_sign_is_a_key() -> None:
+    cfg = parse_string("1e+5 = 1\na { 1e+5 = 2 }")
+    assert cfg.get('"1e+5"') == 1
+    assert cfg.get('a."1e+5"') == 2
