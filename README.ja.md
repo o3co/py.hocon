@@ -581,6 +581,49 @@ pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) よ�
 20 ms 未満でパースできます。ホットパスで巨大な設定を扱う場合は `Config` をキャッシュ
 してください。
 
+## 比較
+
+✅ 完全サポート / ⚠️ 部分的 / ❌ 非対応
+
+### HOCON 実装
+
+[pyhocon](https://github.com/chimpler/pyhocon) **v0.3.63** と 2026-10-16 に比較。
+
+| 機能 | py.hocon | pyhocon v0.3.63 |
+| --- | :---: | :---: |
+| 代入（`${path}`、自己参照を含む） | ✅ | ✅ |
+| オプショナル代入（`${?path}`） | ✅ | ✅ |
+| 環境変数フォールバック | ✅ | ✅ |
+| Include（`include "file"` / `file(...)`） | ✅ | ✅ |
+| `include required(...)` | ✅ | ✅ |
+| `include url(...)` | ❌（設計上の判断 — [既知の制限](#既知の制限) を参照） | ✅ |
+| `include package(...)` | ✅（`package("id", "file")`: ファイルシステム規約、または独自の `package_resolver`） | ✅（`package("pkg:path")`: インストール済みの Python パッケージを `importlib` で探す） |
+| glob include（`include "conf.d/*.conf"`、HOCON.md 外） | ❌ | ✅ |
+| `.properties` の include | ✅ | ⚠️（HOCON として読むため、HOCON としても正しいファイルしか読めない） |
+| オブジェクト / 配列の連結 | ✅ | ✅ |
+| `+=` 追記 | ✅ | ⚠️（`a += [x]` は要素 1 つの追加ではなく配列の連結になる。スカラーを渡すと値が置き換わるか例外になる） |
+| Duration パース（`30s`、`5m`） | ✅（`get_duration`） | ⚠️（クォートなしの整数値のみ。パース時に `timedelta`、`python-dateutil` があれば `relativedelta` へ変換） |
+| Period パース（`2w`、`3mo`、`1y`） | ✅（`get_period`） | ⚠️（月と年には `duration` extra の `python-dateutil` が必要。パース時に変換） |
+| バイトサイズパース（`512MB`） | ✅（`get_bytes`） | ❌（文字列のまま） |
+| 遅延解決（parse / `with_fallback` / resolve） | ✅ | ✅ |
+| `dict` から設定を作る | ✅（`from_map`） | ✅（`ConfigFactory.from_dict`） |
+| dict 形式のアクセス（`cfg["a.b"]`） | ✅（読み取り専用の `Mapping`） | ✅（`OrderedDict` のサブクラス） |
+| その場での変更（`put` / `pop`） | ❌（`Config` は immutable。`from_map` + `with_fallback` で重ねる） | ✅ |
+| 型付き decode（dataclass / Pydantic v2） | ✅（`cfg.decode(cls)`） | ❌ |
+| 行 / 列を持つエラー | ✅（`ParseError` / `ResolveError` が `.line` / `.col` / `.file` を持つ） | ⚠️（構文エラーは `lineno` / `col` を持つ pyparsing の例外。代入エラーの行 / 列はメッセージ内のみ） |
+| HOCON への書き出し | ✅（`render_hocon()`） | ✅（`HOCONConverter.to_hocon`） |
+| JSON / YAML / .properties への変換 | ⚠️（JSON は `json.dumps(cfg.to_object())`。YAML と .properties は別ツールの [hocon2](https://github.com/o3co/hocon2) CLI） | ✅（`HOCONConverter`） |
+| コマンドラインツール | ❌（別ツールの [hocon2](https://github.com/o3co/hocon2) CLI を使う） | ✅（`pyhocon`: HOCON → JSON / YAML / .properties / HOCON） |
+| フォーマットアダプタ（env、`.env`、TOML、YAML、JSON5、JSONC、.properties） | ✅（[フォーマットアダプタ](#フォーマットアダプタ) を参照） | ❌ |
+| 型ヒント（`py.typed`） | ✅ | ❌ |
+| 対応 Python バージョン | 3.11+ | 3.7–3.12（classifiers。`python_requires` の指定なし） |
+| 実行時の依存 | なし（標準ライブラリのみ） | `pyparsing>=3.0.0`。`duration` extra では `python-dateutil` も |
+
+fixture 単位の準拠は別に計測しています。2026-07-15 のライブラリ横断スナップショット
+([xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md))
+では、上の表と同じ pyhocon 0.3.63 が spec corpus 134 件中 106 件 (79.1%)、Lightbend suite
+8/16 を通過し、当時 v1.8.0 の py.hocon は 134/134 と 14/16 でした。
+
 ## 仕様準拠
 
 [Lightbend HOCON 仕様](https://github.com/lightbend/config/blob/main/HOCON.md)への
