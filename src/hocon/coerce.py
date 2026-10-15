@@ -15,9 +15,11 @@ Standalone module: it must not import :mod:`hocon.value` (value imports this).
 
 from __future__ import annotations
 
+import decimal
 import math
 import re
 from datetime import timedelta
+from decimal import Decimal
 from typing import Literal
 
 __all__ = [
@@ -134,17 +136,31 @@ def _leading_numeric_prefix_len(trimmed: str) -> int:
     return i
 
 
+# Unit conversions run in Decimal and round to float once, so a value that is
+# exact in decimal stays exact (`1.001s` is 1001.0 ms, not 1000.9999999999999).
+_EXACT = decimal.Context(prec=60)
+
+
+def _exact_number(text: str) -> Decimal | None:
+    try:
+        d = Decimal(text)
+    except decimal.InvalidOperation:
+        return None
+    return d if d.is_finite() else None
+
+
+def _dec(x: float) -> Decimal:
+    return Decimal(repr(x))  # the table's decimal spelling, not its binary value
+
+
 def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float:
     unit_out = output_unit if output_unit is not None else "ms"
     trimmed = _trim_hocon_ws(value)
     i = _leading_numeric_prefix_len(trimmed)
     if i == 0:
         return math.nan
-    try:
-        num = float(trimmed[:i])
-    except ValueError:
-        return math.nan
-    if math.isnan(num):
+    num = _exact_number(trimmed[:i])
+    if num is None:
         return math.nan
     # S19.8 — unit match is case-sensitive per HOCON.md L1304 (lowercase only).
     unit = _trim_hocon_ws(trimmed[i:])
@@ -153,12 +169,12 @@ def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float
         return math.nan
     # S18.1 + S18.4: bare number (no unit) → treat as default unit (ms).
     if unit == "":
-        return num / divisor
+        return float(_EXACT.divide(num, _dec(divisor)))
     mult = _DURATION_UNITS.get(unit)
     if mult is None:
         return math.nan
-    ms = num * mult
-    return ms / divisor
+    ms = _EXACT.multiply(num, _dec(mult))
+    return float(_EXACT.divide(ms, _dec(divisor)))
 
 
 # S20 — Period format. Values are bounded to i32 like Lightbend
@@ -276,11 +292,8 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     i = _leading_numeric_prefix_len(trimmed)
     if i == 0:
         return math.nan
-    try:
-        num = float(trimmed[:i])
-    except ValueError:
-        return math.nan
-    if math.isnan(num):
+    num = _exact_number(trimmed[:i])
+    if num is None:
         return math.nan
     unit = _trim_hocon_ws(trimmed[i:])
     divisor = _OUTPUT_BYTE_UNITS.get(unit_out)
@@ -289,20 +302,21 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     # S18.1 + S18.4: bare number (no unit) → truncate toward zero (Lightbend
     # BigDecimal.toBigInteger) and treat as default unit (bytes).
     if unit == "":
-        num_bytes = math.trunc(num)
+        num_bytes = int(num)  # toward zero
         if abs(num_bytes) > _MAX_SAFE_INTEGER:
             raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
-        return num_bytes / divisor
+        return float(_EXACT.divide(Decimal(num_bytes), _dec(divisor)))
     # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
     # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
     mult = _BYTE_UNITS.get(unit)
     if mult is None:
         return math.nan
-    num_bytes_f = num * mult
-    if abs(num_bytes_f) > _MAX_SAFE_INTEGER:
+    num_bytes_d = _EXACT.multiply(num, _dec(mult))
+    if abs(num_bytes_d) > _MAX_SAFE_INTEGER:
         raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
-    result = num_bytes_f / divisor
-    return round(result) if unit_out == "B" else result
+    if unit_out == "B":
+        return round(num_bytes_d)  # half-even, like round() on the float before
+    return float(_EXACT.divide(num_bytes_d, _dec(divisor)))
 
 
 UnitProblem = Literal["invalid", "negative", "overflow"]

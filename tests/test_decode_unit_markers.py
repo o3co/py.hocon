@@ -157,6 +157,38 @@ def test_dataclass_errors_carry_the_path(text: str, message: str) -> None:
     assert e.value.path == "server.max-body"
 
 
+@pytest.mark.parametrize(
+    ("text", "marker", "expected"),
+    [
+        ("1.001s", Duration(), 1001),
+        ("0.3s", Duration(), 300),
+        ("1.1MB", Bytes("KB"), 1100),
+        ("1.1MB", Bytes(), 1_100_000),
+    ],
+)
+def test_int_target_accepts_a_decimally_exact_result(
+    text: str, marker: Any, expected: int
+) -> None:
+    # Unit conversion is exact in decimal: 1.001s is 1001 ms, not
+    # 1000.9999999999999, in the getter and in both decode paths.
+    @dataclass
+    class D:
+        v: Annotated[int, marker]
+
+    class P(pydantic.BaseModel):
+        v: Annotated[int, marker]
+
+    cfg = parse_string(f'v = "{text}"')
+    getter = (
+        cfg.get_duration("v", marker.unit)
+        if isinstance(marker, Duration)
+        else cfg.get_bytes("v", marker.unit)
+    )
+    assert getter == expected
+    assert cfg.decode(D).v == expected
+    assert cfg.decode(P).v == expected
+
+
 def test_int_target_rejects_a_fractional_result() -> None:
     @dataclass
     class C:

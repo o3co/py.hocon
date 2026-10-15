@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Duration and byte-size conversions are exact in decimal.** `get_duration`
+  / `get_bytes` (and decoding) compute the unit conversion in `Decimal` and
+  round to `float` once, so `1.001s` is `1001.0` ms rather than
+  `1000.9999999999999`, and `1.1MB` read in `KB` is `1100.0`.
+
 - **`get_bytes` reports an overflowing byte size (`10PB`) as a `ConfigError`
   carrying the key path**, like its other failures, instead of leaking a bare
   `OverflowError`. Code that caught `OverflowError` should catch
