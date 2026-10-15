@@ -17,12 +17,16 @@ from __future__ import annotations
 
 import math
 import re
+from datetime import timedelta
 from typing import Literal
 
 __all__ = [
     "DECIMAL_NUMBER_RE",
     "ByteUnit",
     "DurationUnit",
+    "UNIT_BYTE_SIZE",
+    "UNIT_DURATION",
+    "UNIT_PERIOD",
     "UnitProblem",
     "UnitReadError",
     "coerce_boolean",
@@ -35,6 +39,7 @@ __all__ = [
     "read_bytes",
     "read_duration",
     "read_period",
+    "read_timedelta",
 ]
 
 DECIMAL_NUMBER_RE = re.compile(r"-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
@@ -302,6 +307,11 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
 
 UnitProblem = Literal["invalid", "negative", "overflow"]
 
+# The unit systems' names, as they appear in error messages.
+UNIT_DURATION = "duration"
+UNIT_BYTE_SIZE = "byte size"
+UNIT_PERIOD = "period"
+
 
 class UnitReadError(ValueError):
     """A unit value its reader rejects.
@@ -342,8 +352,18 @@ def read_duration(raw: str, unit: DurationUnit | None = None) -> float:
     """A HOCON duration in ``unit`` (default ms). Raises :class:`UnitReadError`."""
     result = parse_duration(raw, unit)
     if math.isnan(result):
-        raise UnitReadError("duration", "invalid", raw)
+        raise UnitReadError(UNIT_DURATION, "invalid", raw)
     return result
+
+
+def read_timedelta(raw: str) -> timedelta:
+    """A HOCON duration as a ``timedelta``. Raises :class:`UnitReadError`,
+    including when the duration is past ``timedelta``'s range."""
+    ms = read_duration(raw)
+    try:
+        return timedelta(milliseconds=ms)
+    except OverflowError:
+        raise UnitReadError(UNIT_DURATION, "overflow", raw) from None
 
 
 def read_bytes(raw: str, unit: ByteUnit | None = None) -> float:
@@ -352,11 +372,11 @@ def read_bytes(raw: str, unit: ByteUnit | None = None) -> float:
     try:
         result = parse_bytes(raw, unit)
     except OverflowError:
-        raise UnitReadError("byte size", "overflow", raw) from None
+        raise UnitReadError(UNIT_BYTE_SIZE, "overflow", raw) from None
     if math.isnan(result):
-        raise UnitReadError("byte size", "invalid", raw)
+        raise UnitReadError(UNIT_BYTE_SIZE, "invalid", raw)
     if result < 0:
-        raise UnitReadError("byte size", "negative", raw)
+        raise UnitReadError(UNIT_BYTE_SIZE, "negative", raw)
     return result
 
 
@@ -364,5 +384,5 @@ def read_period(raw: str) -> tuple[int, int, int]:
     """A HOCON period as ``(years, months, days)``. Raises :class:`UnitReadError`."""
     parsed = parse_period(raw)
     if parsed is None:
-        raise UnitReadError("period", "invalid", raw)
+        raise UnitReadError(UNIT_PERIOD, "invalid", raw)
     return parsed

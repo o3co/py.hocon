@@ -28,7 +28,14 @@ from enum import Enum
 from types import UnionType
 from typing import Annotated, Any, Union, get_args, get_origin, get_type_hints
 
-from .coerce import coerce_boolean, coerce_number, read_duration, read_period
+from .coerce import (
+    UNIT_DURATION,
+    UNIT_PERIOD,
+    coerce_boolean,
+    coerce_number,
+    read_period,
+    read_timedelta,
+)
 from .config import Config, Period, _hocon_to_py, _read_unit_scalar, _scalar_to_py
 from .errors import ConfigError
 from .markers import UnitMarker
@@ -70,10 +77,10 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
         return Config(_as_object(node, target, path))
     if target is Period:
         sc = _as_nonnull_scalar(node, target, path)
-        return Period(*_read_unit_scalar(sc, path, "period", read_period))
+        return Period(*_read_unit_scalar(sc, path, UNIT_PERIOD, read_period))
     if target is timedelta:
         sc = _as_nonnull_scalar(node, target, path)
-        return timedelta(milliseconds=_read_unit_scalar(sc, path, "duration", read_duration))
+        return _read_unit_scalar(sc, path, UNIT_DURATION, read_timedelta)
 
     # Pydantic v2 (duck-typed so pydantic is never imported): hand the decoded
     # plain object to the model's own validator, which handles its own nesting.

@@ -248,6 +248,17 @@ def test_timedelta_and_period() -> None:
     assert got.p == Period(years=0, months=3, days=0)
 
 
+def test_timedelta_overflow_is_a_config_error_with_the_path() -> None:
+    @dataclass
+    class C:
+        d: timedelta
+
+    # Past timedelta's range: used to escape as a bare OverflowError.
+    with pytest.raises(ConfigError, match="duration overflows .* at d") as e:
+        parse_string("d = 1000000000000 days").decode(C)
+    assert e.value.path == "d"
+
+
 def test_dict_and_any_fields() -> None:
     @dataclass
     class C:

@@ -31,6 +31,9 @@ from ._internal.resolver.types import (
     merge_unresolved,
 )
 from .coerce import (
+    UNIT_BYTE_SIZE,
+    UNIT_DURATION,
+    UNIT_PERIOD,
     ByteUnit,
     DurationUnit,
     UnitReadError,
@@ -215,11 +218,11 @@ class Config(Mapping[str, Any]):
 
     def get_duration(self, path: str, unit: DurationUnit | None = None) -> float:
         v = self._require_scalar(path)
-        return _read_unit_scalar(v, path, "duration", lambda raw: read_duration(raw, unit))
+        return _read_unit_scalar(v, path, UNIT_DURATION, lambda raw: read_duration(raw, unit))
 
     def get_bytes(self, path: str, unit: ByteUnit | None = None) -> float:
         v = self._require_scalar(path)
-        return _read_unit_scalar(v, path, "byte size", lambda raw: read_bytes(raw, unit))
+        return _read_unit_scalar(v, path, UNIT_BYTE_SIZE, lambda raw: read_bytes(raw, unit))
 
     def get_period(self, path: str) -> Period:
         """Calendar :class:`Period` at ``path`` (S20.1–S20.4). Accepts
@@ -228,7 +231,7 @@ class Config(Mapping[str, Any]):
         integer-only (Lightbend ``Integer.parseInt``): fractional values
         raise, unlike :meth:`get_duration` / :meth:`get_bytes`."""
         v = self._require_scalar(path)
-        return Period(*_read_unit_scalar(v, path, "period", read_period))
+        return Period(*_read_unit_scalar(v, path, UNIT_PERIOD, read_period))
 
     def get_config(self, path: str) -> Config:
         v = self._lookup_node(path)

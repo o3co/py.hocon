@@ -27,6 +27,8 @@ from types import UnionType
 from typing import Any, ClassVar, Union, get_args, get_origin
 
 from .coerce import (
+    UNIT_BYTE_SIZE,
+    UNIT_DURATION,
     ByteUnit,
     DurationUnit,
     UnitReadError,
@@ -34,6 +36,7 @@ from .coerce import (
     is_duration_unit,
     read_bytes,
     read_duration,
+    read_timedelta,
 )
 
 __all__ = ["Bytes", "Duration", "UnitMarker"]
@@ -85,7 +88,7 @@ class Bytes(UnitMarker):
 
     unit: ByteUnit = "B"
 
-    what: ClassVar[str] = "byte size"
+    what: ClassVar[str] = UNIT_BYTE_SIZE
     targets: ClassVar[tuple[type, ...]] = (int, float)
 
     def __post_init__(self) -> None:
@@ -104,7 +107,7 @@ class Duration(UnitMarker):
 
     unit: DurationUnit = "ms"
 
-    what: ClassVar[str] = "duration"
+    what: ClassVar[str] = UNIT_DURATION
     targets: ClassVar[tuple[type, ...]] = (int, float, timedelta)
 
     def __post_init__(self) -> None:
@@ -116,7 +119,7 @@ class Duration(UnitMarker):
 
     def to_target(self, raw: str, target: type) -> int | float | timedelta:
         if target is timedelta:
-            return timedelta(milliseconds=read_duration(raw))
+            return read_timedelta(raw)
         return super().to_target(raw, target)
 
 
