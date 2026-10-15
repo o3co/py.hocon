@@ -237,8 +237,8 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 
 | Method | Returns | Raises if |
 |--------|---------|-----------|
-| `get(path, default=None)` | value or `default` | — |
-| `config[path]` | value | `KeyError` when missing |
+| `get(path, default=None)` | value or `default` | unresolved (`NotResolvedError`) |
+| `config[path]` | value | `KeyError` when missing, `NotResolvedError` when unresolved |
 | `get_string(path)` | `str` | missing, wrong type, or unresolved |
 | `get_number(path)` | `int \| float` | missing, not numeric, or unresolved |
 | `get_int(path)` | `int` | missing, not numeric, or unresolved |
@@ -257,7 +257,7 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `resolve(*, allow_unresolved=False, use_system_environment=True)` | `Config` | unresolvable substitution (unless `allow_unresolved`) |
 | `resolve_with(source, *, ...)` | `Config` | source unresolved, or unresolvable substitution |
 | `is_resolved()` | `bool` | — |
-| `to_object()` | `dict / list / scalar` | — |
+| `to_object()` | `dict / list / scalar` | any part unresolved |
 | `render_hocon()` | `str` (HOCON text) | unresolved |
 
 `get_boolean` also accepts `yes`/`no` and `on`/`off`. `get_number` returns an

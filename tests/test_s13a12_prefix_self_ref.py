@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from hocon import ResolveError, parse
+from hocon import NotResolvedError, ResolveError, parse
 
 D = chr(36)  # '$' — avoids IDE template-string lint on ${...} literals
 
@@ -172,13 +172,17 @@ def test_allow_unresolved_keeps_prefix_miss_placeholder() -> None:
     cfg = parse(
         "foo : { a : 1 }\nfoo : " + D + "{foo.b}", resolve_substitutions=False
     ).resolve(allow_unresolved=True)
-    assert "foo" not in cfg.to_object()
+    assert not cfg.is_resolved()
+    with pytest.raises(NotResolvedError):
+        cfg.get("foo")
 
 
 def test_allow_unresolved_keeps_known_absent_placeholder() -> None:
     src = "foo : { a : 1 }\nfoo : " + D + "{foo.b}\nfoo : " + D + "{foo.a}"
     cfg = parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)
-    assert "foo" not in cfg.to_object()
+    assert not cfg.is_resolved()
+    with pytest.raises(NotResolvedError):
+        cfg.get("foo")
 
 
 # --- `[]`-suffixed substitutions report their own path in the error ---

@@ -18,7 +18,6 @@ from ._internal.resolver.resolver import (
     contains_placeholders,
     hocon_value_to_res_obj,
     resolve_tree,
-    val_contains_placeholders,
 )
 from ._internal.resolver.types import (
     ConcatPlaceholder,
@@ -93,13 +92,20 @@ class Config(Mapping[str, Any]):
         origin_description: str | None = None,
         res_obj_root: ResObj | None = None,
         resolve_opts: ResolveOptions | None = None,
+        pending: ResObj | HoconObject | None = None,
     ) -> None:
         self._root = root
         self._resolved = resolved
         self._parse_base_dir = parse_base_dir
         self._origin_description = origin_description
+        # The unresolved source tree, kept so a later resolve() / with_fallback
+        # can start over from it.
         self._res_obj_root = res_obj_root
         self._resolve_opts = resolve_opts
+        # The tree as it stands now, placeholders included: where the
+        # NotResolvedError checks look. After resolve(allow_unresolved=True)
+        # it differs from _res_obj_root, whose resolved paths are stale.
+        self._pending = pending if pending is not None else res_obj_root
 
     # ─── construction ─────────────────────────────────────────────────────────
 
@@ -140,7 +146,7 @@ class Config(Mapping[str, Any]):
         # leak a TypeError out of the path splitter.
         if not isinstance(path, str):
             raise KeyError(path)
-        v = self._lookup_key_or_path(path)
+        v = self._lookup_resolved(path)
         if v is None:
             raise KeyError(path)
         return _hocon_to_py(v)
@@ -166,7 +172,7 @@ class Config(Mapping[str, Any]):
         """
         if not isinstance(path, str):  # dict parity: non-str keys are absent
             return default
-        v = self._lookup_key_or_path(path)
+        v = self._lookup_resolved(path)
         if v is None:
             return default
         return _hocon_to_py(v)
@@ -265,7 +271,9 @@ class Config(Mapping[str, Any]):
             raise ConfigError(f"expected object at {path}", path)
         if not self._resolved and self._subtree_has_placeholders(path):
             raise NotResolvedError(path)
-        return Config(v, resolved=self._resolved)
+        # The subtree was just checked free of placeholders, so it is resolved
+        # even when another part of this config is not.
+        return Config(v, resolved=True)
 
     def get_list(self, path: str) -> list[Any]:
         v = self._lookup_node(path)
@@ -339,6 +347,7 @@ class Config(Mapping[str, Any]):
                 origin_description=self._origin_description,
                 res_obj_root=tree if had_placeholders else None,
                 resolve_opts=resolve_opts if had_placeholders else None,
+                pending=resolved if had_placeholders else None,
             )
 
         return Config(
@@ -398,6 +407,11 @@ class Config(Mapping[str, Any]):
         )
 
     def to_object(self) -> Any:
+        """The whole config as plain Python data. Raises
+        :class:`NotResolvedError` while any substitution is unresolved, rather
+        than dropping the unresolved paths."""
+        if not self._resolved:
+            raise NotResolvedError("<root>")
         return _hocon_to_py(self._root)
 
     # The Any overload keeps typing expressions that are not `type` objects
@@ -490,6 +504,15 @@ class Config(Mapping[str, Any]):
             origin_description=self._origin_description,
         )
 
+    def _lookup_resolved(self, path: str) -> HoconValue | None:
+        """``_lookup_key_or_path``, raising :class:`NotResolvedError` when the
+        path is unresolved instead of reporting it absent (or partial)."""
+        v = self._lookup_key_or_path(path)
+        if not self._resolved and (v is None or not isinstance(v, HoconScalar)):
+            if self._subtree_has_placeholders(path):
+                raise NotResolvedError(path)
+        return v
+
     def _lookup_key_or_path(self, path: str) -> HoconValue | None:
         """Literal top-level key first, then dotted-path traversal.
 
@@ -515,20 +538,20 @@ class Config(Mapping[str, Any]):
         return current
 
     def _subtree_has_placeholders(self, path: str) -> bool:
-        tree = self._res_obj_root
+        tree = self._pending
         if tree is None:
             return False
-        segments = _split_config_path(path)
-        cur: ResObj = tree
-        for seg in segments:
+        if path in tree.fields:  # literal top-level key, as _lookup_key_or_path
+            return _has_placeholder(tree.fields[path])
+        cur: Any = tree
+        for seg in _split_config_path(path):
+            if not isinstance(cur, (ResObj, HoconObject)):
+                return False
             val = cur.fields.get(seg)
             if val is None:
                 return False
-            if is_res_obj(val):
-                cur = val
-            else:
-                return val_contains_placeholders(val)
-        return contains_placeholders(cur)
+            cur = val
+        return _has_placeholder(cur)
 
     def _require_scalar(self, path: str) -> HoconScalar:
         v = self._lookup_node(path)
@@ -626,19 +649,34 @@ def _res_obj_to_key_shape(tree: ResObj) -> HoconObject:
 
 
 def _strip_placeholder_fields(v: HoconObject) -> tuple[HoconObject, bool]:
+    """``v`` without its unresolved values, and whether it had any. An object
+    keeps its resolved fields; any other value that holds a placeholder
+    anywhere (an array element, an object inside an array) is dropped whole."""
     fields: dict[str, HoconValue] = {}
     had_placeholders = False
     for k, val in v.fields.items():
-        if isinstance(val, (SubstPlaceholder, ConcatPlaceholder)):
-            had_placeholders = True
-        elif isinstance(val, HoconObject):
+        if isinstance(val, HoconObject):
             inner, inner_had = _strip_placeholder_fields(val)
             if inner_had:
                 had_placeholders = True
             fields[k] = inner
+        elif _has_placeholder(val):
+            had_placeholders = True
         else:
             fields[k] = val
     return HoconObject(fields), had_placeholders
+
+
+def _has_placeholder(v: object) -> bool:
+    """Whether ``v`` holds an unresolved substitution anywhere, through
+    objects (resolver or value form) and arrays."""
+    if isinstance(v, (SubstPlaceholder, ConcatPlaceholder)):
+        return True
+    if isinstance(v, (ResObj, HoconObject)):
+        return any(_has_placeholder(x) for x in v.fields.values())
+    if isinstance(v, HoconArray):
+        return any(_has_placeholder(x) for x in v.items)
+    return False
 
 
 def _filter_by_receiver_shape(resolved: HoconObject, receiver_shape: HoconObject) -> HoconObject:
