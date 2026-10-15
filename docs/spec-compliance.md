@@ -8,15 +8,17 @@ Per-item compliance status against the canonical 209-item checklist in
 Measured against the shared o3co/xx.hocon corpus (Lightbend-generated expected
 output), via `tests/conformance/`:
 
-| Corpus | py.hocon | go.hocon / rs.hocon (reference) |
-|---|---:|---:|
-| Spec corpus (134) | **134 (100.0%)** | 134 (100.0%) |
-| Lightbend suite (16) | **14/16** | 14/16 |
+| Corpus (py.hocon's own harness, xx.hocon main as of 2026-10-16) | py.hocon |
+|---|---:|
+| Spec corpus | **154/154 (100.0%)** |
+| Lightbend fixtures with expected output | **12/14** |
 
-At parity with the reference sibling implementations. The 2 held-out Lightbend
-fixtures (`test01`, `test03`) reference JVM system properties
-`${?java.version}` / `${?user.home}`, which resolve only inside a JVM — every
-non-JVM parser caps at 14/16.
+The 2 held-out Lightbend fixtures (`test01`, `test03`) reference JVM system
+properties `${?java.version}` / `${?user.home}`, which resolve only inside a
+JVM; every non-JVM parser stops there. The cross-library snapshot in xx.hocon
+`docs/ecosystem-conformance.md` (measured 2026-07-15: corpus 134, Lightbend
+suite 14/16 by its own count) shows py.hocon at parity with go.hocon and
+rs.hocon.
 
 ## Per-impl notes
 

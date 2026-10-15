@@ -5,7 +5,7 @@
 [![CI](https://github.com/o3co/py.hocon/actions/workflows/test.yml/badge.svg)](https://github.com/o3co/py.hocon/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/o3co/py.hocon/branch/main/graph/badge.svg)](https://codecov.io/gh/o3co/py.hocon)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Spec conformance](https://img.shields.io/badge/spec%20corpus-134%2F134-brightgreen.svg)](docs/spec-compliance.md)
+[![Spec conformance](https://img.shields.io/badge/spec%20corpus-100%25-brightgreen.svg)](docs/spec-compliance.md)
 
 A [Lightbend HOCON specification](https://github.com/lightbend/config/blob/main/HOCON.md)
 parser for Python. Hand-written lexer, recursive-descent parser, and a typed `Config`
@@ -587,14 +587,18 @@ is tracked at item granularity in [`docs/spec-compliance.md`](docs/spec-complian
 see [`xx.hocon/docs/compliance-matrix.md`](https://github.com/o3co/xx.hocon/blob/main/docs/compliance-matrix.md)
 for live cross-impl values.
 
-| Corpus | py.hocon | go.hocon / rs.hocon (reference) |
-|---|---:|---:|
-| Spec corpus (134) | **134 (100.0%)** | 134 (100.0%) |
-| Lightbend suite (16) | **14/16** | 14/16 |
+| Corpus (py.hocon's own harness, xx.hocon main as of 2026-10-16) | py.hocon |
+|---|---:|
+| Spec corpus | **154/154 (100.0%)** |
+| Lightbend fixtures with expected output | **12/14** |
 
-At parity with the reference sibling implementations. The 2 held-out Lightbend
-fixtures reference JVM system properties (`${?java.version}` / `${?user.home}`),
-which resolve only inside a JVM — every non-JVM parser caps at 14/16.
+The 2 held-out Lightbend fixtures (`test01`, `test03`) reference JVM system
+properties (`${?java.version}` / `${?user.home}`), which resolve only inside a
+JVM; every non-JVM parser stops there. Run `make testdata && make test` to
+re-measure against the current corpus. The cross-library snapshot in
+[xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md)
+(measured 2026-07-15, with that day's corpus of 134 and its own count of the
+Lightbend suite, 14/16) shows py.hocon at parity with go.hocon and rs.hocon.
 
 ## Related Projects
 

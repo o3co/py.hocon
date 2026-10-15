@@ -5,7 +5,7 @@
 [![CI](https://github.com/o3co/py.hocon/actions/workflows/test.yml/badge.svg)](https://github.com/o3co/py.hocon/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/o3co/py.hocon/branch/main/graph/badge.svg)](https://codecov.io/gh/o3co/py.hocon)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Spec conformance](https://img.shields.io/badge/spec%20corpus-134%2F134-brightgreen.svg)](docs/spec-compliance.md)
+[![Spec conformance](https://img.shields.io/badge/spec%20corpus-100%25-brightgreen.svg)](docs/spec-compliance.md)
 
 [Lightbend HOCON 仕様](https://github.com/lightbend/config/blob/main/HOCON.md)準拠の
 Python パーサー。手書きの字句解析器・再帰下降パーサー・型付き `Config` API を備え、
@@ -534,13 +534,18 @@ pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) よ�
 横断値は [`xx.hocon/docs/compliance-matrix.md`](https://github.com/o3co/xx.hocon/blob/main/docs/compliance-matrix.md)
 を参照。
 
-| コーパス | py.hocon | go.hocon / rs.hocon (参照) |
-|---|---:|---:|
-| Spec corpus (134) | **134 (100.0%)** | 134 (100.0%) |
-| Lightbend suite (16) | **14/16** | 14/16 |
+| コーパス (py.hocon 自身のハーネス、2026-10-16 時点の xx.hocon main) | py.hocon |
+|---|---:|
+| Spec corpus | **154/154 (100.0%)** |
+| 期待出力のある Lightbend fixture | **12/14** |
 
-参照 sibling 実装と同値。held-out の Lightbend 2 件は JVM system property
-(`${?java.version}` / `${?user.home}`) 参照で、非 JVM パーサーは 14/16 が上限です。
+held-out の Lightbend 2 件 (`test01`、`test03`) は JVM system property
+(`${?java.version}` / `${?user.home}`) を参照し、JVM の中でしか解決できないので、
+非 JVM パーサーはそこで止まります。現在のコーパスで測り直すには
+`make testdata && make test` を実行します。ライブラリ横断のスナップショット
+([xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md)、
+2026-07-15 計測。当時のコーパス 134 件と、そこでの Lightbend suite の数え方で 14/16) でも、
+py.hocon は go.hocon / rs.hocon と同値です。
 
 ## 関連プロジェクト
 
