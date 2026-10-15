@@ -1,10 +1,11 @@
 """S8.1 / E8 — `+` is reserved outside quotes.
 
 HOCON.md L245 lists `+` among the characters an unquoted string may not
-contain (it is the `+=` operator). Inside an unquoted run the only `+` that
-survives is the sign of a number's exponent (`1e+5`); E8 step 4 makes a failed
-number-lex that consumed a `+` (`1e+x`, fixture us15) a reserved-character
-error rather than a fallback to text. Matches Lightbend and go.hocon.
+contain (it is the `+=` operator). Outside quotes the only `+` that survives
+is the sign of a number's exponent (`1e+5`). E8 step 4 makes a number run that
+consumed a `+` but is not a number (`1e+x`, fixture us15; `1e+5.5`) a
+reserved-character error rather than a fallback to text, as in Lightbend 1.4.6;
+the shared cross-impl table below is pinned verbatim.
 """
 
 from __future__ import annotations
@@ -80,3 +81,31 @@ def test_number_key_with_exponent_sign_is_a_key() -> None:
     cfg = parse_string("1e+5 = 1\na { 1e+5 = 2 }")
     assert cfg.get('"1e+5"') == 1
     assert cfg.get('a."1e+5"') == 2
+
+
+# The cross-impl table (Lightbend 1.4.6 = go.hocon develop, measured
+# 2026-10-16): outside quotes, '+' survives only as an exponent sign.
+_SHARED_TABLE: list[tuple[str, object]] = [
+    ("1e+x", ParseError),
+    ("1+2", ParseError),
+    ("1.2.3+build", ParseError),
+    ("1.0.0+abc", ParseError),
+    ("+1", ParseError),
+    ("1e+5", 100000.0),
+    ("1x+2", ParseError),
+    ("abc+1", ParseError),
+    ("abc+", ParseError),
+    ("a+b", ParseError),
+    ("1e+5ms", "1e+5ms"),
+    ("1e+5 ms", "1e+5 ms"),
+    ("1.5e+3s", "1.5e+3s"),
+]
+
+
+@pytest.mark.parametrize(("value", "expected"), _SHARED_TABLE)
+def test_shared_cross_impl_table(value: str, expected: object) -> None:
+    if expected is ParseError:
+        with pytest.raises(ParseError, match="reserved character '\\+'"):
+            parse_string(f"a = {value}")
+    else:
+        assert parse_string(f"a = {value}").get("a") == expected

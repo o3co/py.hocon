@@ -30,8 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unquoted value or key that contains `+` is now a `ParseError`
   ("reserved character '+' outside quotes"), as in Lightbend and go.hocon,
   instead of being read as text: `a = 1e+x` (fixture us15, E8 step 4),
-  `a = 1+2`, `a = foo+bar`, `a+b = 1`. The only `+` left in an unquoted run is
-  the sign of a number's exponent (`1e+5`, `-1.5E+3`), and `+=` is unchanged.
+  `a = 1+2`, `a = 1.2.3+build`, `a = abc+`, `a = foo+bar`, `a = +1`,
+  `a+b = 1`, and a number run that is not a number (`1e+5.5`). The only `+`
+  left outside quotes is the sign of a number's exponent (`1e+5`,
+  `-1.5E+3`; `1e+5ms` stays the string "1e+5ms"), and `+=` is unchanged.
   **Workaround:** quote a value that needs a literal `+` (`a = "foo+bar"`,
   `"a+b" = 1`).
 
