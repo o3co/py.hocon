@@ -5,8 +5,9 @@ errors, whole-float→int coercion derived from the decimal text per xx.hocon#56
 S15 numeric-keyed objects in sequence context, extra keys ignored) and
 rs.hocon's serde integration, adapted to Python typing: nested dataclasses,
 ``list[T]`` / ``dict[str, T]`` / ``Optional[T]`` / ``Any``, ``timedelta`` for
-durations, ``Period``, ``Enum``, nested ``Config``, and duck-typed delegation
-to Pydantic v2's ``model_validate``.
+durations, ``Period``, ``Enum``, nested ``Config``, ``Annotated`` unit markers
+(:mod:`hocon.markers`), and duck-typed delegation to Pydantic v2's
+``model_validate``.
 
 Field-name resolution for dataclass fields: a ``field(metadata={"hocon":
 key})`` alias, when present, is the *only* key consulted (like go.hocon's
@@ -25,11 +26,12 @@ from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from types import UnionType
-from typing import Any, Union, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Union, get_args, get_origin, get_type_hints
 
 from .coerce import coerce_boolean, coerce_number, read_duration, read_period
 from .config import Config, Period, _hocon_to_py, _read_unit_scalar, _scalar_to_py
 from .errors import ConfigError
+from .markers import UnitMarker
 from .numeric_array import numeric_object_to_array
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue
 
@@ -42,6 +44,8 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
         return _hocon_to_py(node)
 
     origin = get_origin(target)
+    if origin is Annotated:
+        return _decode_annotated(node, target, path)
     if origin is Union or origin is UnionType:
         return _decode_optional(node, target, path)
     if origin is list:
@@ -100,6 +104,30 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
     raise ConfigError(f"unsupported target type {target!r} at {_p(path)}", path)
 
 
+def _decode_annotated(node: HoconValue, target: Any, path: str) -> Any:
+    # get_args flattens nested Annotated: (base, *metadata).
+    base, *metadata = get_args(target)
+    markers = [m for m in metadata if isinstance(m, UnitMarker)]
+    if not markers:
+        return decode_node(node, base, path)  # metadata for someone else
+    if len(markers) > 1:
+        raise ConfigError(f"more than one unit marker on {target!r} at {_p(path)}", path)
+    marker = markers[0]
+    if _is_null(node):
+        return decode_node(node, base, path)  # Optional → None, else the null error
+    try:
+        inner = marker.resolve_target(base)
+    except TypeError as e:
+        raise ConfigError(f"{e} at {_p(path)}", path) from None
+    sc = _as_nonnull_scalar(node, base, path)
+    value = _read_unit_scalar(sc, path, marker.what, lambda raw: marker.to_target(raw, inner))
+    if inner is int and not isinstance(value, int):
+        raise ConfigError(f"expected int at {_p(path)}, got {value!r} from {sc.raw!r}", path)
+    if inner is float:
+        return float(value)  # type: ignore[arg-type]
+    return value
+
+
 def _decode_optional(node: HoconValue, target: Any, path: str) -> Any:
     args = get_args(target)
     if _is_null(node) and type(None) in args:
@@ -115,7 +143,7 @@ def _decode_optional(node: HoconValue, target: Any, path: str) -> Any:
 
 def _decode_dataclass(node: HoconValue, target: type, path: str) -> Any:
     obj = _as_object(node, target, path)
-    hints = get_type_hints(target)
+    hints = get_type_hints(target, include_extras=True)
     kwargs: dict[str, Any] = {}
     for f in dataclass_fields(target):
         if not f.init:

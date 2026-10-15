@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Unit markers for typed decoding (xx.hocon#102): `hocon.Bytes(unit="B")`
+  and `hocon.Duration(unit="ms")`.** `Annotated[int, hocon.Bytes()]` reads a
+  byte size (`64KiB`) and `Annotated[timedelta, hocon.Duration()]` /
+  `Annotated[float, hocon.Duration("s")]` a duration (`30m`) with the getters'
+  rules, in `Config.decode` dataclasses and in Pydantic v2 models (through
+  `__get_pydantic_core_schema__`; pydantic is still never imported unless
+  Pydantic asks for the schema). Errors carry the key path; constraints stay in
+  the annotated type. In Pydantic models a bare number in exponent form
+  (`1e3`) reads through its value, while the getters and dataclass decoding
+  read the source text and reject it.
+
 ### Fixed
 
 - **`get_bytes` reports an overflowing byte size (`10PB`) as a `ConfigError`

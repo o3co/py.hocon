@@ -397,7 +397,8 @@ class Config(Mapping[str, Any]):
         a field without a default whose key is absent is an error, extra keys
         are ignored, and int fields accept whole-number floats (wholeness
         derived from the decimal text). ``timedelta`` fields parse HOCON
-        durations; :class:`Period` fields parse periods.
+        durations; :class:`Period` fields parse periods; ``Annotated[int,
+        hocon.Bytes()]`` / ``hocon.Duration()`` markers read unit values.
 
         Raises :class:`NotResolvedError` when the decoded subtree still
         contains unresolved substitutions, and :class:`ConfigError` on a

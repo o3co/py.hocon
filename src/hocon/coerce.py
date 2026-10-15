@@ -27,6 +27,8 @@ __all__ = [
     "UnitReadError",
     "coerce_boolean",
     "coerce_number",
+    "is_byte_unit",
+    "is_duration_unit",
     "parse_bytes",
     "parse_duration",
     "parse_period",
@@ -324,6 +326,16 @@ class UnitReadError(ValueError):
         if self.problem == "overflow":
             return f"{self.what} overflows the representable range{at}: {self.raw!r}"
         return f"invalid {self.what}{at}: {self.raw!r}"
+
+
+def is_duration_unit(unit: str) -> bool:
+    """Whether ``unit`` is an output unit ``read_duration`` accepts."""
+    return unit in _OUTPUT_DURATION_UNITS
+
+
+def is_byte_unit(unit: str) -> bool:
+    """Whether ``unit`` is an output unit ``read_bytes`` accepts."""
+    return unit in _OUTPUT_BYTE_UNITS
 
 
 def read_duration(raw: str, unit: DurationUnit | None = None) -> float:

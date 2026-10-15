@@ -129,7 +129,8 @@ attrs 等) に委ねます。HOCON はそれらを仕様に組み込んでおり
   `cfg.get(path, default)`、イテレーション、`len`、`dict(cfg)`、`**cfg`
 - 型付き decode: `cfg.decode(MyDataclass)` — dataclass の再帰構築
   (kebab-case / camelCase のキーマッチ、default、`Optional`、`list[T]` /
-  `dict[str, T]`、`timedelta` duration、`Enum`) と Pydantic v2 への
+  `dict[str, T]`、`timedelta` duration、`Enum`、`Annotated[int, hocon.Bytes()]`
+  marker による byte サイズ / duration) と Pydantic v2 への
   `model_validate` 委譲
 - 外部 runtime 依存ゼロ (pure stdlib)、型付き (`py.typed`)
 
@@ -226,6 +227,47 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
   `str` は非 null スカラーの raw テキストを受理、`int` は整数値の float を
   受理し、整数性は 10 進テキストから判定します (`3.0` → `3`、`2.5` → エラー)。
   HOCON `null` は optional なフィールドにしか decode されません。
+
+#### 単位つきの値: `hocon.Bytes` / `hocon.Duration`
+
+フィールドに単位 marker を付けると、HOCON の byte サイズ / duration を
+`get_bytes` / `get_duration` と同じ規則で読みます (単位は大文字小文字を区別、
+単位なしの数値は bytes / ms、byte サイズは非負)。marker が受け持つのは単位の
+構文だけで、制約は型の側に置きます:
+
+```python
+from dataclasses import dataclass
+from datetime import timedelta
+from typing import Annotated
+
+import hocon
+from pydantic import BaseModel, Field
+
+@dataclass
+class Server:
+    max_body: Annotated[int, hocon.Bytes()]          # "64KiB" → 65536
+    cache: Annotated[float, hocon.Bytes("MiB")]      # "512KiB" → 0.5
+    timeout: Annotated[timedelta, hocon.Duration()]  # "30m" → 0:30:00
+    retry_s: Annotated[float, hocon.Duration("s")]   # "1.5m" → 90.0
+
+class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使える
+    max_body: Annotated[int, hocon.Bytes(), Field(gt=1024)]
+```
+
+- `Bytes(unit="B")` は `int` / `float` に、`Duration(unit="ms")` は `int` /
+  `float` / `timedelta` に付けます。`int` フィールドは結果が整数でなければ
+  エラーです (`"512B"` を `KiB` で読む場合など)。`Optional`、`list[...]`、
+  `dict[str, ...]` の中でも使えます。
+- エラーにはキーのパスが入ります (`invalid byte size at server.max-body:
+  '64KB'`)。Pydantic モデルでは、そのフィールドの位置の validation error に
+  なります。
+- Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
+  読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
+  getter と dataclass の decode ではエラーです。単位を付けて書いた値は、
+  どちらでも同じに読まれます。
+- Pydantic モデルで marker のない `timedelta` フィールドは、Pydantic 自身の
+  規則 (ISO 8601、単位なしの数値は秒) で読まれます。HOCON の duration として
+  読むには `Annotated[timedelta, hocon.Duration()]` を使います。
 
 ### 値ファクトリ
 
