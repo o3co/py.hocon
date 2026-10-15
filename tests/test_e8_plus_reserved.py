@@ -109,3 +109,76 @@ def test_shared_cross_impl_table(value: str, expected: object) -> None:
             parse_string(f"a = {value}")
     else:
         assert parse_string(f"a = {value}").get("a") == expected
+
+
+# The rest of the shared table (Lightbend 1.4.6 is the baseline; go.hocon is
+# being aligned on the rows it diverges from).
+_SHARED_TABLE_MORE: list[tuple[str, object]] = [
+    ("1e+5x", "1e+5x"),
+    ("1e-x", "1e-x"),
+    ("1e-5e5", "1e-5e5"),
+    ("-1.5e+3", -1500.0),
+    ("x1e+5", ParseError),
+    (".5e+3", ParseError),
+    ("1e+5.5", ParseError),
+    ("1e+5.2", ParseError),
+    ("1e+5e5", ParseError),
+    ("1e+5-", ParseError),
+    ("1.e+5", 100000.0),
+]
+
+
+@pytest.mark.parametrize(("value", "expected"), _SHARED_TABLE_MORE)
+def test_shared_cross_impl_table_more(value: str, expected: object) -> None:
+    test_shared_cross_impl_table(value, expected)
+
+
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ("1e+5 = 1", {"1e+5": 1}),
+        ("1e+5x = 1", {"1e+5x": 1}),
+        ("a+b = 1", ParseError),
+        ("a.1e+5 = 1", ParseError),
+        ("x = [1]\nx += 2", {"x": [1, 2]}),
+    ],
+)
+def test_shared_table_key_position(document: str, expected: object) -> None:
+    if expected is ParseError:
+        with pytest.raises(ParseError, match="reserved character '\\+'"):
+            parse_string(document)
+    else:
+        assert parse_string(document).to_object() == expected
+
+
+# Number-lex edges without '+' (S8.4, Lightbend 1.4.6). Digits are ASCII:
+# a Unicode digit makes the run text.
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("1.", 1.0),
+        ("1.e5", 100000.0),
+        ("-1.", -1.0),
+        ("-.5", -0.5),
+        ("-.5e+3", -500.0),
+        ("1.5.", "1.5."),
+        (".5", ".5"),
+        ("-.", "-."),
+        ("1.e", "1.e"),
+        ("1٥", "1٥"),
+    ],
+)
+def test_number_lex_edges(value: str, expected: object) -> None:
+    got = parse_string(f"a = {value}").get("a")
+    assert got == expected
+    assert isinstance(got, str) == isinstance(expected, str)
+
+
+def test_long_malformed_run_is_rejected_quickly() -> None:
+    # The number regexes have no overlapping quantifiers, so this is linear.
+    import time
+
+    start = time.perf_counter()
+    with pytest.raises(ParseError):
+        parse_string("1" * 8000 + "e+5.2 = 1")
+    assert time.perf_counter() - start < 1.0

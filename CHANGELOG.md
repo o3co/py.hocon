@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-1.5E+3`; `1e+5ms` stays the string "1e+5ms"), and `+=` is unchanged.
   **Workaround:** quote a value that needs a literal `+` (`a = "foo+bar"`,
   `"a+b" = 1`).
+- **Numbers use ASCII digits only.** An unquoted value with a non-ASCII
+  digit (`a = 1٥`) is now the string it reads as, as in Lightbend, instead of
+  a number (`15`); `get_number` on such text raises `ConfigError` as for any
+  string.
 
 - **A duration past the float range is an error (extra-spec E21).**
   `get_duration` (and decoding into `int` / `float` with `Duration`) raises

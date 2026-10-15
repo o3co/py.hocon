@@ -95,24 +95,27 @@ _PLUS_RESERVED = (
 
 # Digits are ASCII only ([0-9], never \d): Lightbend's number characters are
 # ASCII, so a Unicode digit is text and a '+' after it is reserved.
-# A number mantissa followed by its exponent marker (`1e`, `-1.5E`, `1.e`): the
-# only place an unquoted run may carry a `+`, as the exponent's sign.
-_EXPONENT_PREFIX_RE = re.compile(r"-?[0-9]+(?:\.[0-9]*)?[eE]")
+# A number mantissa followed by its exponent marker (`1e`, `-1.5E`, `1.e`,
+# `-.5e`): the only place an unquoted run may carry a `+`, as the exponent's
+# sign. A '.'-leading run (`.5e`) is text, not a number.
+_EXPONENT_PREFIX_RE = re.compile(r"(?:-?[0-9]+(?:\.[0-9]*)?|-\.[0-9]+)[eE]")
 
 
 # E8 step 4 (Lightbend Tokenizer.pullNumber): a run that starts like a number
 # consumes the longest prefix of these characters, and that prefix must parse as
 # a Java long / double. If it does not and it holds a `+`, the `+` is reserved.
 _NUMBER_LEX_CHARS = frozenset("0123456789.eE+-")
-_JAVA_NUMBER_RE = re.compile(r"-?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+# Same grammar as coerce.DECIMAL_NUMBER_RE (kept local: the lexer must not
+# depend on coerce). Quantifiers do not overlap, so long runs stay linear.
+_JAVA_NUMBER_RE = re.compile(r"-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 
 
 def _greedy_number_lex_rejects(run: str) -> bool:
-    """True when ``run`` starts a number (a digit, or ``-`` and a digit) and
+    """True when ``run`` starts a number (a digit, or ``-`` and a digit or ``.``) and
     its greedy number-lex prefix holds a ``+`` but is not a number, e.g.
     ``1e+5e5`` or ``1e+5.2`` (E8 step 4: an error, not a fallback to text)."""
     starts_number = _is_decimal_digit(run[:1]) or (
-        run[:1] == "-" and _is_decimal_digit(run[1:2])
+        run[:1] == "-" and (_is_decimal_digit(run[1:2]) or run[1:2] == ".")
     )
     if not starts_number:
         return False

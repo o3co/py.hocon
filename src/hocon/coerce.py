@@ -50,7 +50,10 @@ __all__ = [
     "read_timedelta",
 ]
 
-DECIMAL_NUMBER_RE = re.compile(r"-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?")
+# ASCII digits only ([0-9], not \d, which also matches Unicode digits:
+# Lightbend reads `1٥` as text). The quantifiers do not overlap, so a long
+# malformed run is rejected in linear time.
+DECIMAL_NUMBER_RE = re.compile(r"-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 
 # HOCON_WS = Java Character.isWhitespace set
 #          ∪ { 0x00A0 NBSP, 0x2007 FIGURE SPACE, 0x202F NARROW NO-BREAK SPACE }
