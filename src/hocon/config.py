@@ -217,10 +217,32 @@ class Config(Mapping[str, Any]):
         raise ConfigError(f"expected boolean at {path}, got {v.value_type}", path)
 
     def get_duration(self, path: str, unit: DurationUnit | None = None) -> float:
+        """The duration at ``path`` as a number in ``unit`` (default ``"ms"``).
+
+        ``unit`` is an output-unit token — ``ns`` / ``us`` / ``ms`` / ``s`` /
+        ``m`` / ``h`` / ``d`` — not a config spelling (``"seconds"`` is not
+        accepted). A bare number in the config is milliseconds; arithmetic is
+        exact decimal, rounded to float once (E20). Raises
+        :class:`ConfigError` when the value is missing, of the wrong type,
+        invalid, or past the float range (E21) — and, today, when ``unit`` is
+        not one of the tokens above (reported as an invalid duration).
+        """
         v = self._require_scalar(path)
         return _read_unit_scalar(v, path, UNIT_DURATION, lambda raw: read_duration(raw, unit))
 
     def get_bytes(self, path: str, unit: ByteUnit | None = None) -> float:
+        """The byte size at ``path`` in ``unit`` (default ``"B"``); an ``int``
+        in bytes, a ``float`` in any other unit.
+
+        ``unit`` is an output-unit token — ``B`` / ``KB`` / ``KiB`` / ``MB`` /
+        ``MiB`` / ``GB`` / ``GiB`` / ``TB`` / ``TiB`` — not a config spelling:
+        ``"KB"`` here is 1000 bytes, which config text spells ``kB``. The exact
+        decimal product is truncated toward zero in bytes, then converted
+        (E20). Raises :class:`ConfigError` when the value is missing, of the
+        wrong type, invalid, negative, or 2^53 bytes or more — and, today,
+        when ``unit`` is not one of the tokens above (reported as an invalid
+        byte size).
+        """
         v = self._require_scalar(path)
         return _read_unit_scalar(v, path, UNIT_BYTE_SIZE, lambda raw: read_bytes(raw, unit))
 
@@ -405,7 +427,9 @@ class Config(Mapping[str, Any]):
 
         Raises :class:`NotResolvedError` when the decoded subtree still
         contains unresolved substitutions, and :class:`ConfigError` on a
-        missing path, a missing required field, or a type mismatch.
+        missing path, a missing required field, or a type mismatch. A Pydantic
+        model reports its own validation failures as
+        ``pydantic.ValidationError``.
         """
         from .decode import decode_node
 

@@ -5,7 +5,7 @@
 [![CI](https://github.com/o3co/py.hocon/actions/workflows/test.yml/badge.svg)](https://github.com/o3co/py.hocon/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/o3co/py.hocon/branch/main/graph/badge.svg)](https://codecov.io/gh/o3co/py.hocon)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Spec conformance](https://img.shields.io/badge/spec%20corpus-134%2F134-brightgreen.svg)](docs/spec-compliance.md)
+[![Spec conformance](https://img.shields.io/badge/spec%20corpus-100%25-brightgreen.svg)](docs/spec-compliance.md)
 
 [Lightbend HOCON 仕様](https://github.com/lightbend/config/blob/main/HOCON.md)準拠の
 Python パーサー。手書きの字句解析器・再帰下降パーサー・型付き `Config` API を備え、
@@ -109,6 +109,66 @@ attrs 等) に委ねます。HOCON はそれらを仕様に組み込んでおり
 加えて HOCON は YAML の可読性と JSON の構造を兼ね備え、フラットな key-value を超える
 設定に適します。
 
+## 設定を module の中に閉じ込める
+
+大きなコードベースでは、設定が漏れ出しがちです。全チームが編集する 1 つの巨大なファイル、各サービスにコピーされた default、互いのキーを読み合う module。HOCON なら、各 module はコードと同じように自分の設定を持てます。
+
+- **各 module は自分の名前空間を持ち、default を同梱する。** `auth` module は `auth { … }` をコードの隣に置き、すべての default を埋めておく。アプリは default をコピーせず、`include` 1 行で取り込む。
+- **アプリは違うところだけを上書きする。** 後の層は前の層に deep merge されるので、アプリが書くのはブロック全体ではなく 2 つのキーだけ。
+- **各 module は自分の subtree だけを、自分の schema で読む。** module は `auth` を要求し、自分で定義した schema で検証する。その section の形が module の契約で、ファイルのほかの部分は module からは見えない。
+- **module 間の配線はアプリに置く。** module は自分が読むキー (`auth.db`) を宣言するだけで、アプリが与えるべきものには default を置かない。アプリがそれを共有の値につなぐ (`auth.db = ${shared.db}`)。module は互いのキーもアプリのキーも参照しないので、依存は一方向になる。
+
+```hocon
+# auth/reference.conf: auth package に同梱し、auth チームが持つ
+auth {
+  session { lifetime = 30m, max-body = 64KiB }
+  # db: default なし。auth.db はアプリが与える
+}
+```
+
+```hocon
+# application.conf: アプリが持つ
+include package("github.com/acme/auth", "reference.conf")
+
+shared.db { host = db.internal, port = 5432 }
+auth.db = ${shared.db}       # 配線はアプリに置く
+auth.session.lifetime = 2h   # 違うところだけ上書き。残りは module の default のまま
+```
+
+```python
+# auth module の中
+from dataclasses import dataclass
+from typing import Annotated
+
+import hocon
+
+
+@dataclass
+class Session:
+    lifetime: Annotated[int, hocon.Duration("s")]  # "2h" → 7200
+    max_body: Annotated[int, hocon.Bytes()]        # "64KiB" → 65536
+
+
+@dataclass
+class Db:
+    host: str
+    port: int
+
+
+@dataclass
+class Auth:
+    session: Session
+    db: Db  # default なし: auth.db はアプリが与える
+
+
+def load_auth(config: hocon.Config) -> Auth:
+    return config.decode(Auth, "auth")  # 自分の subtree だけを読む
+```
+
+dataclass のフィールドは kebab-case のキーに一致し (`max_body` は `max-body` を読む)、単位 marker は `2h` や `64KiB` を getter と同じ規則で読みます。アプリが `auth.db` を与えなければ、decode は `ConfigError: missing required field at auth.db` で失敗します。
+
+`include package(...)` は HOCON.md の一部ではなく、o3co の実装で共有している規約 ([E11](https://github.com/o3co/xx.hocon/blob/main/docs/extra-spec-conventions.md#e11)) で、`include classpath(...)` の非 JVM 版にあたります。アプリにファイルの置き場所を知らせずに module が default を公開する仕組みです。py.hocon は package をファイルシステムの規約 `<base>/<id>/<file>` で探します。`<base>` は `resolve_from` (ディレクトリ 1 つかそのリスト)、`base_dir`、include 元ファイルのディレクトリ、カレントディレクトリのうち、最初に当てはまるものです。独自の `package_resolver` を使うこともできます ([パース関数](#パース関数) と [既知の制限](#既知の制限) を参照)。JVM では、Lightbend の `reference.conf` の慣習が同じ役割を果たします。
+
 ## 機能
 
 - 完全な HOCON パース: オブジェクト・配列・スカラー・置換 (`${path}` / `${?path}`)
@@ -124,7 +184,8 @@ attrs 等) に委ねます。HOCON はそれらを仕様に組み込んでおり
 - 数値キーオブジェクト → 配列変換
 - `.properties` include
 - 遅延解決ライフサイクル: `parse(..., resolve_substitutions=False)` →
-  `with_fallback` → `resolve()`
+  `with_fallback` → `resolve()` (Lightbend の `parseString` / `withFallback` /
+  `resolve()` API)
 - `Config` は `collections.abc.Mapping`: `cfg[path]`、`path in cfg`、
   `cfg.get(path, default)`、イテレーション、`len`、`dict(cfg)`、`**cfg`
 - 型付き decode: `cfg.decode(MyDataclass)` — dataclass の再帰構築
@@ -132,6 +193,8 @@ attrs 等) に委ねます。HOCON はそれらを仕様に組み込んでおり
   `dict[str, T]`、`timedelta` duration、`Enum`、`Annotated[int, hocon.Bytes()]`
   marker による byte サイズ / duration) と Pydantic v2 への
   `model_validate` 委譲
+- HOCON emitter: `cfg.render_hocon()` は解決済みの config を HOCON テキストに戻し、
+  round-trip を保証します (出力をパースし直すと値ツリーが再現される)
 - 外部 runtime 依存ゼロ (pure stdlib)、型付き (`py.typed`)
 
 ## API リファレンス
@@ -173,8 +236,8 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 | `get_int(path)` | `int` | 不在・非数値・未解決 |
 | `get_float(path)` | `float` | 不在・非数値・未解決 |
 | `get_boolean(path)` | `bool` | 不在・型不一致・未解決 |
-| `get_duration(path, unit=None)` | `float` | 不在・型不一致・不正な duration |
-| `get_bytes(path, unit=None)` | `float` (bytes では `int`) | 不在・型不一致・不正な byte size |
+| `get_duration(path, unit=None)` | `float` | 不在・型不一致・不正な duration・float の範囲外 (E21) |
+| `get_bytes(path, unit=None)` | `float` (bytes では `int`) | 不在・型不一致・不正または負の byte size・2^53 bytes 以上 |
 | `get_period(path)` | `Period` | 不在・型不一致・不正な period |
 | `get_config(path)` | `Config` | 不在・オブジェクトでない・未解決 |
 | `get_list(path)` | `list` | 不在・配列でない・未解決 |
@@ -187,6 +250,7 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 | `resolve_with(source, *, ...)` | `Config` | source 未解決、または解決不能な置換 |
 | `is_resolved()` | `bool` | — |
 | `to_object()` | `dict / list / scalar` | — |
+| `render_hocon()` | `str` (HOCON テキスト) | 未解決 |
 
 `get_boolean` は `yes`/`no`・`on`/`off` も受け付けます。`get_number` は整数字句なら
 `int`、それ以外は `float` を返します。
@@ -255,7 +319,8 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
 ```
 
 - `Bytes(unit="B")` は `int` / `float` に、`Duration(unit="ms")` は `int` /
-  `float` / `timedelta` に付けます。`int` フィールドは結果が整数でなければ
+  `float` / `timedelta` に付けます。`unit` は出力単位の token です (`kB` ではなく
+  `KB`。[Duration / Period / Byte サイズ](#duration--period--byte-サイズ) を参照)。`int` フィールドは結果が整数でなければ
   エラーです (`"512B"` を `KiB` で読む場合など)。`Optional`、`list[...]`、
   `dict[str, ...]` の中でも使えます。
 - エラーにはキーのパスが入ります (`invalid byte size at server.max-body:
@@ -271,6 +336,11 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
   書きます。`__init__` を override したモデルには validation context が
   渡らない (Pydantic の制約) ため、その中の marker は働きません。`__init__` の
   override ではなく `model_validator` を使ってください。
+- kebab-case / camelCase でのキーの照合は dataclass の機能です。Pydantic モデルには
+  キーが書いたとおりに渡るので、HOCON のキー `max-body` には field の alias
+  (`Field(alias="max-body")`、またはモデルの `alias_generator`) が要ります。
+  あるいは config のキーを field 名に合わせます (`max_body`)。どちらもないと
+  Pydantic はその field を missing と報告します。
 - Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
   読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
   getter と dataclass の decode ではエラーです。単位を付けて書いた値は、
@@ -305,6 +375,29 @@ node = cfg.get_value("server")      # HoconValue
 as_object(node)                     # dict[str, HoconValue] | None
 is_scalar(cfg.get_value("server.port"))   # True
 ```
+
+### HOCON への書き出し
+
+`render_hocon()` は解決済みの config を HOCON テキストとして書き出します。保証するのは
+バイト単位の形式ではなく round-trip です。出力をパースし直すと値ツリーがそのまま
+再現されるので、クォートを外すと別の型として読まれるスカラーはクォートします
+(`{"port": "8080"}` は `port = "8080"` となり、文字列のまま)。ルートのフィールドは
+波括弧なし、ネストしたオブジェクトは `key { … }` になり、未解決の config では
+`NotResolvedError` を送出します:
+
+```python
+from hocon import from_map
+
+cfg = from_map({"server": {"host": "localhost", "port": 8080}})
+print(cfg.render_hocon())
+# server {
+#   host = localhost
+#   port = 8080
+# }
+```
+
+置換とコメントは表現されません。解決済みの値ツリーはそれらを持たないためです。
+go.hocon `RenderHOCON`、ts.hocon `renderHocon()`、rs.hocon `render_hocon()` と同じ契約です。
 
 ### 遅延解決
 
@@ -355,6 +448,14 @@ from hocon import (
 )
 ```
 
+| 型 | 発生する場面 |
+|------|------|
+| `ParseError` | 字句解析・構文解析中の構文エラー (行と列を含む) |
+| `ResolveError` | 置換の失敗、循環参照、required include の不在 |
+| `PackageLookupError` | `include package(...)` が見つからない |
+| `ConfigError` | 値アクセス時のキー不在や型不一致。配列がルートの文書 (S3.5) では `parse` / `parse_file` も送出する |
+| `NotResolvedError` | 未解決の置換を持つパスに getter を呼んだ |
+
 ## HOCON の例
 
 ```hocon
@@ -387,6 +488,9 @@ description = """
   This is a
   multiline string.
 """
+
+# 非クォート文字列
+path = /usr/local/bin
 ```
 
 ### Duration / Period / Byte サイズ
@@ -403,6 +507,7 @@ c = hocon.parse("""
 
 c.get_duration("timeout")         # 30000.0 (ms)
 c.get_duration("timeout", "s")    # 30.0
+c.get_duration("cache-ttl", "m")  # 5.0
 c.get_period("retention")         # Period(years=0, months=0, days=14)
 c.get_bytes("max-size")           # 536870912 (bytes)
 c.get_bytes("max-size", "MiB")    # 512.0
@@ -416,7 +521,25 @@ Lightbend の表どおり大文字小文字を区別します: `B`/`b`、`kB` (1
 小文字の両方 (`K`/`k`、S21.4)。計算は正確な 10 進数で行います (E20): `1.001s` は
 ちょうど `1001` ms、小数の byte サイズは正確な積を 0 方向に切り捨てます
 (`1.0009kB` は `1000` bytes)。float の範囲を超える duration はエラーで、`inf` には
-なりません (E21)。
+なりません (E21)。byte サイズは 2^53 bytes (約 9 PB) 未満でなければなりません。
+`8PB` は読めますが、`10PB` や `1YB` は `ConfigError` になるので、最大級の単位は
+小数でしか収まりません (`0.000000001YiB`)。
+
+**出力単位は、別の短い token の集合です。** `get_duration` / `get_bytes` と
+`hocon.Duration` / `hocon.Bytes` marker の `unit` 引数は *結果* の単位を指定し、
+次の token だけを受け付けます:
+
+| 結果 | `unit` の token | 既定 |
+|---|---|---|
+| `get_duration`、`hocon.Duration` | `ns`、`us`、`ms`、`s`、`m`、`h`、`d` | `ms` |
+| `get_bytes`、`hocon.Bytes` | `B`、`KB`、`KiB`、`MB`、`MiB`、`GB`、`GiB`、`TB`、`TiB` | `B` |
+
+これは config に書く綴りとは違います。ここでの `KB` は 1000 bytes の意味で、config
+では `kB` と書きます (config で `KB` と書くとエラー)。`seconds` のような長形式も
+受け付けません。marker は未知の token を構築時に拒否します (`hocon.Bytes("kB")` は
+`ValueError`)。getter は不正な値として報告する (`get_bytes("v", "kB")` は
+`invalid byte size at v`) ので、正しそうな値が拒否されたら、まず token を確認して
+ください。
 
 `get_period` (仕様 S20.1–S20.4) は `Period(years, months, days)` (frozen
 dataclass、rs.hocon の `Period` struct 準拠) を返します。単位: `d`/`day`/`days`
@@ -437,7 +560,10 @@ Period は **整数のみ** (Lightbend `Integer.parseInt`) で、`"7.5"` のよ�
 | 中 (100 keys) | ~600 | ~1.7 ms |
 | 大 (1,000 keys) | ~57 | ~17.7 ms |
 | 置換 10 | ~3,700 | ~270 µs |
+| 置換 50 | ~800 | ~1.2 ms |
 | 置換 100 | ~400 | ~2.5 ms |
+| ネスト深さ 5 | ~8,500 | ~117 µs |
+| ネスト深さ 10 | ~4,600 | ~220 µs |
 | ネスト深さ 20 | ~2,000 | ~500 µs |
 
 pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) より概ね 30〜40 倍
@@ -452,13 +578,18 @@ pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) よ�
 横断値は [`xx.hocon/docs/compliance-matrix.md`](https://github.com/o3co/xx.hocon/blob/main/docs/compliance-matrix.md)
 を参照。
 
-| コーパス | py.hocon | go.hocon / rs.hocon (参照) |
-|---|---:|---:|
-| Spec corpus (134) | **134 (100.0%)** | 134 (100.0%) |
-| Lightbend suite (16) | **14/16** | 14/16 |
+| コーパス (py.hocon 自身のハーネス、2026-10-16 時点の xx.hocon main) | py.hocon |
+|---|---:|
+| Spec corpus | **154/154 (100.0%)** |
+| 期待出力のある Lightbend fixture | **12/14** |
 
-参照 sibling 実装と同値。held-out の Lightbend 2 件は JVM system property
-(`${?java.version}` / `${?user.home}`) 参照で、非 JVM パーサーは 14/16 が上限です。
+held-out の Lightbend 2 件 (`test01`、`test03`) は JVM system property
+(`${?java.version}` / `${?user.home}`) を参照し、JVM の中でしか解決できないので、
+非 JVM パーサーはこの 2 件を通せません。現在のコーパスで測り直すには
+`make testdata && make test` を実行します。ライブラリ横断のスナップショット
+([xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md)、
+2026-07-15 計測。当時のコーパス 134 件と、そこでの Lightbend suite の数え方で 14/16) でも、
+py.hocon は go.hocon / rs.hocon と同値です。
 
 ## 関連プロジェクト
 
@@ -468,6 +599,10 @@ pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) よ�
 | [go.hocon](https://github.com/o3co/go.hocon) | Go | [pkg.go.dev](https://pkg.go.dev/github.com/o3co/go.hocon) | Go 向け HOCON パーサー |
 | [rs.hocon](https://github.com/o3co/rs.hocon) | Rust | [crates.io](https://crates.io/crates/hocon-parser) | Rust 向け HOCON パーサー |
 | [hocon2](https://github.com/o3co/hocon2) | Go | [pkg.go.dev](https://pkg.go.dev/github.com/o3co/hocon2) | HOCON → JSON/YAML/TOML/Properties CLI |
+
+4 つのパーサー実装は、どれも同じ Lightbend HOCON 仕様に照らして準拠状況を追跡しています。実装ごとの
+準拠率は [実装横断のまとめ](https://github.com/o3co/xx.hocon/blob/main/docs/compliance-matrix.md)
+を参照してください。
 
 ## ベストプラクティス
 
@@ -614,7 +749,8 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   クライアントで取得して `parse()` に渡してください。
 - **`include classpath(...)`** 非対応。JVM 固有の include 形式です。
 - **`include package(...)`** は Python パッケージマネージャ探索ではなく filesystem
-  規約 (`resolve_from` / `base_dir` / CWD から `<base>/<id>/<file>` を探索) で解決
+  規約 (`<base>/<id>/<file>`。`<base>` は `resolve_from`、`base_dir`、include 元
+  ファイルのディレクトリ、カレントディレクトリのうち最初に当てはまるもの) で解決
   します。他方式は `package_resolver` を渡してください。
 - **watch/reload なし** — ロード時にパースします。ライブリロードは変更時に
   `parse()` / `parse_file()` を再実行してください。
@@ -631,6 +767,14 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   サイズを検証してください。
 - **include 深さ:** 深い include 連鎖によるスタックオーバーフローを防ぐため 50 段に
   制限しています。
+- **対応づけたパスの深さ:** 環境変数の `__` 区切りのセグメントと、Properties ファイルの
+  ドット区切りのキーは 64 セグメントまでです。1 つの名前が任意の深さの連鎖を 1 本作るので、
+  上限がないと、1.5 kB の変数名でインタプリタのスタックを使い果たすのに十分でした。rs.hocon も同じ
+  対応づけを 64 で制限しています。
+- **文書のネストの深さ:** 上限はありません。インタプリタのスタックを超えてネストした文書は
+  `ParseError` または `AdapterError` として失敗し、素の `RecursionError` にはなりません。
+  ただし、それが起きる深さは呼び出し側のコードがすでにどれだけ深いかで変わるので、
+  固定の段数に頼らず、信頼できない入力はパースの前にサイズを検証してください (上記)。
 
 ## 開発
 

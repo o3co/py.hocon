@@ -1,6 +1,6 @@
 # Spec Compliance — py.hocon
 
-Per-item compliance status against the canonical 209-item checklist in
+Per-item compliance status against the canonical 210-item checklist in
 [xx.hocon `docs/spec-checklist.md`](https://github.com/o3co/xx.hocon/blob/main/docs/spec-checklist.md).
 
 ## Conformance summary
@@ -8,19 +8,21 @@ Per-item compliance status against the canonical 209-item checklist in
 Measured against the shared o3co/xx.hocon corpus (Lightbend-generated expected
 output), via `tests/conformance/`:
 
-| Corpus | py.hocon | go.hocon / rs.hocon (reference) |
-|---|---:|---:|
-| Spec corpus (134) | **134 (100.0%)** | 134 (100.0%) |
-| Lightbend suite (16) | **14/16** | 14/16 |
+| Corpus (py.hocon's own harness, xx.hocon main as of 2026-10-16) | py.hocon |
+|---|---:|
+| Spec corpus | **154/154 (100.0%)** |
+| Lightbend fixtures with expected output | **12/14** |
 
-At parity with the reference sibling implementations. The 2 held-out Lightbend
-fixtures (`test01`, `test03`) reference JVM system properties
-`${?java.version}` / `${?user.home}`, which resolve only inside a JVM — every
-non-JVM parser caps at 14/16.
+The 2 held-out Lightbend fixtures (`test01`, `test03`) reference JVM system
+properties `${?java.version}` / `${?user.home}`, which resolve only inside a
+JVM, so every non-JVM parser holds these two out. The cross-library snapshot in xx.hocon
+`docs/ecosystem-conformance.md` (measured 2026-07-15: corpus 134, Lightbend
+suite 14/16 by its own count) shows py.hocon at parity with go.hocon and
+rs.hocon.
 
 ## Per-impl notes
 
-- **S1.1 ➖** — beyond the 17 globally out-of-scope items: Python `str` is
+- **S1.1 ➖** — beyond the 15 globally out-of-scope items (with S13a.10, py's ➖ total is 17): Python `str` is
   pre-decoded Unicode at the I/O boundary; byte-level UTF-8 handling happens
   outside the parser (same rationale as ts.hocon).
 - **S20.1–S20.4 ✅** — `get_period` / `Period(years, months, days)` implemented
@@ -127,7 +129,7 @@ Citation shorthand used on `tests:` lines:
   tests: smoke: test_parse_scalars_and_nesting; corpus: test04 (incidental — all six value types)
   status: ✅
 - **S1.4** Number formats match JSON (no NaN, no Infinity) — §Unchanged from JSON (L120)
-  tests: corpus: leading-zero-value/lzv01, unquoted-starts/us10, us11 (number-grammar greedy-backtrack boundaries)
+  tests: corpus: leading-zero-value/lzv01, unquoted-starts/us10, us11 (number-grammar greedy-backtrack boundaries); tests/test_e19_float_overflow.py (a literal past the double range is a ParseError, never Infinity — E19)
   status: ✅
 
 ### S2. Comments
@@ -722,8 +724,8 @@ Citation shorthand used on `tests:` lines:
 ### S18. Units format
 
 - **S18.1** Number value taken as default unit — §Units format (L1279)
-  tests: period: test_period_bare_number_scalar (`p = 7` → 7 days)
-  status: ⚠️ — pinned for the period family only (number-typed scalar). The units-default group is now consumed, but its duration/bytes fixtures (units: ud01, ub01) carry quoted strings — those pin the string-no-unit path under S18.4; the *number-typed* duration/bytes value path (`t = 500` unquoted) remains unpinned because the fixture group has no such case
+  tests: period: test_period_bare_number_scalar (`p = 7` → 7 days); spec-units: TestS18_1NumberValueDefaultUnit (`t = 500` → 500 ms, `b = 1024` → 1024 bytes, unquoted); decode: test_unquoted_number_reads_like_the_getter (both decode paths agree with the getters)
+  status: ✅ — the number-typed value path is pinned for all three families (the units-default fixtures carry quoted strings and pin S18.4)
 - **S18.2** String parsed as: optional ws + number + ws + unit + ws — §Units format (L1281-1294)
   tests: period: test_period_leading_trailing_ws, test_period_units (spaced forms); units: ud02–ud04 (leading / trailing / both outer ws), ud08 (ws between number and unit), ub02 (ws-padded bytes); smoke: test_duration_and_bytes (`5s`, `1K` no-space forms)
   status: ✅ — grammar pinned across the period, duration and bytes families in both spaced and no-space forms
@@ -867,13 +869,13 @@ accessors too (ts.hocon#198, go.hocon#199); rs is the reference sibling.
 
 ---
 
-Status tally (210 items): ✅ 181 · ⚠️ 12 · ❌ 0 · 🤷 0 · ➖ 17.
-Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **89.0%**;
-in-scope `(✅ + ⚠️·0.5) / (210 − 17)` = **96.9%**. The 🤷 mass is fully burned:
+Status tally (210 items): ✅ 182 · ⚠️ 11 · ❌ 0 · 🤷 0 · ➖ 17.
+Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **89.3%**;
+in-scope `(✅ + ⚠️·0.5) / (210 − 17)` = **97.2%**. The 🤷 mass is fully burned:
 the first expansion wave (error-fixture, units-default, deferred-resolution,
 properties-conflict and include-package harnesses) took it 95 → 72, and the
 2026-08-18 spec-verification wave (tests/test_spec_*.py) pinned the rest —
 flipping 69 rows to ✅, three ⚠️ rows (S19.4/S21.3/S21.4) to ✅, and settling
-S13a.10 as ➖. S21.5 went ⚠️ → ✅ with the E20 fixtures (ub07 / ub08). The
-remaining ⚠️ 12 are coverage-partial rows whose remainders are named on each
-row.
+S13a.10 as ➖. S21.5 went ⚠️ → ✅ with the E20 fixtures (ub07 / ub08), and S18.1
+with the number-typed getter pins. The remaining ⚠️ 11 are coverage-partial rows
+whose remainders are named on each row.

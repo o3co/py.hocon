@@ -1,4 +1,10 @@
-"""Typed coercions for Config accessors: numbers, booleans, durations, byte sizes.
+"""Typed coercions for Config accessors: numbers, booleans, durations, periods,
+byte sizes.
+
+**Internal module.** Nothing here is part of the public API, and names and
+signatures may change in any release. The public surface for unit values is
+the ``Config`` getters (``get_duration`` / ``get_bytes`` / ``get_period``) and
+the ``hocon.Duration`` / ``hocon.Bytes`` markers.
 
 The ``read_*`` functions are the single owner of each unit system's rules:
 the unit grammar plus its invariants (a byte size is non-negative, a period is
@@ -136,8 +142,10 @@ def _leading_numeric_prefix_len(trimmed: str) -> int:
     return i
 
 
-# Unit conversions run in Decimal and round to float once, so a value that is
-# exact in decimal stays exact (`1.001s` is 1001.0 ms, not 1000.9999999999999).
+# Unit conversions run in Decimal (E20). A duration is the exact product,
+# rounded to float once (`1.001s` is 1001.0 ms, not 1000.9999999999999); a byte
+# size is the exact product truncated toward zero to whole bytes, then
+# converted to the output unit with one rounding.
 
 
 def _exact_number(text: str) -> Decimal | None:

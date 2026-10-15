@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values as they are. In Pydantic models a bare number in exponent form
   (`1e3`) reads through its value, while the getters and dataclass decoding
   read the source text and reject it.
+  The readers behind the markers live in `hocon.coerce`, an internal module:
+  they are not public API and may change in any release.
 
 ### Fixed
 

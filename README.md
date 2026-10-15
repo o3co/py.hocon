@@ -5,7 +5,7 @@
 [![CI](https://github.com/o3co/py.hocon/actions/workflows/test.yml/badge.svg)](https://github.com/o3co/py.hocon/actions/workflows/test.yml)
 [![codecov](https://codecov.io/gh/o3co/py.hocon/branch/main/graph/badge.svg)](https://codecov.io/gh/o3co/py.hocon)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Spec conformance](https://img.shields.io/badge/spec%20corpus-134%2F134-brightgreen.svg)](docs/spec-compliance.md)
+[![Spec conformance](https://img.shields.io/badge/spec%20corpus-100%25-brightgreen.svg)](docs/spec-compliance.md)
 
 A [Lightbend HOCON specification](https://github.com/lightbend/config/blob/main/HOCON.md)
 parser for Python. Hand-written lexer, recursive-descent parser, and a typed `Config`
@@ -113,6 +113,66 @@ disappears at the format boundary.
 On top of that, HOCON combines the readability of YAML with the structure of JSON —
 making it a strong fit for anything beyond flat key-value config.
 
+## Configuration that stays inside its module
+
+In a large codebase, configuration tends to leak: one big file that every team edits, defaults copied into each service, and modules that read each other's keys. HOCON lets each module own its configuration the way it owns its code.
+
+- **Each module owns a namespace and ships its own defaults.** The `auth` module keeps `auth { … }` next to its code, with every default filled in. The application never copies those defaults; it brings them in with one `include`.
+- **The application overrides only what differs.** Later layers deep-merge over earlier ones, so the application states two keys, not the whole block.
+- **Each module reads only its own subtree, through its own schema.** The module asks for `auth` and validates it against the schema it defines. The shape of that section is the module's contract; nothing else in the file is visible to it.
+- **Wiring between modules lives in the application.** The module only declares the keys it reads (`auth.db`) and leaves them without a default when the application must supply them. The application connects them to shared values (`auth.db = ${shared.db}`). Modules never reference each other or the application's keys, so dependencies run one way.
+
+```hocon
+# auth/reference.conf: shipped inside the auth package, owned by the auth team
+auth {
+  session { lifetime = 30m, max-body = 64KiB }
+  # db: no default; the application supplies auth.db
+}
+```
+
+```hocon
+# application.conf: owned by the application
+include package("github.com/acme/auth", "reference.conf")
+
+shared.db { host = db.internal, port = 5432 }
+auth.db = ${shared.db}       # wiring lives in the application
+auth.session.lifetime = 2h   # override what differs; the rest stays the module's default
+```
+
+```python
+# inside the auth module
+from dataclasses import dataclass
+from typing import Annotated
+
+import hocon
+
+
+@dataclass
+class Session:
+    lifetime: Annotated[int, hocon.Duration("s")]  # "2h" → 7200
+    max_body: Annotated[int, hocon.Bytes()]        # "64KiB" → 65536
+
+
+@dataclass
+class Db:
+    host: str
+    port: int
+
+
+@dataclass
+class Auth:
+    session: Session
+    db: Db  # no default: the application must supply auth.db
+
+
+def load_auth(config: hocon.Config) -> Auth:
+    return config.decode(Auth, "auth")  # reads only its own subtree
+```
+
+The dataclass fields match the kebab-case keys (`max_body` reads `max-body`), and the unit markers read `2h` and `64KiB` with the getters' rules. If the application does not supply `auth.db`, decoding fails with `ConfigError: missing required field at auth.db`.
+
+`include package(...)` is not part of HOCON.md: it is a convention shared by the o3co implementations ([E11](https://github.com/o3co/xx.hocon/blob/main/docs/extra-spec-conventions.md#e11)), a non-JVM counterpart to `include classpath(...)`. It is how a module publishes its defaults without the application knowing where its files live. py.hocon finds a package by a filesystem convention, `<base>/<id>/<file>`, where `<base>` is the first that applies of `resolve_from` (one directory or a list), `base_dir`, the including file's directory, and the working directory; or it uses your own `package_resolver` (see [Parse functions](#parse-functions) and [Known Limitations](#known-limitations)). On the JVM, Lightbend's `reference.conf` convention plays the same role.
+
 ## Features
 
 - Full HOCON parsing: objects, arrays, scalars, substitutions (`${path}`, `${?path}`)
@@ -182,8 +242,8 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `get_int(path)` | `int` | missing, not numeric, or unresolved |
 | `get_float(path)` | `float` | missing, not numeric, or unresolved |
 | `get_boolean(path)` | `bool` | missing, wrong type, or unresolved |
-| `get_duration(path, unit=None)` | `float` | missing, wrong type, or invalid duration |
-| `get_bytes(path, unit=None)` | `float` (`int` in bytes) | missing, wrong type, or invalid byte size |
+| `get_duration(path, unit=None)` | `float` | missing, wrong type, invalid duration, or past the float range (E21) |
+| `get_bytes(path, unit=None)` | `float` (`int` in bytes) | missing, wrong type, invalid or negative byte size, or 2^53 bytes or more |
 | `get_period(path)` | `Period` | missing, wrong type, or invalid period |
 | `get_config(path)` | `Config` | missing, not an object, or unresolved |
 | `get_list(path)` | `list` | missing, not an array, or unresolved |
@@ -266,7 +326,9 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
 ```
 
 - `Bytes(unit="B")` annotates `int` or `float`; `Duration(unit="ms")`
-  annotates `int`, `float`, or `timedelta`. An `int` field rejects a
+  annotates `int`, `float`, or `timedelta`. `unit` is an output-unit token
+  (`KB`, not `kB`; see [Durations, Periods, and Byte
+  Sizes](#durations-periods-and-byte-sizes)). An `int` field rejects a
   fractional result (`"512B"` in `KiB`). `Optional`, `list[...]` and
   `dict[str, ...]` positions work.
 - Errors carry the key path (`invalid byte size at server.max-body: '64KB'`);
@@ -280,6 +342,11 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   in HOCON form (`"1.5m"`). A model that overrides `__init__` does not
   receive the validation context (a Pydantic limitation), so markers inside it
   do not act — use a `model_validator` instead of overriding `__init__`.
+- Key matching by kebab-case / camelCase is a dataclass feature. A Pydantic
+  model receives the keys as written, so a HOCON key `max-body` needs a field
+  alias (`Field(alias="max-body")`, or an `alias_generator` on the model), or a
+  config key that already matches the field name (`max_body`); otherwise
+  Pydantic reports the field as missing.
 - Pydantic models receive plain values, so there a number is read through its
   value rather than its source text: a bare number in exponent form (`1e3`)
   reads as `1000`, while the getters and dataclass decoding reject it. Values
@@ -464,7 +531,25 @@ forms (`kilobytes`, `mebibytes`, …), and single-letter powers of two in both
 cases (`K`/`k`, S21.4). Arithmetic is exact decimal (E20): `1.001s` is exactly
 `1001` ms, and a fractional byte size truncates toward zero after the exact
 product (`1.0009kB` is `1000` bytes). A duration past the float range is an
-error (E21), never `inf`.
+error (E21), never `inf`. A byte size must stay below 2^53 bytes (about 9 PB):
+`8PB` reads, `10PB` and `1YB` raise `ConfigError`, so the largest units only
+fit as fractions (`0.000000001YiB`).
+
+**Output units are a separate, short set of tokens.** The `unit` argument of
+`get_duration` / `get_bytes` and of the `hocon.Duration` / `hocon.Bytes`
+markers names the unit of the *result*, and takes only these tokens:
+
+| Result of | `unit` tokens | Default |
+|---|---|---|
+| `get_duration`, `hocon.Duration` | `ns`, `us`, `ms`, `s`, `m`, `h`, `d` | `ms` |
+| `get_bytes`, `hocon.Bytes` | `B`, `KB`, `KiB`, `MB`, `MiB`, `GB`, `GiB`, `TB`, `TiB` | `B` |
+
+They are not the config spellings: `KB` here means 1000 bytes, which config
+text spells `kB` (where `KB` is an error), and long forms such as `seconds` are
+not accepted. A marker rejects an unknown token when it is constructed
+(`hocon.Bytes("kB")` raises `ValueError`); a getter reports it as an invalid
+value (`get_bytes("v", "kB")` raises `invalid byte size at v`), so check the
+token first when a value that looks right is rejected.
 
 `get_period` (spec S20.1–S20.4) returns a `Period(years, months, days)` value —
 a frozen dataclass mirroring rs.hocon's `Period` struct. Supported units:
@@ -504,14 +589,18 @@ is tracked at item granularity in [`docs/spec-compliance.md`](docs/spec-complian
 see [`xx.hocon/docs/compliance-matrix.md`](https://github.com/o3co/xx.hocon/blob/main/docs/compliance-matrix.md)
 for live cross-impl values.
 
-| Corpus | py.hocon | go.hocon / rs.hocon (reference) |
-|---|---:|---:|
-| Spec corpus (134) | **134 (100.0%)** | 134 (100.0%) |
-| Lightbend suite (16) | **14/16** | 14/16 |
+| Corpus (py.hocon's own harness, xx.hocon main as of 2026-10-16) | py.hocon |
+|---|---:|
+| Spec corpus | **154/154 (100.0%)** |
+| Lightbend fixtures with expected output | **12/14** |
 
-At parity with the reference sibling implementations. The 2 held-out Lightbend
-fixtures reference JVM system properties (`${?java.version}` / `${?user.home}`),
-which resolve only inside a JVM — every non-JVM parser caps at 14/16.
+The 2 held-out Lightbend fixtures (`test01`, `test03`) reference JVM system
+properties (`${?java.version}` / `${?user.home}`), which resolve only inside a
+JVM, so every non-JVM parser holds these two out. Run `make testdata && make test` to
+re-measure against the current corpus. The cross-library snapshot in
+[xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md)
+(measured 2026-07-15, with that day's corpus of 134 and its own count of the
+Lightbend suite, 14/16) shows py.hocon at parity with go.hocon and rs.hocon.
 
 ## Related Projects
 
@@ -678,9 +767,10 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   to `parse()`.
 - **`include classpath(...)`** is not supported. This is a JVM-specific include form
   with no equivalent outside Java runtimes.
-- **`include package(...)`** resolves via a filesystem convention (search
-  `resolve_from` / `base_dir` / CWD for `<base>/<id>/<file>`), not a Python
-  package-manager lookup. Supply a custom `package_resolver` for other schemes.
+- **`include package(...)`** resolves via a filesystem convention
+  (`<base>/<id>/<file>`, where `<base>` is the first that applies of
+  `resolve_from`, `base_dir`, the including file's directory, and the working
+  directory), not a Python package-manager lookup. Supply a custom `package_resolver` for other schemes.
 - **No watch/reload** — the library parses config at load time. For live-reloading,
   re-call `parse()` / `parse_file()` on change.
 - **No streaming parser** — the entire input is loaded into memory. For untrusted
