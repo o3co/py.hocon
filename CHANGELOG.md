@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `hocon.coerce` is an internal module. Its readers (`read_duration`,
+  `read_bytes`, …) back the getters and the unit markers but are not public
+  API and may change in any release; use the `Config` getters and
+  `hocon.Duration` / `hocon.Bytes`.
+
 - **Unit markers for typed decoding (xx.hocon#102): `hocon.Bytes(unit="B")`
   and `hocon.Duration(unit="ms")`.** `Annotated[int, hocon.Bytes()]` reads a
   byte size (`64KiB`) and `Annotated[timedelta, hocon.Duration()]` /
