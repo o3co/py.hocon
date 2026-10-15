@@ -170,7 +170,7 @@ def load_auth(config: hocon.Config) -> Auth:
 
 The dataclass fields match the kebab-case keys (`max_body` reads `max-body`), and the unit markers read `2h` and `64KiB` with the getters' rules. Without the application's `shared.db`, `db` decodes as `None`.
 
-`include package(...)` is how a module publishes its defaults without the application knowing where its files live. py.hocon finds a package by a filesystem convention, `<base>/<id>/<file>` under `resolve_from` / `base_dir` / the working directory, or through your own `package_resolver` (see [Parse functions](#parse-functions) and [Known Limitations](#known-limitations)). On the JVM, Lightbend's `reference.conf` convention plays the same role.
+`include package(...)` is how a module publishes its defaults without the application knowing where its files live. py.hocon finds a package by a filesystem convention, `<base>/<id>/<file>`, where `<base>` is the first that applies of `resolve_from` (one directory or a list), `base_dir`, the including file's directory, and the working directory; or it uses your own `package_resolver` (see [Parse functions](#parse-functions) and [Known Limitations](#known-limitations)). On the JVM, Lightbend's `reference.conf` convention plays the same role.
 
 ## Features
 
@@ -343,7 +343,8 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   do not act — use a `model_validator` instead of overriding `__init__`.
 - Key matching by kebab-case / camelCase is a dataclass feature. A Pydantic
   model receives the keys as written, so a HOCON key `max-body` needs a field
-  alias (`Field(alias="max-body")`) or a field of that name; otherwise
+  alias (`Field(alias="max-body")`, or an `alias_generator` on the model), or a
+  config key that already matches the field name (`max_body`); otherwise
   Pydantic reports the field as missing.
 - Pydantic models receive plain values, so there a number is read through its
   value rather than its source text: a bare number in exponent form (`1e3`)
@@ -594,7 +595,7 @@ for live cross-impl values.
 
 The 2 held-out Lightbend fixtures (`test01`, `test03`) reference JVM system
 properties (`${?java.version}` / `${?user.home}`), which resolve only inside a
-JVM; every non-JVM parser stops there. Run `make testdata && make test` to
+JVM, so every non-JVM parser holds these two out. Run `make testdata && make test` to
 re-measure against the current corpus. The cross-library snapshot in
 [xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md)
 (measured 2026-07-15, with that day's corpus of 134 and its own count of the
@@ -765,9 +766,10 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   to `parse()`.
 - **`include classpath(...)`** is not supported. This is a JVM-specific include form
   with no equivalent outside Java runtimes.
-- **`include package(...)`** resolves via a filesystem convention (search
-  `resolve_from` / `base_dir` / CWD for `<base>/<id>/<file>`), not a Python
-  package-manager lookup. Supply a custom `package_resolver` for other schemes.
+- **`include package(...)`** resolves via a filesystem convention
+  (`<base>/<id>/<file>`, where `<base>` is the first that applies of
+  `resolve_from`, `base_dir`, the including file's directory, and the working
+  directory), not a Python package-manager lookup. Supply a custom `package_resolver` for other schemes.
 - **No watch/reload** — the library parses config at load time. For live-reloading,
   re-call `parse()` / `parse_file()` on change.
 - **No streaming parser** — the entire input is loaded into memory. For untrusted

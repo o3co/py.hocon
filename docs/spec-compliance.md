@@ -15,7 +15,7 @@ output), via `tests/conformance/`:
 
 The 2 held-out Lightbend fixtures (`test01`, `test03`) reference JVM system
 properties `${?java.version}` / `${?user.home}`, which resolve only inside a
-JVM; every non-JVM parser stops there. The cross-library snapshot in xx.hocon
+JVM, so every non-JVM parser holds these two out. The cross-library snapshot in xx.hocon
 `docs/ecosystem-conformance.md` (measured 2026-07-15: corpus 134, Lightbend
 suite 14/16 by its own count) shows py.hocon at parity with go.hocon and
 rs.hocon.

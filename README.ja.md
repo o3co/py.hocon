@@ -166,7 +166,7 @@ def load_auth(config: hocon.Config) -> Auth:
 
 dataclass のフィールドは kebab-case のキーに一致し (`max_body` は `max-body` を読む)、単位 marker は `2h` や `64KiB` を getter と同じ規則で読みます。アプリが `shared.db` を書かなければ、`db` は `None` になります。
 
-`include package(...)` は、アプリにファイルの置き場所を知らせずに module が default を公開する仕組みです。py.hocon は package をファイルシステムの規約 (`resolve_from` / `base_dir` / カレントディレクトリの下の `<base>/<id>/<file>`) で探すか、独自の `package_resolver` を使います ([パース関数](#パース関数) と [既知の制限](#既知の制限) を参照)。JVM では、Lightbend の `reference.conf` の慣習が同じ役割を果たします。
+`include package(...)` は、アプリにファイルの置き場所を知らせずに module が default を公開する仕組みです。py.hocon は package をファイルシステムの規約 `<base>/<id>/<file>` で探します。`<base>` は `resolve_from` (ディレクトリ 1 つかそのリスト)、`base_dir`、include 元ファイルのディレクトリ、カレントディレクトリのうち、最初に当てはまるものです。独自の `package_resolver` を使うこともできます ([パース関数](#パース関数) と [既知の制限](#既知の制限) を参照)。JVM では、Lightbend の `reference.conf` の慣習が同じ役割を果たします。
 
 ## 機能
 
@@ -337,8 +337,9 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
   override ではなく `model_validator` を使ってください。
 - kebab-case / camelCase でのキーの照合は dataclass の機能です。Pydantic モデルには
   キーが書いたとおりに渡るので、HOCON のキー `max-body` には field の alias
-  (`Field(alias="max-body")`) か同じ名前の field が必要です。ないと Pydantic は
-  その field を missing と報告します。
+  (`Field(alias="max-body")`、またはモデルの `alias_generator`) が要ります。
+  あるいは config のキーを field 名に合わせます (`max_body`)。どちらもないと
+  Pydantic はその field を missing と報告します。
 - Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
   読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
   getter と dataclass の decode ではエラーです。単位を付けて書いた値は、
@@ -583,7 +584,7 @@ pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) よ�
 
 held-out の Lightbend 2 件 (`test01`、`test03`) は JVM system property
 (`${?java.version}` / `${?user.home}`) を参照し、JVM の中でしか解決できないので、
-非 JVM パーサーはそこで止まります。現在のコーパスで測り直すには
+非 JVM パーサーはこの 2 件を通せません。現在のコーパスで測り直すには
 `make testdata && make test` を実行します。ライブラリ横断のスナップショット
 ([xx.hocon `docs/ecosystem-conformance.md`](https://github.com/o3co/xx.hocon/blob/main/docs/ecosystem-conformance.md)、
 2026-07-15 計測。当時のコーパス 134 件と、そこでの Lightbend suite の数え方で 14/16) でも、
@@ -598,7 +599,7 @@ py.hocon は go.hocon / rs.hocon と同値です。
 | [rs.hocon](https://github.com/o3co/rs.hocon) | Rust | [crates.io](https://crates.io/crates/hocon-parser) | Rust 向け HOCON パーサー |
 | [hocon2](https://github.com/o3co/hocon2) | Go | [pkg.go.dev](https://pkg.go.dev/github.com/o3co/hocon2) | HOCON → JSON/YAML/TOML/Properties CLI |
 
-4 つのパーサー実装は、どれも同じ Lightbend HOCON 仕様に対して追跡しています。実装ごとの
+4 つのパーサー実装は、どれも同じ Lightbend HOCON 仕様に照らして準拠状況を追跡しています。実装ごとの
 準拠率は [実装横断のまとめ](https://github.com/o3co/xx.hocon/blob/main/docs/compliance-matrix.md)
 を参照してください。
 
@@ -747,7 +748,8 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   クライアントで取得して `parse()` に渡してください。
 - **`include classpath(...)`** 非対応。JVM 固有の include 形式です。
 - **`include package(...)`** は Python パッケージマネージャ探索ではなく filesystem
-  規約 (`resolve_from` / `base_dir` / CWD から `<base>/<id>/<file>` を探索) で解決
+  規約 (`<base>/<id>/<file>`。`<base>` は `resolve_from`、`base_dir`、include 元
+  ファイルのディレクトリ、カレントディレクトリのうち最初に当てはまるもの) で解決
   します。他方式は `package_resolver` を渡してください。
 - **watch/reload なし** — ロード時にパースします。ライブリロードは変更時に
   `parse()` / `parse_file()` を再実行してください。
@@ -766,7 +768,7 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   制限しています。
 - **対応づけたパスの深さ:** 環境変数の `__` 区切りのセグメントと、Properties ファイルの
   ドット区切りのキーは 64 セグメントまでです。1 つの名前が任意の深さの連鎖を 1 本作るので、
-  上限がないと 1.5 kB の変数名でインタプリタのスタックを使い切れました。rs.hocon も同じ
+  上限がないと、1.5 kB の変数名でインタプリタのスタックを使い果たすのに十分でした。rs.hocon も同じ
   対応づけを 64 で制限しています。
 - **文書のネストの深さ:** 上限はありません。インタプリタのスタックを超えてネストした文書は
   `ParseError` または `AdapterError` として失敗し、素の `RecursionError` にはなりません。

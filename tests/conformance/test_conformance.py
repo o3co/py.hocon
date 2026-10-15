@@ -12,7 +12,8 @@ ecosystem-bench method (see xx.hocon ``docs/ecosystem-conformance.md`` §Method)
 
 - **JVM system-property (test01, test03)** — reference ``${?java.version}`` /
   ``${?user.home}``, which resolve only inside a JVM. Every non-JVM parser
-  (go.hocon / rs.hocon / ts.hocon included) caps at 14/16 here; marked xfail.
+  (go.hocon / rs.hocon / ts.hocon included) holds these two of the Lightbend
+  fixtures out; marked xfail.
 
 The **empty-file group (6)** is part of the corpus: an empty document parses to
 ``{}`` per HOCON.md §Omit root braces L134-136, so the Lightbend-generated
@@ -109,7 +110,7 @@ def _params() -> list:
             marks.append(
                 pytest.mark.xfail(
                     reason="JVM system property (${?java.version}/${?user.home}); "
-                    "non-JVM parsers cap at 14/16",
+                    "non-JVM parsers hold these two Lightbend fixtures out",
                     strict=False,
                 )
             )
