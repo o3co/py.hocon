@@ -15,6 +15,8 @@ Python パーサー。手書きの字句解析器・再帰下降パーサー・�
 > **[Claude](https://claude.ai/)（Anthropic）による実装** — Claude Code を用いて
 > 設計・実装され、sibling の [ts.hocon](https://github.com/o3co/ts.hocon) から移植されました。
 
+**ドキュメント:** [o3co.github.io/hocon](https://o3co.github.io/hocon/) — 4 実装・hocon2 CLI・共通の準拠コーパスをまとめた横断ハブです。
+
 [English](README.md)
 
 > **ライブラリの立場** — py.hocon は HOCON 設定ローダーです。`.conf` 設定ファイルを

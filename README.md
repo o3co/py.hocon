@@ -16,6 +16,8 @@ See [Spec Compliance](#spec-compliance) for the current conformance rate.
 > end-to-end with Claude Code, ported from the sibling
 > [ts.hocon](https://github.com/o3co/ts.hocon) implementation.
 
+**Docs:** [o3co.github.io/hocon](https://o3co.github.io/hocon/) — the cross-language hub for all four implementations, the hocon2 CLI and the shared conformance corpus.
+
 [日本語](README.ja.md)
 
 > **Library stance** — py.hocon is a HOCON config loader. Its purpose is reading
