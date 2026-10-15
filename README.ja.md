@@ -351,9 +351,9 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
   あるいは config のキーを field 名に合わせます (`max_body`)。どちらもないと
   Pydantic はその field を missing と報告します。
 - Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
-  読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
-  getter と dataclass の decode ではエラーです。単位を付けて書いた値は、
-  どちらでも同じに読まれます。
+  読まれます。結果は同じです (`1e3` はどの経路でも `1000`)。違うのは、float が
+  保てる桁数より有効桁の多い非クォートの数値だけで、Pydantic には丸められた値が
+  渡ります。
 - Pydantic モデルで marker のない `timedelta` フィールドは、Pydantic 自身の
   規則 (ISO 8601、単位なしの数値は秒) で読まれます。HOCON の duration として
   読むには `Annotated[timedelta, hocon.Duration()]` を使います。

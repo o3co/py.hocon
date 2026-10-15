@@ -359,9 +359,9 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   config key that already matches the field name (`max_body`); otherwise
   Pydantic reports the field as missing.
 - Pydantic models receive plain values, so there a number is read through its
-  value rather than its source text: a bare number in exponent form (`1e3`)
-  reads as `1000`, while the getters and dataclass decoding reject it. Values
-  written with a unit read the same either way.
+  value rather than its source text. The result is the same (`1e3` reads as
+  `1000` in every path) except for an unquoted number with more significant
+  digits than a float holds, which Pydantic sees already rounded.
 - A plain `timedelta` field in a Pydantic model keeps Pydantic's own parsing
   (ISO 8601, bare numbers as seconds); use `Annotated[timedelta,
   hocon.Duration()]` for HOCON durations.

@@ -12,8 +12,10 @@ Families covered here (the up01–up05 period scenarios are inlined in
 - ud01–ud08  duration (bare int, WS variants, fractional, negative, unit regressions)
 - ud09–ud11  duration, E20 exact decimal arithmetic
 - ud12–ud13  duration, E21 overflow is an error (integer and fractional form)
+- ud14–ud20  duration, E20 exponent forms (xx.hocon#111)
 - ub01–ub06  bytes (bare int, WS, fractional-truncated, negative-accessor, unit, empty)
 - ub07–ub08  bytes, E20 exact product then truncation
+- ub09–ub13  bytes, E20 exponent forms (xx.hocon#111)
 - un01–un03  cross-family negative edge cases (empty, WS-only, unit-only)
 
 S-items pinned: S18.1 (number default unit, via the same parse path), S18.2
@@ -170,6 +172,37 @@ def test_ud13_duration_overflow_fractional_rejected() -> None:
         cfg.get_duration("t")
 
 
+# ud14–ud20 (E20 exponent forms, xx.hocon#111): the number part of a unit value
+# may carry an exponent, computed exactly; Lightbend 1.4.6 reads them all.
+@pytest.mark.parametrize(
+    ("name", "ms"),
+    [
+        ("ud14-duration-exponent-unit.conf", 100_000.0),  # "1e+5ms"
+        ("ud15-duration-exponent-fraction.conf", 150_000.0),  # "1.5e2s"
+        ("ud16-duration-exponent-no-unit.conf", 1_000.0),  # "1E3"
+        ("ud17-duration-exponent-number-value.conf", 1_000.0),  # 1e3 (NUMBER)
+        ("ud18-duration-negative-exponent.conf", 1.0),  # "1e-3s"
+    ],
+)
+def test_ud14_ud18_duration_exponent_forms(name: str, ms: float) -> None:
+    assert _load(name).get_duration("t") == ms
+
+
+def test_ud18_duration_negative_exponent_in_ns() -> None:
+    assert _load("ud18-duration-negative-exponent.conf").get_duration("t", "ns") == 1_000_000.0
+
+
+def test_ud19_duration_exponent_overflow() -> None:
+    # E21: "1e400s" is past the float range — an error (Lightbend saturates).
+    with pytest.raises(ConfigError, match="duration overflows"):
+        _load("ud19-duration-exponent-overflow.conf").get_duration("t")
+
+
+def test_ud20_duration_exponent_bad_mantissa() -> None:
+    with pytest.raises(ConfigError, match="invalid duration"):  # "1e3.5ms"
+        _load("ud20-duration-exponent-bad-mantissa.conf").get_duration("t")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Bytes family (ub01–ub08)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,6 +258,21 @@ def test_ub08_bytes_fractional_unit_exact() -> None:
     cfg = _load("ub08-bytes-fractional-unit-exact.conf")
     assert cfg.get_bytes("b") == 1001
     assert cfg.get_bytes("b", "KB") == 1.001
+
+
+# ub09–ub13 (E20 exponent forms): exact product, truncated toward zero.
+def test_ub09_ub12_bytes_exponent_forms() -> None:
+    assert _load("ub09-bytes-exponent-unit.conf").get_bytes("b") == 1_000_000  # "1e3kB"
+    assert _load("ub10-bytes-exponent-no-unit.conf").get_bytes("b") == 1_000  # "1e3"
+    assert _load("ub11-bytes-exponent-binary.conf").get_bytes("b") == 204_800  # "2E2KiB"
+    cfg = _load("ub12-bytes-negative-exponent-truncated.conf")
+    assert cfg.get_bytes("b") == 1  # "1e-3kB"
+    assert cfg.get_bytes("b2") == 1_000  # "1.0005e3B" truncates
+
+
+def test_ub13_bytes_exponent_overflow() -> None:
+    with pytest.raises(ConfigError, match="byte size overflows"):  # "1e400B"
+        _load("ub13-bytes-exponent-overflow.conf").get_bytes("b")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

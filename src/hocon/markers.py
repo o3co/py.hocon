@@ -23,9 +23,9 @@ in both decode paths:
   receive the validation context (a Pydantic limitation), so markers inside
   it do not act.
   Pydantic receives plain values, so a number is read through its value
-  rather than its source text: a bare number in exponent form (``1e3``)
-  reads as ``1000`` there, while the getters and dataclass decoding reject it
-  as an unknown unit ``e3``.
+  rather than its source text. That gives the same result (``1e3`` is 1000
+  in every path) except for an unquoted number with more significant digits
+  than a float holds, which Pydantic sees already rounded.
 """
 
 from __future__ import annotations

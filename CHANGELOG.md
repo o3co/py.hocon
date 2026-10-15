@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Exponent forms in unit values (extra-spec E20, xx.hocon#111).** The
+  number part of a duration or byte size may carry an exponent, as in
+  Lightbend: `"1e+5ms"` is 100000 ms, `"1.5e2s"` 150000 ms, `t = 1e3` 1000 ms,
+  `"2E2KiB"` 204800 bytes, `"1e-3kB"` 1 byte (exact product, then E20's
+  truncation / single rounding). These used to be invalid. A value far past
+  any range (`"1e400s"`, `"1e400B"`) is an overflow error and one that
+  certainly rounds to nothing (`"1e-400s"`) is 0, decided from the exponent
+  without big-number work. A malformed number part (`"1e3.5ms"`) stays
+  invalid, and periods stay integer-only (`"1e2d"` is an error).
+
 - **Unit markers for typed decoding (xx.hocon#102): `hocon.Bytes(unit="B")`
   and `hocon.Duration(unit="ms")`.** `Annotated[int, hocon.Bytes()]` reads a
   byte size (`64KiB`) and `Annotated[timedelta, hocon.Duration()]` /
@@ -18,9 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Pydantic asks for the schema). Errors carry the key path; constraints stay
   in the annotated type. A marker acts only on the values `Config.decode`
   reads from a config: constructing a model or validating its own dump leaves
-  values as they are. In Pydantic models a bare number in exponent form
-  (`1e3`) reads through its value, while the getters and dataclass decoding
-  read the source text and reject it.
+  values as they are. In Pydantic models a number reads through its value
+  rather than its source text, which differs only for an unquoted number with
+  more significant digits than a float holds.
   The readers behind the markers live in `hocon.coerce`, an internal module:
   they are not public API and may change in any release.
 
