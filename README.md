@@ -361,7 +361,8 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
 - Pydantic models receive plain values, so there a number is read through its
   value rather than its source text. The result is the same (`1e3` reads as
   `1000` in every path) except for an unquoted number with more significant
-  digits than a float holds, which Pydantic sees already rounded.
+  digits than a float holds, which Pydantic sees already rounded, and an
+  unquoted `-0`, which Pydantic sees as `0`.
 - A plain `timedelta` field in a Pydantic model keeps Pydantic's own parsing
   (ISO 8601, bare numbers as seconds); use `Annotated[timedelta,
   hocon.Duration()]` for HOCON durations.
@@ -539,7 +540,8 @@ lowercase (HOCON spec S19.8). Byte units follow Lightbend's case-sensitive table
 `B`/`b`, `kB` (powers of ten; `KB` and `kb` are errors), `KiB`/`Ki` (powers of
 two), `MB`/`MiB`, `GB`/`GiB`, `TB`/`TiB` and up to `YB`/`YiB`, lowercase long
 forms (`kilobytes`, `mebibytes`, …), and single-letter powers of two in both
-cases (`K`/`k`, S21.4). Arithmetic is exact decimal (E20): `1.001s` is exactly
+cases (`K`/`k`, S21.4). The number may carry an exponent (`1e3ms`, `2E2KiB`,
+`1e-3kB` is 1 byte). Arithmetic is exact decimal (E20): `1.001s` is exactly
 `1001` ms, and a fractional byte size truncates toward zero after the exact
 product (`1.0009kB` is `1000` bytes). A duration past the float range is an
 error (E21), never `inf`. A byte size must stay below 2^53 bytes (about 9 PB):

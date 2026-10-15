@@ -166,17 +166,21 @@ def _split_unit_value(value: str) -> tuple[Decimal, str] | None:
     if exponent_text is None or mantissa.is_zero():
         return mantissa, unit  # zero stays zero (sign kept), whatever the exponent
     negative_exponent = exponent_text.startswith("-")
-    digits = exponent_text.lstrip("+-").lstrip("0")
+    # Normalized digits, so zero padding (`1e0000…01`) never reaches int() at
+    # a length past Python's int-conversion limit.
+    digits = exponent_text.lstrip("+-").lstrip("0") or "0"
     if len(digits) <= 9:
-        position = mantissa.adjusted() + int(exponent_text)
-    else:  # an exponent of 10 digits or more is past the bound either way
+        exponent = -int(digits) if negative_exponent else int(digits)
+        position = mantissa.adjusted() + exponent
+    else:  # a 10+ digit exponent outweighs any practical mantissa (< ~10^9 digits)
+        exponent = 0
         position = -(10**10) if negative_exponent else 10**10
     sign = "-" if mantissa.is_signed() else ""
     if position > _UNIT_EXPONENT_BOUND:
         return Decimal(sign + "Infinity"), unit
     if position < -_UNIT_EXPONENT_BOUND:
         return Decimal(sign + "0"), unit
-    return mantissa.scaleb(int(exponent_text), _context(mantissa, 0)), unit
+    return mantissa.scaleb(exponent, _context(mantissa, 0)), unit
 
 
 # Unit conversions run in Decimal (E20). A duration is the exact product,

@@ -327,7 +327,6 @@ class TestS18_1NumberValueDefaultUnit:
         assert cfg.get_bytes("b", "KiB") == 1.0
 
 
-
 class TestE20ExponentForms:
     """E20 exponent forms (xx.hocon#111): `[+-]? (digits [. digits?] | . digits)
     ([eE] [+-]? digits)?` before the unit; huge exponents decided without
@@ -335,14 +334,24 @@ class TestE20ExponentForms:
 
     @pytest.mark.parametrize(
         ("value", "ms"),
-        [("-1e3ms", -1000.0), ("1e3 ms", 1000.0), ("1.e3ms", 1000.0), ("1e-400s", 0.0),
-         ("0e999999999s", 0.0), (".5s", 500.0), ("+2E0s", 2000.0)],
+        [
+            ("-1e3ms", -1000.0),
+            ("1e3 ms", 1000.0),
+            ("1.e3ms", 1000.0),
+            ("1e-400s", 0.0),
+            ("0e999999999s", 0.0),
+            (".5s", 500.0),
+            ("+2E0s", 2000.0),
+            ("1e" + "0" * 5000 + "1ms", 10.0),  # zero-padded exponent
+        ],
     )
     def test_duration_values(self, value: str, ms: float) -> None:
         assert _duration_ms(value) == ms
 
+    # A malformed number part ("1e3.5ms", "e3s", "1e+s", "1ee3s"), or a well-formed
+    # number followed by an unknown unit ("1e3e" is 1e3 + unit "e", "1e" is 1 + "e").
     @pytest.mark.parametrize("value", ["1e3.5ms", "1e3e", "1e", "e3s", "1e+s", "1ee3s"])
-    def test_malformed_number_part_is_invalid(self, value: str) -> None:
+    def test_malformed_number_or_unknown_unit_is_invalid(self, value: str) -> None:
         with pytest.raises(ConfigError, match="invalid duration"):
             _duration_ms(value)
 
@@ -354,7 +363,13 @@ class TestE20ExponentForms:
 
     @pytest.mark.parametrize(
         ("value", "expected"),
-        [("1e-999999999kB", 0), ("1e-" + "9" * 40 + "B", 0), ("0e20B", 0), ("9.007199254740991e15B", 2**53 - 1)],
+        [
+            ("1e-999999999kB", 0),
+            ("1e-" + "9" * 40 + "B", 0),
+            ("0e20B", 0),
+            ("9.007199254740991e15B", 2**53 - 1),
+            ("1e" + "0" * 5000 + "3B", 1000),  # zero-padded exponent
+        ],
     )
     def test_byte_values(self, value: str, expected: int) -> None:
         assert read_bytes(value) == expected

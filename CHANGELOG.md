@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reads from a config: constructing a model or validating its own dump leaves
   values as they are. In Pydantic models a number reads through its value
   rather than its source text, which differs only for an unquoted number with
-  more significant digits than a float holds.
+  more significant digits than a float holds, and for an unquoted `-0`.
   The readers behind the markers live in `hocon.coerce`, an internal module:
   they are not public API and may change in any release.
 
