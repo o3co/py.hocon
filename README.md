@@ -277,8 +277,10 @@ On a config that is not fully resolved, the keys are all there and only the
 values wait: iteration, `len` and `keys()` include unresolved keys and
 `path in cfg` is `True` for them, while reading an unresolved value
 (`cfg[path]`, `get`, `items()`, `dict(cfg)`, `==`, `to_object()`) raises
-`NotResolvedError`. `has(path)` raises too, like Lightbend's `hasPath`, and so
-does `in` for a path below an unresolved value, which cannot be answered yet.
+`NotResolvedError`. `has(path)` never raises: it is `True` for a path whose
+value is unresolved (the cross-implementation rule; Lightbend's `hasPath`
+throws instead). `in` raises for a path below an unresolved value, which
+cannot be answered yet.
 
 ### Typed decoding
 

@@ -270,8 +270,9 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
 完全には解決されていない config では、キーはすべてそろっていて、値だけが未確定です。
 イテレーション・`len`・`keys()` は未解決のキーも含み、`path in cfg` もそれらに `True` を
 返します。一方、未解決の値を読む操作 (`cfg[path]`、`get`、`items()`、`dict(cfg)`、`==`、
-`to_object()`) は `NotResolvedError` を送出します。`has(path)` も Lightbend の `hasPath` と
-同じく送出し、未解決の値の下にあるパスへの `in` も、まだ答えられないので送出します。
+`to_object()`) は `NotResolvedError` を送出します。`has(path)` は送出せず、値が未解決のパスでも
+`True` を返します (実装横断の規則。Lightbend の `hasPath` は例外を投げる)。未解決の値の下に
+あるパスへの `in` は、まだ答えられないので送出します。
 
 ### 型付き decode
 

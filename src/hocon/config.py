@@ -309,10 +309,14 @@ class Config(Mapping[str, Any]):
         return [_hocon_to_py(x) for x in v.items]
 
     def has(self, path: str) -> bool:
-        """Whether ``path`` holds a value. Raises :class:`NotResolvedError` when
-        the path is unresolved (Lightbend ``hasPath``)."""
-        if not self._resolved and self._subtree_has_placeholders(path, literal_first=True):
-            raise NotResolvedError(path)
+        """Whether ``path`` exists. Never raises for an unresolved value: a path
+        whose value is still a substitution exists, so this is ``True`` (the
+        cross-implementation rule; Lightbend's ``hasPath`` would throw). A path
+        below an unresolved value cannot be confirmed yet and is ``False``.
+        Reading the value is what raises :class:`NotResolvedError`."""
+        if not self._resolved and self._pending is not None:
+            if path in self._pending.fields or self._pending_has_key(path):
+                return True
         return self._lookup_key_or_path(path) is not None
 
     # Pre-Mapping API returned a list; kept for backward compatibility over

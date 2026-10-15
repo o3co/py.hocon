@@ -118,15 +118,22 @@ def test_mapping_view_lists_unresolved_keys_and_reading_them_raises() -> None:
     assert cfg.get("v") == 1
 
 
-def test_has_raises_on_an_unresolved_path_like_lightbend_haspath() -> None:
+def test_has_is_true_for_an_unresolved_path_and_never_raises() -> None:
+    # Cross-implementation rule (go / rs return bool): the path exists, only
+    # its value waits. Reading it is what raises.
     cfg = parse_string("t = ${missing}\nv = 1\nu { x = ${m2}, y = 2 }", resolve_substitutions=False)
-    with pytest.raises(NotResolvedError):
-        cfg.has("t")
-    with pytest.raises(NotResolvedError):
-        cfg.has("u")
+    assert cfg.has("t")
+    assert cfg.has("u")
+    assert cfg.has("u.x")
     assert cfg.has("v")
     assert cfg.has("u.y")
     assert not cfg.has("zz")
+    assert not cfg.has("t.q")  # below an unresolved value: not confirmable
+    with pytest.raises(NotResolvedError):
+        cfg.get("t")
+    partial = cfg.resolve(allow_unresolved=True)
+    assert partial.has("t")
+    assert partial.has("u.x")
 
 
 @pytest.mark.parametrize("partial", [False, True])

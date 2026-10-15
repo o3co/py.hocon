@@ -58,8 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     iteration, `len`, `keys()` and `in` include unresolved keys (they used to
     vanish, so `cfg == {...}` could compare equal without them), and reading
     their values — `items()`, `values()`, `dict(cfg)`, `==` — raises
-    `NotResolvedError`. `has(path)` raises on an unresolved path, like
-    Lightbend's `hasPath`; `in` raises for a path below an unresolved value.
+    `NotResolvedError`. `has(path)` is `True` for a path whose value is
+    unresolved and never raises (the cross-implementation rule; Lightbend's
+    `hasPath` throws); `in` raises for a path below an unresolved value.
 
 - **A duration past the float range is an error (extra-spec E21).**
   `get_duration` (and decoding into `int` / `float` with `Duration`) raises
