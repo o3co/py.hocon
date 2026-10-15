@@ -352,6 +352,19 @@ def test_pydantic_validate_default_reads_the_default_as_hocon() -> None:
     assert (got.ttl, got.t) == (90.0, timedelta(seconds=5))
 
 
+def test_pydantic_custom_init_does_not_receive_the_context() -> None:
+    # Pydantic does not pass the validation context to an overridden __init__,
+    # so markers inside such a model do not act (documented limitation). Pin
+    # it so a Pydantic change that lifts the limitation is noticed.
+    class P(pydantic.BaseModel):
+        ttl: Annotated[float, Duration("s")]
+
+        def __init__(self, **data: Any) -> None:
+            super().__init__(**data)
+
+    assert parse_string("ttl = 1500").decode(P).ttl == 1500.0
+
+
 def test_pydantic_lazy_iterable_reads_under_the_decode_context() -> None:
     from collections.abc import Iterable
 

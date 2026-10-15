@@ -268,7 +268,9 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
   素の型として検証されるので、値が二重に変換されることはありません
   (`Limits(max_body=65536)` は `65536` のまま)。`validate_default=True` の
   default は decode の検証の一部として読まれるので、HOCON の形 (`"1.5m"`) で
-  書きます。
+  書きます。`__init__` を override したモデルには validation context が
+  渡らない (Pydantic の制約) ため、その中の marker は働きません。`__init__` の
+  override ではなく `model_validator` を使ってください。
 - Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
   読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
   getter と dataclass の decode ではエラーです。単位を付けて書いた値は、

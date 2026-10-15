@@ -19,7 +19,9 @@ in both decode paths:
   ``default_factory``, ``model_validate(model.model_dump())``, JSON — sees the
   field as its plain type, so values are not converted twice. A default
   validated with ``validate_default=True`` is part of decode's validation and
-  is read as a HOCON value.
+  is read as a HOCON value. A model that overrides ``__init__`` does not
+  receive the validation context (a Pydantic limitation), so markers inside
+  it do not act.
   Pydantic receives plain values, so a number is read through its value
   rather than its source text: a bare number in exponent form (``1e3``)
   reads as ``1000`` there, while the getters and dataclass decoding reject it

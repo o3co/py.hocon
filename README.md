@@ -277,7 +277,9 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   and JSON round-trips see the field as its plain type, so values are not
   converted twice (`Limits(max_body=65536)` stays `65536`). With
   `validate_default=True` a default is validated as part of decode, so write it
-  in HOCON form (`"1.5m"`).
+  in HOCON form (`"1.5m"`). A model that overrides `__init__` does not
+  receive the validation context (a Pydantic limitation), so markers inside it
+  do not act — use a `model_validator` instead of overriding `__init__`.
 - Pydantic models receive plain values, so there a number is read through its
   value rather than its source text: a bare number in exponent form (`1e3`)
   reads as `1000`, while the getters and dataclass decoding reject it. Values
