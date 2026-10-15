@@ -183,7 +183,8 @@ dataclass のフィールドは kebab-case のキーに一致し (`max_body` は
 - 数値キーオブジェクト → 配列変換
 - `.properties` include
 - 遅延解決ライフサイクル: `parse(..., resolve_substitutions=False)` →
-  `with_fallback` → `resolve()`
+  `with_fallback` → `resolve()` (Lightbend の `parseString` / `withFallback` /
+  `resolve()` API)
 - `Config` は `collections.abc.Mapping`: `cfg[path]`、`path in cfg`、
   `cfg.get(path, default)`、イテレーション、`len`、`dict(cfg)`、`**cfg`
 - 型付き decode: `cfg.decode(MyDataclass)` — dataclass の再帰構築
@@ -191,6 +192,8 @@ dataclass のフィールドは kebab-case のキーに一致し (`max_body` は
   `dict[str, T]`、`timedelta` duration、`Enum`、`Annotated[int, hocon.Bytes()]`
   marker による byte サイズ / duration) と Pydantic v2 への
   `model_validate` 委譲
+- HOCON emitter: `cfg.render_hocon()` は解決済みの config を HOCON テキストに戻し、
+  round-trip を保証します (出力をパースし直すと値ツリーが再現される)
 - 外部 runtime 依存ゼロ (pure stdlib)、型付き (`py.typed`)
 
 ## API リファレンス
@@ -246,6 +249,7 @@ hocon.parse_file(path, **opts)     # include はファイルのディレクト�
 | `resolve_with(source, *, ...)` | `Config` | source 未解決、または解決不能な置換 |
 | `is_resolved()` | `bool` | — |
 | `to_object()` | `dict / list / scalar` | — |
+| `render_hocon()` | `str` (HOCON テキスト) | 未解決 |
 
 `get_boolean` は `yes`/`no`・`on`/`off` も受け付けます。`get_number` は整数字句なら
 `int`、それ以外は `float` を返します。
@@ -370,6 +374,29 @@ as_object(node)                     # dict[str, HoconValue] | None
 is_scalar(cfg.get_value("server.port"))   # True
 ```
 
+### HOCON への書き出し
+
+`render_hocon()` は解決済みの config を HOCON テキストとして書き出します。保証するのは
+バイト単位の形式ではなく round-trip です。出力をパースし直すと値ツリーがそのまま
+再現されるので、クォートを外すと別の型として読まれるスカラーはクォートします
+(`{"port": "8080"}` は `port = "8080"` となり、文字列のまま)。ルートのフィールドは
+波括弧なし、ネストしたオブジェクトは `key { … }` になり、未解決の config では
+`NotResolvedError` を送出します:
+
+```python
+from hocon import from_map
+
+cfg = from_map({"server": {"host": "localhost", "port": 8080}})
+print(cfg.render_hocon())
+# server {
+#   host = localhost
+#   port = 8080
+# }
+```
+
+置換とコメントは表現されません。解決済みの値ツリーはそれらを持たないためです。
+go.hocon `RenderHOCON`、ts.hocon `renderHocon()`、rs.hocon `render_hocon()` と同じ契約です。
+
 ### 遅延解決
 
 ランタイム設定注入のため、パース・fallback 重ね・解決を分離できます:
@@ -419,6 +446,14 @@ from hocon import (
 )
 ```
 
+| 型 | 発生する場面 |
+|------|------|
+| `ParseError` | 字句解析・構文解析中の構文エラー (行と列を含む) |
+| `ResolveError` | 置換の失敗、循環参照、required include の不在 |
+| `PackageLookupError` | `include package(...)` が見つからない |
+| `ConfigError` | 値アクセス時のキー不在や型不一致。配列がルートの文書 (S3.5) では `parse` / `parse_file` も送出する |
+| `NotResolvedError` | 未解決の置換を持つパスに getter を呼んだ |
+
 ## HOCON の例
 
 ```hocon
@@ -451,6 +486,9 @@ description = """
   This is a
   multiline string.
 """
+
+# 非クォート文字列
+path = /usr/local/bin
 ```
 
 ### Duration / Period / Byte サイズ
@@ -467,6 +505,7 @@ c = hocon.parse("""
 
 c.get_duration("timeout")         # 30000.0 (ms)
 c.get_duration("timeout", "s")    # 30.0
+c.get_duration("cache-ttl", "m")  # 5.0
 c.get_period("retention")         # Period(years=0, months=0, days=14)
 c.get_bytes("max-size")           # 536870912 (bytes)
 c.get_bytes("max-size", "MiB")    # 512.0
@@ -519,7 +558,10 @@ Period は **整数のみ** (Lightbend `Integer.parseInt`) で、`"7.5"` のよ�
 | 中 (100 keys) | ~600 | ~1.7 ms |
 | 大 (1,000 keys) | ~57 | ~17.7 ms |
 | 置換 10 | ~3,700 | ~270 µs |
+| 置換 50 | ~800 | ~1.2 ms |
 | 置換 100 | ~400 | ~2.5 ms |
+| ネスト深さ 5 | ~8,500 | ~117 µs |
+| ネスト深さ 10 | ~4,600 | ~220 µs |
 | ネスト深さ 20 | ~2,000 | ~500 µs |
 
 pure-Python のため、コンパイル / V8 系の sibling (go / rs / ts) より概ね 30〜40 倍
@@ -555,6 +597,10 @@ py.hocon は go.hocon / rs.hocon と同値です。
 | [go.hocon](https://github.com/o3co/go.hocon) | Go | [pkg.go.dev](https://pkg.go.dev/github.com/o3co/go.hocon) | Go 向け HOCON パーサー |
 | [rs.hocon](https://github.com/o3co/rs.hocon) | Rust | [crates.io](https://crates.io/crates/hocon-parser) | Rust 向け HOCON パーサー |
 | [hocon2](https://github.com/o3co/hocon2) | Go | [pkg.go.dev](https://pkg.go.dev/github.com/o3co/hocon2) | HOCON → JSON/YAML/TOML/Properties CLI |
+
+4 つのパーサー実装は、どれも同じ Lightbend HOCON 仕様に対して追跡しています。実装ごとの
+準拠率は [実装横断のまとめ](https://github.com/o3co/xx.hocon/blob/main/docs/compliance-matrix.md)
+を参照してください。
 
 ## ベストプラクティス
 
@@ -718,6 +764,14 @@ cfg = from_value(pyyaml.safe_load(src), "their-file.yml")
   サイズを検証してください。
 - **include 深さ:** 深い include 連鎖によるスタックオーバーフローを防ぐため 50 段に
   制限しています。
+- **対応づけたパスの深さ:** 環境変数の `__` 区切りのセグメントと、Properties ファイルの
+  ドット区切りのキーは 64 セグメントまでです。1 つの名前が任意の深さの連鎖を 1 本作るので、
+  上限がないと 1.5 kB の変数名でインタプリタのスタックを使い切れました。rs.hocon も同じ
+  対応づけを 64 で制限しています。
+- **文書のネストの深さ:** 上限はありません。インタプリタのスタックを超えてネストした文書は
+  `ParseError` または `AdapterError` として失敗し、素の `RecursionError` にはなりません。
+  ただし、それが起きる深さは呼び出し側のコードがすでにどれだけ深いかで変わるので、
+  固定の段数に頼らず、信頼できない入力はパースの前にサイズを検証してください (上記)。
 
 ## 開発
 
