@@ -867,12 +867,13 @@ accessors too (ts.hocon#198, go.hocon#199); rs is the reference sibling.
 
 ---
 
-Status tally (210 items): ✅ 180 · ⚠️ 13 · ❌ 0 · 🤷 0 · ➖ 17.
-Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **88.8%**;
-in-scope `(✅ + ⚠️·0.5) / (210 − 17)` = **96.6%**. The 🤷 mass is fully burned:
+Status tally (210 items): ✅ 181 · ⚠️ 12 · ❌ 0 · 🤷 0 · ➖ 17.
+Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **89.0%**;
+in-scope `(✅ + ⚠️·0.5) / (210 − 17)` = **96.9%**. The 🤷 mass is fully burned:
 the first expansion wave (error-fixture, units-default, deferred-resolution,
 properties-conflict and include-package harnesses) took it 95 → 72, and the
 2026-08-18 spec-verification wave (tests/test_spec_*.py) pinned the rest —
 flipping 69 rows to ✅, three ⚠️ rows (S19.4/S21.3/S21.4) to ✅, and settling
-S13a.10 as ➖. The remaining ⚠️ 13 are coverage-partial rows whose remainders
-are named on each row.
+S13a.10 as ➖. S21.5 went ⚠️ → ✅ with the E20 fixtures (ub07 / ub08). The
+remaining ⚠️ 12 are coverage-partial rows whose remainders are named on each
+row.

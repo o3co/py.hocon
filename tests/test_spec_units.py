@@ -265,6 +265,9 @@ class TestE20ExactByteProduct:
     def test_truncated_product_at_the_guard(self) -> None:
         # 9007199254740991.9 bytes truncates to 2^53 - 1, which is in range.
         assert _bytes("9007199254740.9919kB") == 2**53 - 1
+        # A long fraction must not round up past the guard in the range check.
+        assert _bytes("9007199254740991.9999999999999") == 2**53 - 1
+        assert _bytes("9007199254740.9919999999999999999999999kB") == 2**53 - 1
         with pytest.raises(ConfigError, match="overflows"):
             _bytes("9007199254741kB")
 
@@ -283,3 +286,11 @@ class TestE20ExactByteProduct:
         # An astronomically large duration reads as an infinite float, as it
         # did before the Decimal arithmetic.
         assert read_duration("1" + "0" * 1_000_000 + "d") == float("inf")
+
+    def test_duration_rounds_once_for_long_inputs(self) -> None:
+        # E20: a float result is rounded once, at the end. A 60-digit
+        # intermediate rounding would give 9007199254740996.0 here.
+        value = "9007199254740994." + "9" * 70 + "ms"
+        assert read_duration(value) == 9007199254740994.0
+        # A non-terminating output conversion still rounds once: 7 min in h.
+        assert read_duration("7m", "h") == 7 / 60
