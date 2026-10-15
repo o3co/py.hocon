@@ -83,11 +83,12 @@ version from the tag before it builds. Do not bump `pyproject.toml` in a PR
 is not where a version is decided).
 
 1. **Release-prep PR** against `main`, with a commit `chore(release): X.Y.Z`
-   that renames the content of `## [Unreleased]` in `CHANGELOG.md` to
-   `## [X.Y.Z] - YYYY-MM-DD`, leaving an empty `## [Unreleased]` above it.
-   `make check` must pass, including `tests/test_docs.py` (the doc gate:
-   README facts recomputed from `pyproject.toml` and
-   `docs/spec-compliance.md`).
+   that renames `## [Unreleased]` in `CHANGELOG.md` to
+   `## [X.Y.Z] - YYYY-MM-DD` and opens a new empty `## [Unreleased]` above it.
+   Run `make testdata` first (the conformance suite skips without the corpus;
+   release CI fetches xx.hocon `main` at tag time), then `make check`, which
+   includes `tests/test_docs.py` (the doc gate: facts in `README.md`
+   recomputed from `pyproject.toml` and `docs/spec-compliance.md`).
 2. **Tag** the merged commit on `main` with `vX.Y.Z` and push the tag.
 3. **CI** (`release.yml`) then:
    1. sets the version from the tag;

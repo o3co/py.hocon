@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.14.0] - 2026-10-16
 
+A minor release that contains breaking spec fixes (marked **BREAKING**
+below): `+` is reserved outside quotes; non-ASCII digits are text; fractional
+byte sizes truncate toward zero and read as `int` in bytes; unresolved values
+raise `NotResolvedError` from `get` / `[]` / `to_object` and the Mapping view;
+overflowing byte sizes and `timedelta`s raise `ConfigError` instead of
+`OverflowError`; a literal past the double range is a parse error.
+
 ### Added
 
 - **Exponent forms in unit values (extra-spec E20, xx.hocon#111).** The
@@ -43,17 +50,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ("reserved character '+' outside quotes"), as in Lightbend and go.hocon,
   instead of being read as text: `a = 1e+x` (fixture us15, E8 step 4),
   `a = 1+2`, `a = 1.2.3+build`, `a = abc+`, `a = foo+bar`, `a = +1`,
-  `a+b = 1`, and a number run that is not a number (`1e+5.5`). The only `+`
+  `a+b = 1`, a number run that is not a number (`1e+5.5`), and `a = .5e+3`
+  (a number cannot start with `.`, so that `+` is not an exponent sign). The only `+`
   left outside quotes is the sign of a number's exponent (`1e+5`,
   `-1.5E+3`; `1e+5ms` stays the string "1e+5ms"), and `+=` is unchanged.
   A numeric key written directly before `+=` (`1+= 2`) is an error for the
   same reason (the number run takes the `+`, as in Lightbend).
   **Workaround:** quote a value that needs a literal `+` (`a = "foo+bar"`,
   `"a+b" = 1`), and put a space before `+=` after a numeric key (`1 += 2`).
-- **Numbers use ASCII digits only.** An unquoted value with a non-ASCII
+
+- **BREAKING (spec fix): numbers use ASCII digits only.** An unquoted value with a non-ASCII
   digit (`a = 1٥`) is now the string it reads as, as in Lightbend, instead of
   a number (`15`); `get_number` on such text raises `ConfigError` as for any
-  string.
+  string. Workaround: write numbers with ASCII digits.
 
 - **Resolved paths read and unresolved values raise `NotResolvedError` (E12
   decision 12).**
@@ -99,13 +108,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   number of digits, and a count of `1e16` or more is rejected as overflow
   before any big-number arithmetic. Fixtures ub07 / ub08.
 
-- **`get_bytes` reports an overflowing byte size (`10PB`) as a `ConfigError`
+- **BREAKING: `get_bytes` reports an overflowing byte size (`10PB`) as a `ConfigError`
   carrying the key path**, like its other failures, instead of leaking a bare
   `OverflowError`. Code that caught `OverflowError` should catch
   `ConfigError`.
 
-- **Decoding a `timedelta` past its range (`1000000000000 days`) raises a
-  `ConfigError` carrying the key path** instead of a bare `OverflowError`.
+- **BREAKING: decoding a `timedelta` past its range (`1000000000000 days`)
+  raises a `ConfigError` carrying the key path** instead of a bare
+  `OverflowError`; code that caught `OverflowError` should catch `ConfigError`.
   A boolean decoded into `timedelta` / `Period` now reports `expected
   duration at <path>, got boolean` (the getters' wording) instead of
   `invalid duration at <path>: 'true'`.
