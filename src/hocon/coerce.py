@@ -138,7 +138,6 @@ def _leading_numeric_prefix_len(trimmed: str) -> int:
 
 # Unit conversions run in Decimal and round to float once, so a value that is
 # exact in decimal stays exact (`1.001s` is 1001.0 ms, not 1000.9999999999999).
-_EXACT = decimal.Context(prec=60)
 
 
 def _exact_number(text: str) -> Decimal | None:
@@ -151,6 +150,25 @@ def _exact_number(text: str) -> Decimal | None:
 
 def _dec(x: float) -> Decimal:
     return Decimal(repr(x))  # the table's decimal spelling, not its binary value
+
+
+def _context(num: Decimal, extra: int) -> decimal.Context:
+    """A context ``extra`` digits wider than ``num``, with unbounded exponents
+    (a huge value is an infinite float, never a ``decimal.Overflow``)."""
+    return decimal.Context(
+        prec=len(num.as_tuple().digits) + extra, Emax=decimal.MAX_EMAX, Emin=decimal.MIN_EMIN
+    )
+
+
+# Digits beyond the operand for a result that becomes a float. A quotient of
+# the operand by the unit factors lies at least ~10^-(digits + 340) (relative)
+# away from any binary64 halfway point it does not equal, so rounding at this
+# width cannot move it onto or across one: float() then rounds once (E20).
+_FLOAT_GUARD_DIGITS = 400
+
+
+def _to_float(value: Decimal) -> float:
+    return float(value)  # correctly rounded; ±inf / 0.0 outside the range
 
 
 def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float:
@@ -168,13 +186,11 @@ def parse_duration(value: str, output_unit: DurationUnit | None = None) -> float
     if divisor is None:
         return math.nan
     # S18.1 + S18.4: bare number (no unit) → treat as default unit (ms).
-    if unit == "":
-        return float(_EXACT.divide(num, _dec(divisor)))
-    mult = _DURATION_UNITS.get(unit)
+    mult = 1.0 if unit == "" else _DURATION_UNITS.get(unit)
     if mult is None:
         return math.nan
-    ms = _EXACT.multiply(num, _dec(mult))
-    return float(_EXACT.divide(ms, _dec(divisor)))
+    ctx = _context(num, _FLOAT_GUARD_DIGITS)  # the product below is exact
+    return _to_float(ctx.divide(ctx.multiply(num, _dec(mult)), _dec(divisor)))
 
 
 # S20 — Period format. Values are bounded to i32 like Lightbend
@@ -299,24 +315,32 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     divisor = _OUTPUT_BYTE_UNITS.get(unit_out)
     if divisor is None:
         return math.nan
-    # S18.1 + S18.4: bare number (no unit) → truncate toward zero (Lightbend
-    # BigDecimal.toBigInteger) and treat as default unit (bytes).
+    # E20: exact product, then truncate toward zero (Lightbend
+    # BigDecimal.toBigInteger), then convert to the output unit, rounding once.
+    # S18.1 + S18.4: a bare number (no unit) is bytes.
     if unit == "":
-        num_bytes = int(num)  # toward zero
-        if abs(num_bytes) > _MAX_SAFE_INTEGER:
-            raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
-        return float(_EXACT.divide(Decimal(num_bytes), _dec(divisor)))
-    # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
-    # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
-    mult = _BYTE_UNITS.get(unit)
-    if mult is None:
-        return math.nan
-    num_bytes_d = _EXACT.multiply(num, _dec(mult))
-    if abs(num_bytes_d) > _MAX_SAFE_INTEGER:
+        mult: float = 1
+    else:
+        # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
+        # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
+        found = _BYTE_UNITS.get(unit)
+        if found is None:
+            return math.nan
+        mult = found
+    # Every unit is at least one byte, so a count of 1e16 or more is past 2^53
+    # whatever the unit: reject it before any arithmetic on a huge number.
+    if num.adjusted() >= len(str(_MAX_SAFE_INTEGER)):
         raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
+    # Enough precision for the whole product, so nothing rounds before the
+    # truncation (0.999…9kB with any number of nines is 999 bytes, not 1000).
+    num_bytes_d = _context(num, 30).multiply(num, _dec(mult))  # factor ≤ 25 digits
+    if num_bytes_d.copy_abs() >= _MAX_SAFE_INTEGER + 1:  # copy_abs: no rounding
+        raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
+    num_bytes = int(num_bytes_d)  # toward zero: 1.0009kB is 1000, not 1001
     if unit_out == "B":
-        return round(num_bytes_d)  # half-even, like round() on the float before
-    return float(_EXACT.divide(num_bytes_d, _dec(divisor)))
+        return num_bytes
+    out = Decimal(num_bytes)
+    return _to_float(_context(out, _FLOAT_GUARD_DIGITS).divide(out, _dec(divisor)))
 
 
 UnitProblem = Literal["invalid", "negative", "overflow"]

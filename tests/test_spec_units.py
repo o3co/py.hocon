@@ -10,9 +10,12 @@ tables (L1307–L1385), with Lightbend probes for the contested spellings.
 tests/test_units_default.py).
 """
 
+from decimal import Decimal
+
 import pytest
 
 from hocon import ConfigError, parse
+from hocon.coerce import UnitReadError, read_bytes, read_duration
 
 
 def _duration_ms(value: str) -> float:
@@ -21,6 +24,12 @@ def _duration_ms(value: str) -> float:
 
 def _bytes(value: str) -> float:
     return parse(f'b = "{value}"').get_bytes("b")
+
+
+def _trunc(count: str, factor: int) -> int:
+    """E20: the exact decimal product, truncated toward zero (Lightbend
+    ``BigDecimal.toBigInteger``)."""
+    return int(Decimal(count) * factor)
 
 
 class TestS18_3UnitNameLettersOnly:
@@ -138,16 +147,16 @@ class TestS21_2PowersOfTen:
         ("value", "expected"),
         [
             # Binary long/short forms of the new large units; counts chosen to
-            # stay under the 2^53 guard (get_bytes rounds the byte result).
+            # stay under the 2^53 guard (E20: get_bytes truncates the exact byte product).
             ("1PiB", 1024**5),
             ("1pebibyte", 1024**5),
             ("1pebibytes", 1024**5),
-            ("0.001EiB", round(1e-3 * 1024**6)),
-            ("0.001exbibyte", round(1e-3 * 1024**6)),
-            ("0.000001ZiB", round(1e-6 * 1024**7)),
-            ("0.000001zebibytes", round(1e-6 * 1024**7)),
-            ("0.000000001YiB", round(1e-9 * 1024**8)),
-            ("0.000000001yobibyte", round(1e-9 * 1024**8)),
+            ("0.001EiB", _trunc("1e-3", 1024**6)),
+            ("0.001exbibyte", _trunc("1e-3", 1024**6)),
+            ("0.000001ZiB", _trunc("1e-6", 1024**7)),
+            ("0.000001zebibytes", _trunc("1e-6", 1024**7)),
+            ("0.000000001YiB", _trunc("1e-9", 1024**8)),
+            ("0.000000001yobibyte", _trunc("1e-9", 1024**8)),
         ],
     )
     def test_large_binary_units_recognised(self, value: str, expected: float) -> None:
@@ -201,8 +210,8 @@ class TestS21_3TwoLetterBinaryPrefixes:
     )
     def test_two_letter_large_forms(self, value: str, power: int, count: float) -> None:
         # Ei/Zi/Yi at count 1 exceed the 2^53 guard; fractional counts pin
-        # unit recognition (get_bytes rounds the byte result).
-        assert _bytes(value) == round(count * 1024**power)
+        # unit recognition (E20: get_bytes truncates the exact byte product).
+        assert _bytes(value) == _trunc(repr(count), 1024**power)
 
     def test_matches_full_spelling(self) -> None:
         assert _bytes("1Ki") == _bytes("1KiB") == 1024
@@ -224,7 +233,7 @@ class TestS21_4SingleLetterBinary:
         ("value", "power", "count"),
         [
             # 1E/1Z/1Y exceed the 2^53 guard, so unit recognition is pinned
-            # with fractional counts; get_bytes rounds the byte result.
+            # with fractional counts; get_bytes truncates the exact byte product (E20).
             ("0.001E", 6, 1e-3),
             ("0.001e", 6, 1e-3),
             ("0.000001Z", 7, 1e-6),
@@ -234,4 +243,54 @@ class TestS21_4SingleLetterBinary:
         ],
     )
     def test_e_z_y_recognised(self, value: str, power: int, count: float) -> None:
-        assert _bytes(value) == round(count * 1024**power)
+        assert _bytes(value) == _trunc(repr(count), 1024**power)
+
+
+class TestE20ExactByteProduct:
+    """E20 — the byte product is exact before truncation, whatever the number
+    of digits, and huge counts are rejected cheaply as overflow."""
+
+    def test_long_fraction_is_not_rounded_before_truncation(self) -> None:
+        # 65 nines: a 60-digit context would round the product up to 1000.
+        assert _bytes("0." + "9" * 65 + "kB") == 999
+        assert _bytes("0." + "9" * 65 + "KiB") == 1023
+
+    def test_truncation_happens_before_the_sign_check(self) -> None:
+        # -0.5 bytes truncates to 0 and is accepted (Lightbend: toBigInteger,
+        # then signum); -500 bytes is rejected.
+        assert _bytes("-0.0005kB") == 0
+        with pytest.raises(ConfigError, match="non-negative"):
+            _bytes("-0.5kB")
+
+    def test_truncated_product_at_the_guard(self) -> None:
+        # 9007199254740991.9 bytes truncates to 2^53 - 1, which is in range.
+        assert _bytes("9007199254740.9919kB") == 2**53 - 1
+        # A long fraction must not round up past the guard in the range check.
+        assert _bytes("9007199254740991.9999999999999") == 2**53 - 1
+        assert _bytes("9007199254740.9919999999999999999999999kB") == 2**53 - 1
+        with pytest.raises(ConfigError, match="overflows"):
+            _bytes("9007199254741kB")
+
+    # The huge-count cases call the readers directly: lexing a megabyte of
+    # config text would dominate the test, and the getters' mapping of
+    # UnitReadError to ConfigError is pinned above.
+    @pytest.mark.parametrize("unit", ["B", "kB", ""])
+    def test_huge_count_is_an_overflow_error(self, unit: str) -> None:
+        # Rejected by magnitude before any big-number arithmetic (no slow
+        # int conversion, no decimal.Overflow escaping as a bare exception).
+        with pytest.raises(UnitReadError) as e:
+            read_bytes("1" + "0" * 1_000_000 + unit)
+        assert e.value.problem == "overflow"
+
+    def test_huge_duration_does_not_raise_decimal_overflow(self) -> None:
+        # An astronomically large duration reads as an infinite float, as it
+        # did before the Decimal arithmetic.
+        assert read_duration("1" + "0" * 1_000_000 + "d") == float("inf")
+
+    def test_duration_rounds_once_for_long_inputs(self) -> None:
+        # E20: a float result is rounded once, at the end. A 60-digit
+        # intermediate rounding would give 9007199254740996.0 here.
+        value = "9007199254740994." + "9" * 70 + "ms"
+        assert read_duration(value) == 9007199254740994.0
+        # A non-terminating output conversion still rounds once: 7 min in h.
+        assert read_duration("7m", "h") == 7 / 60

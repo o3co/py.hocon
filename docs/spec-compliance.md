@@ -25,8 +25,9 @@ non-JVM parser caps at 14/16.
   outside the parser (same rationale as ts.hocon).
 - **S20.1–S20.4 ✅** — `get_period` / `Period(years, months, days)` implemented
   to rs.hocon's behaviour (integer-only per Lightbend `Integer.parseInt`, bare
-  numbers default to days, lowercase-only units, negative permitted). ts / go
-  remain ➖ here; rs.hocon is the reference. Tests: `tests/test_period.py`
+  numbers default to days, lowercase-only units, negative permitted). All four
+  implementations are ✅ (ts.hocon#198, go.hocon#199); rs.hocon is the
+  reference. Tests: `tests/test_period.py`
   (mirrors rs `parse_period` unit tests + units-default up01–up05 scenarios).
 - **S14a.2 (URL / classpath includes) ➖** — inside the 15 globally
   out-of-scope items (see xx.hocon `docs/compliance-matrix.md` §Globally
@@ -730,7 +731,7 @@ Citation shorthand used on `tests:` lines:
   tests: tests/test_spec_units.py (TestS18_3UnitNameLettersOnly: digit and symbol in unit rejected)
   status: ✅
 - **S18.4** String with no unit → interpreted with default unit — §Units format (L1290)
-  tests: period: test_period_bare_integer_string (up01 scenario), test_period_leading_trailing_ws (up02 scenario); units: ud01–ud06 (duration: bare / ws / fractional / negative no-unit strings → ms default), ub01–ub04 (bytes: bare / ws / fractional-truncated / negative no-unit strings → byte default)
+  tests: period: test_period_bare_integer_string (up01 scenario), test_period_leading_trailing_ws (up02 scenario); units: ud01–ud06 (duration: bare / ws / fractional / negative no-unit strings → ms default), ud11 (E20: `"1.001"` → exactly 1.001 ms), ub01–ub04 (bytes: bare / ws / fractional-truncated / negative no-unit strings → byte default)
   status: ✅ — ud06 caveat: py returns signed −500 ms for `"-500"` (Lightbend `java.time.Duration` / go.hocon-faithful); rs pins `Err` only because `std::time::Duration` is unsigned (rs-side constraint, documented in rs's CHANGELOG) — the literal rs expectation is kept as a strict-xfail tripwire in `tests/test_units_default.py`, not a py violation
 
 ### S19. Duration format
@@ -763,21 +764,21 @@ Citation shorthand used on `tests:` lines:
 ### S20. Period format
 
 py.hocon exposes `get_period` returning `Period(years, months, days)`,
-implemented to rs.hocon parity (see Per-impl notes). ts and go remain ➖
-per-impl here (no period accessor); rs is the reference sibling.
+implemented to rs.hocon parity (see Per-impl notes). ts and go have period
+accessors too (ts.hocon#198, go.hocon#199); rs is the reference sibling.
 
 - **S20.1** `d` / `day` / `days` — §Period Format (L1327)
   tests: period: test_period_units (`7d`, `7 days`), test_period_bare_integer_string, test_period_bare_number_scalar, test_period_negative, test_period_fractional_rejected, test_period_i32_overflow_rejected
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 - **S20.2** `w` / `week` / `weeks` — §Period Format (L1328)
   tests: period: test_period_weeks_to_days (`7w` → 49 days), test_period_units (`2 week`)
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 - **S20.3** `m` / `mo` / `month` / `months` — §Period Format (L1329)
   tests: period: test_period_units (`3m`, `3mo`, `3 months`)
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 - **S20.4** `y` / `year` / `years` — §Period Format (L1333)
   tests: period: test_period_units (`1y`, `10 years`)
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 
 ### S21. Size in bytes format
 
@@ -794,8 +795,8 @@ per-impl here (no period accessor); rs is the reference sibling.
   tests: smoke: test_duration_and_bytes (`1K` → 1024, binary not decimal); units: ub05 (`1024K` → 1_048_576 — Lightbend binary ground truth, NOT SI-decimal 1_024_000)
   status: ✅ — the full single-letter ladder is now pinned at accessor level (tests/test_spec_units.py TestS21_4SingleLetterBinary: K–P at count 1, E/Z/Y via fractional counts under the 2^53 guard; `Z`/`z`/`Y`/`y` were missing from the ported table and added in this branch)
 - **S21.5** Fractional values supported (`0.5M`) — §Units format (L1281-1294) + §Size in bytes (L1335-1342)
-  tests: units: ub03 (`"1024.5"` → 1024 — fractional accepted, truncated toward zero per Lightbend `BigDecimal.toBigInteger`, NOT rounded), ud05 (duration side: `"500.5"` → 500.5 ms / 500_500_000 ns)
-  status: ⚠️ — fractional acceptance and the truncation rule are pinned at accessor level; the fractional-times-multiplier form (`0.5M`/`0.5K` → 512·…) remains accessor-unpinned (bsl09 `0.5K` is consumed parse-side only; rs pins it via its fractional-binary unit tests)
+  tests: units: ub03 (`"1024.5"` → 1024 — fractional accepted, truncated toward zero per Lightbend `BigDecimal.toBigInteger`, NOT rounded), ub07 (`"1.0009kB"` → 1000 — fractional × unit, exact product then truncation, E20), ub08 (`"1.001kB"` → 1001 — exact before truncation, E20), ud05 / ud09 / ud10 (duration side: `"500.5"` → 500.5 ms, `"1.001s"` → 1001 ms, `"2.3h"` → 8280000 ms); spec-units: TestE20ExactByteProduct, the fractional binary-unit counts (`0.001EiB`, `0.001E`, …)
+  status: ✅ — fractional counts with and without a unit are pinned at accessor level, with E20's exact-product-then-truncate rule
 
 ### S22. Config object merging API
 
@@ -866,12 +867,13 @@ per-impl here (no period accessor); rs is the reference sibling.
 
 ---
 
-Status tally (210 items): ✅ 180 · ⚠️ 13 · ❌ 0 · 🤷 0 · ➖ 17.
-Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **88.8%**;
-in-scope `(✅ + ⚠️·0.5) / (210 − 17)` = **96.6%**. The 🤷 mass is fully burned:
+Status tally (210 items): ✅ 181 · ⚠️ 12 · ❌ 0 · 🤷 0 · ➖ 17.
+Rates per the shared convention — spec-total `(✅ + ⚠️·0.5) / 210` = **89.0%**;
+in-scope `(✅ + ⚠️·0.5) / (210 − 17)` = **96.9%**. The 🤷 mass is fully burned:
 the first expansion wave (error-fixture, units-default, deferred-resolution,
 properties-conflict and include-package harnesses) took it 95 → 72, and the
 2026-08-18 spec-verification wave (tests/test_spec_*.py) pinned the rest —
 flipping 69 rows to ✅, three ⚠️ rows (S19.4/S21.3/S21.4) to ✅, and settling
-S13a.10 as ➖. The remaining ⚠️ 13 are coverage-partial rows whose remainders
-are named on each row.
+S13a.10 as ➖. S21.5 went ⚠️ → ✅ with the E20 fixtures (ub07 / ub08). The
+remaining ⚠️ 12 are coverage-partial rows whose remainders are named on each
+row.

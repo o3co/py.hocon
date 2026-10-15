@@ -183,7 +183,7 @@ segments for keys that contain dots (`config.get_string('"a.b".c')`).
 | `get_float(path)` | `float` | missing, not numeric, or unresolved |
 | `get_boolean(path)` | `bool` | missing, wrong type, or unresolved |
 | `get_duration(path, unit=None)` | `float` | missing, wrong type, or invalid duration |
-| `get_bytes(path, unit=None)` | `float` | missing, wrong type, or invalid byte size |
+| `get_bytes(path, unit=None)` | `float` (`int` in bytes) | missing, wrong type, or invalid byte size |
 | `get_period(path)` | `Period` | missing, wrong type, or invalid period |
 | `get_config(path)` | `Config` | missing, not an object, or unresolved |
 | `get_list(path)` | `list` | missing, not an array, or unresolved |
@@ -457,10 +457,13 @@ c.get_bytes("max-size", "MiB")    # 512.0
 
 Supported duration units: `ns`, `us`, `ms`, `s`, `m`, `h`, `d` (and long forms
 like `seconds`, `minutes`). Duration unit names are **case-sensitive** and must be
-lowercase (HOCON spec S19.8). Byte units are more case-tolerant: the canonical
-forms plus lowercase aliases (`kb`, `kib`, …), any-case long forms (`megabytes`),
-and single-letter powers-of-two in both cases (`K`/`k`, per Lightbend, S21.4).
-Supported byte units: `B`, `KB`/`KiB`, `MB`/`MiB`, `GB`/`GiB`, `TB`/`TiB`.
+lowercase (HOCON spec S19.8). Byte units follow Lightbend's case-sensitive table:
+`B`/`b`, `kB` (powers of ten; `KB` and `kb` are errors), `KiB`/`Ki` (powers of
+two), `MB`/`MiB`, `GB`/`GiB`, `TB`/`TiB` and up to `YB`/`YiB`, lowercase long
+forms (`kilobytes`, `mebibytes`, …), and single-letter powers of two in both
+cases (`K`/`k`, S21.4). Arithmetic is exact decimal (E20): `1.001s` is exactly
+`1001` ms, and a fractional byte size truncates toward zero after the exact
+product (`1.0009kB` is `1000` bytes).
 
 `get_period` (spec S20.1–S20.4) returns a `Period(years, months, days)` value —
 a frozen dataclass mirroring rs.hocon's `Period` struct. Supported units:
