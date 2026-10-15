@@ -25,8 +25,9 @@ non-JVM parser caps at 14/16.
   outside the parser (same rationale as ts.hocon).
 - **S20.1–S20.4 ✅** — `get_period` / `Period(years, months, days)` implemented
   to rs.hocon's behaviour (integer-only per Lightbend `Integer.parseInt`, bare
-  numbers default to days, lowercase-only units, negative permitted). ts / go
-  remain ➖ here; rs.hocon is the reference. Tests: `tests/test_period.py`
+  numbers default to days, lowercase-only units, negative permitted). All four
+  implementations are ✅ (ts.hocon#198, go.hocon#199); rs.hocon is the
+  reference. Tests: `tests/test_period.py`
   (mirrors rs `parse_period` unit tests + units-default up01–up05 scenarios).
 - **S14a.2 (URL / classpath includes) ➖** — inside the 15 globally
   out-of-scope items (see xx.hocon `docs/compliance-matrix.md` §Globally
@@ -763,21 +764,21 @@ Citation shorthand used on `tests:` lines:
 ### S20. Period format
 
 py.hocon exposes `get_period` returning `Period(years, months, days)`,
-implemented to rs.hocon parity (see Per-impl notes). ts and go remain ➖
-per-impl here (no period accessor); rs is the reference sibling.
+implemented to rs.hocon parity (see Per-impl notes). ts and go have period
+accessors too (ts.hocon#198, go.hocon#199); rs is the reference sibling.
 
 - **S20.1** `d` / `day` / `days` — §Period Format (L1327)
   tests: period: test_period_units (`7d`, `7 days`), test_period_bare_integer_string, test_period_bare_number_scalar, test_period_negative, test_period_fractional_rejected, test_period_i32_overflow_rejected
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 - **S20.2** `w` / `week` / `weeks` — §Period Format (L1328)
   tests: period: test_period_weeks_to_days (`7w` → 49 days), test_period_units (`2 week`)
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 - **S20.3** `m` / `mo` / `month` / `months` — §Period Format (L1329)
   tests: period: test_period_units (`3m`, `3mo`, `3 months`)
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 - **S20.4** `y` / `year` / `years` — §Period Format (L1333)
   tests: period: test_period_units (`1y`, `10 years`)
-  status: ✅ — rs-parity (ts / go: ➖)
+  status: ✅ — rs-parity
 
 ### S21. Size in bytes format
 
