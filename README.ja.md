@@ -109,6 +109,65 @@ attrs 等) に委ねます。HOCON はそれらを仕様に組み込んでおり
 加えて HOCON は YAML の可読性と JSON の構造を兼ね備え、フラットな key-value を超える
 設定に適します。
 
+## 設定を module の中に閉じ込める
+
+大きなコードベースでは、設定が漏れ出しがちです。全チームが編集する 1 つの巨大なファイル、各サービスにコピーされた default、互いのキーを読み合う module。HOCON なら、各 module はコードと同じように自分の設定を持てます。
+
+- **各 module は自分の名前空間を持ち、default を同梱する。** `auth` module は `auth { … }` をコードの隣に置き、すべての default を埋めておく。アプリは default をコピーせず、`include` 1 行で取り込む。
+- **アプリは違うところだけを上書きする。** 後の層は前の層に deep merge されるので、アプリが書くのはブロック全体ではなく 2 つのキーだけ。
+- **各 module は自分の subtree だけを、自分の schema で読む。** module は `auth` を要求し、自分で定義した schema で検証する。その section の形が module の契約で、ファイルのほかの部分は module からは見えない。
+- **module 間の配線はアプリに置く。** データベースが要る module は、optional な置換 (`${?shared.db}`) でそれを表明する。値をどこから持ってくるかはアプリが決める。module 同士は互いを参照しないので、依存は一方向になる。
+
+```hocon
+# auth/reference.conf: auth package に同梱し、auth チームが持つ
+auth {
+  session { lifetime = 30m, max-body = 64KiB }
+  db = ${?shared.db}
+}
+```
+
+```hocon
+# application.conf: アプリが持つ
+include package("github.com/acme/auth", "reference.conf")
+
+shared.db { host = db.internal, port = 5432 }
+auth.session.lifetime = 2h   # 違うところだけ上書き。残りは module の default のまま
+```
+
+```python
+# auth module の中
+from dataclasses import dataclass
+from typing import Annotated
+
+import hocon
+
+
+@dataclass
+class Session:
+    lifetime: Annotated[int, hocon.Duration("s")]  # "2h" → 7200
+    max_body: Annotated[int, hocon.Bytes()]        # "64KiB" → 65536
+
+
+@dataclass
+class Db:
+    host: str
+    port: int
+
+
+@dataclass
+class Auth:
+    session: Session
+    db: Db | None = None  # アプリが配線する。なければ None
+
+
+def load_auth(config: hocon.Config) -> Auth:
+    return config.decode(Auth, "auth")  # 自分の subtree だけを読む
+```
+
+dataclass のフィールドは kebab-case のキーに一致し (`max_body` は `max-body` を読む)、単位 marker は `2h` や `64KiB` を getter と同じ規則で読みます。アプリが `shared.db` を書かなければ、`db` は `None` になります。
+
+`include package(...)` は、アプリにファイルの置き場所を知らせずに module が default を公開する仕組みです。py.hocon は package をファイルシステムの規約 (`resolve_from` / `base_dir` / カレントディレクトリの下の `<base>/<id>/<file>`) で探すか、独自の `package_resolver` を使います ([パース関数](#パース関数) と [既知の制限](#既知の制限) を参照)。JVM では、Lightbend の `reference.conf` の慣習が同じ役割を果たします。
+
 ## 機能
 
 - 完全な HOCON パース: オブジェクト・配列・スカラー・置換 (`${path}` / `${?path}`)

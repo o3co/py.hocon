@@ -113,6 +113,65 @@ disappears at the format boundary.
 On top of that, HOCON combines the readability of YAML with the structure of JSON —
 making it a strong fit for anything beyond flat key-value config.
 
+## Configuration that stays inside its module
+
+In a large codebase, configuration tends to leak: one big file that every team edits, defaults copied into each service, and modules that read each other's keys. HOCON lets each module own its configuration the way it owns its code.
+
+- **Each module owns a namespace and ships its own defaults.** The `auth` module keeps `auth { … }` next to its code, with every default filled in. The application never copies those defaults; it brings them in with one `include`.
+- **The application overrides only what differs.** Later layers deep-merge over earlier ones, so the application states two keys, not the whole block.
+- **Each module reads only its own subtree, through its own schema.** The module asks for `auth` and validates it against the schema it defines. The shape of that section is the module's contract; nothing else in the file is visible to it.
+- **Wiring between modules lives in the application.** A module that needs a database says so with an optional substitution (`${?shared.db}`). The application decides where that value comes from. Modules never reference each other, so dependencies run one way.
+
+```hocon
+# auth/reference.conf: shipped inside the auth package, owned by the auth team
+auth {
+  session { lifetime = 30m, max-body = 64KiB }
+  db = ${?shared.db}
+}
+```
+
+```hocon
+# application.conf: owned by the application
+include package("github.com/acme/auth", "reference.conf")
+
+shared.db { host = db.internal, port = 5432 }
+auth.session.lifetime = 2h   # override what differs; the rest stays the module's default
+```
+
+```python
+# inside the auth module
+from dataclasses import dataclass
+from typing import Annotated
+
+import hocon
+
+
+@dataclass
+class Session:
+    lifetime: Annotated[int, hocon.Duration("s")]  # "2h" → 7200
+    max_body: Annotated[int, hocon.Bytes()]        # "64KiB" → 65536
+
+
+@dataclass
+class Db:
+    host: str
+    port: int
+
+
+@dataclass
+class Auth:
+    session: Session
+    db: Db | None = None  # wired by the application, or absent
+
+
+def load_auth(config: hocon.Config) -> Auth:
+    return config.decode(Auth, "auth")  # reads only its own subtree
+```
+
+The dataclass fields match the kebab-case keys (`max_body` reads `max-body`), and the unit markers read `2h` and `64KiB` with the getters' rules. Without the application's `shared.db`, `db` decodes as `None`.
+
+`include package(...)` is how a module publishes its defaults without the application knowing where its files live. py.hocon finds a package by a filesystem convention, `<base>/<id>/<file>` under `resolve_from` / `base_dir` / the working directory, or through your own `package_resolver` (see [Parse functions](#parse-functions) and [Known Limitations](#known-limitations)). On the JVM, Lightbend's `reference.conf` convention plays the same role.
+
 ## Features
 
 - Full HOCON parsing: objects, arrays, scalars, substitutions (`${path}`, `${?path}`)
