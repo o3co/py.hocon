@@ -10,7 +10,9 @@ Families covered here (the up01–up05 period scenarios are inlined in
 ``tests/test_period.py`` and are NOT duplicated):
 
 - ud01–ud08  duration (bare int, WS variants, fractional, negative, unit regressions)
+- ud09–ud11  duration, E20 exact decimal arithmetic
 - ub01–ub06  bytes (bare int, WS, fractional-truncated, negative-accessor, unit, empty)
+- ub07–ub08  bytes, E20 exact product then truncation
 - un01–un03  cross-family negative edge cases (empty, WS-only, unit-only)
 
 S-items pinned: S18.1 (number default unit, via the same parse path), S18.2
@@ -131,8 +133,29 @@ def test_ud08_duration_ws_between() -> None:
     assert _load("ud08-duration-ws-between.conf").get_duration("t") == 500.0
 
 
+# ud09–ud11 (E20): the numeric part is an exact decimal and the unit product is
+# exact, so a fractional duration that is exact in decimal stays exact (no
+# 1000.9999999999999 ms, no Lightbend-style 1000999999 ns).
+def test_ud09_duration_fractional_exact() -> None:
+    cfg = _load("ud09-duration-fractional-exact.conf")
+    assert cfg.get_duration("t") == 1001.0
+    assert cfg.get_duration("t", "ns") == 1_001_000_000.0
+
+
+def test_ud10_duration_fractional_exact_hours() -> None:
+    cfg = _load("ud10-duration-fractional-exact-hours.conf")
+    assert cfg.get_duration("t") == 8_280_000.0
+    assert cfg.get_duration("t", "ns") == 8_280_000_000_000.0
+
+
+def test_ud11_duration_fractional_exact_no_unit() -> None:
+    cfg = _load("ud11-duration-fractional-exact-no-unit.conf")
+    assert cfg.get_duration("t") == 1.001
+    assert cfg.get_duration("t", "ns") == 1_001_000.0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
-# Bytes family (ub01–ub06)
+# Bytes family (ub01–ub08)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -169,6 +192,23 @@ def test_ub05_bytes_with_unit() -> None:
 def test_ub06_bytes_empty_rejected() -> None:
     with pytest.raises(ConfigError):
         _load("ub06-bytes-empty-rejected.conf").get_bytes("b")
+
+
+# ub07 (E20): exact product, then truncate toward zero — 1.0009kB is 1000.9
+# bytes, so 1000 (rounding, half-up or half-even, would give 1001). The
+# truncation happens in bytes, before any output-unit conversion.
+def test_ub07_bytes_fractional_unit_truncated() -> None:
+    cfg = _load("ub07-bytes-fractional-unit-truncated.conf")
+    assert cfg.get_bytes("b") == 1000
+    assert cfg.get_bytes("b", "KB") == 1.0
+
+
+# ub08 (E20): the product is exact before truncation — 1.001kB is 1001 bytes
+# (a float product, 1000.9999999999999, would truncate to 1000).
+def test_ub08_bytes_fractional_unit_exact() -> None:
+    cfg = _load("ub08-bytes-fractional-unit-exact.conf")
+    assert cfg.get_bytes("b") == 1001
+    assert cfg.get_bytes("b", "KB") == 1.001
 
 
 # ─────────────────────────────────────────────────────────────────────────────

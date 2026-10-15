@@ -10,6 +10,8 @@ tables (L1307–L1385), with Lightbend probes for the contested spellings.
 tests/test_units_default.py).
 """
 
+from decimal import Decimal
+
 import pytest
 
 from hocon import ConfigError, parse
@@ -21,6 +23,12 @@ def _duration_ms(value: str) -> float:
 
 def _bytes(value: str) -> float:
     return parse(f'b = "{value}"').get_bytes("b")
+
+
+def _trunc(count: str, factor: int) -> int:
+    """E20: the exact decimal product, truncated toward zero (Lightbend
+    ``BigDecimal.toBigInteger``)."""
+    return int(Decimal(count) * factor)
 
 
 class TestS18_3UnitNameLettersOnly:
@@ -138,16 +146,16 @@ class TestS21_2PowersOfTen:
         ("value", "expected"),
         [
             # Binary long/short forms of the new large units; counts chosen to
-            # stay under the 2^53 guard (get_bytes rounds the byte result).
+            # stay under the 2^53 guard (E20: get_bytes truncates the exact byte product).
             ("1PiB", 1024**5),
             ("1pebibyte", 1024**5),
             ("1pebibytes", 1024**5),
-            ("0.001EiB", round(1e-3 * 1024**6)),
-            ("0.001exbibyte", round(1e-3 * 1024**6)),
-            ("0.000001ZiB", round(1e-6 * 1024**7)),
-            ("0.000001zebibytes", round(1e-6 * 1024**7)),
-            ("0.000000001YiB", round(1e-9 * 1024**8)),
-            ("0.000000001yobibyte", round(1e-9 * 1024**8)),
+            ("0.001EiB", _trunc("1e-3", 1024**6)),
+            ("0.001exbibyte", _trunc("1e-3", 1024**6)),
+            ("0.000001ZiB", _trunc("1e-6", 1024**7)),
+            ("0.000001zebibytes", _trunc("1e-6", 1024**7)),
+            ("0.000000001YiB", _trunc("1e-9", 1024**8)),
+            ("0.000000001yobibyte", _trunc("1e-9", 1024**8)),
         ],
     )
     def test_large_binary_units_recognised(self, value: str, expected: float) -> None:
@@ -201,8 +209,8 @@ class TestS21_3TwoLetterBinaryPrefixes:
     )
     def test_two_letter_large_forms(self, value: str, power: int, count: float) -> None:
         # Ei/Zi/Yi at count 1 exceed the 2^53 guard; fractional counts pin
-        # unit recognition (get_bytes rounds the byte result).
-        assert _bytes(value) == round(count * 1024**power)
+        # unit recognition (E20: get_bytes truncates the exact byte product).
+        assert _bytes(value) == _trunc(repr(count), 1024**power)
 
     def test_matches_full_spelling(self) -> None:
         assert _bytes("1Ki") == _bytes("1KiB") == 1024
@@ -224,7 +232,7 @@ class TestS21_4SingleLetterBinary:
         ("value", "power", "count"),
         [
             # 1E/1Z/1Y exceed the 2^53 guard, so unit recognition is pinned
-            # with fractional counts; get_bytes rounds the byte result.
+            # with fractional counts; get_bytes truncates the exact byte product (E20).
             ("0.001E", 6, 1e-3),
             ("0.001e", 6, 1e-3),
             ("0.000001Z", 7, 1e-6),
@@ -234,4 +242,4 @@ class TestS21_4SingleLetterBinary:
         ],
     )
     def test_e_z_y_recognised(self, value: str, power: int, count: float) -> None:
-        assert _bytes(value) == round(count * 1024**power)
+        assert _bytes(value) == _trunc(repr(count), 1024**power)

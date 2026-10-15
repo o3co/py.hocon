@@ -299,24 +299,24 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     divisor = _OUTPUT_BYTE_UNITS.get(unit_out)
     if divisor is None:
         return math.nan
-    # S18.1 + S18.4: bare number (no unit) → truncate toward zero (Lightbend
-    # BigDecimal.toBigInteger) and treat as default unit (bytes).
+    # E20: exact product, then truncate toward zero (Lightbend
+    # BigDecimal.toBigInteger), then convert to the output unit, rounding once.
+    # S18.1 + S18.4: a bare number (no unit) is bytes.
     if unit == "":
-        num_bytes = int(num)  # toward zero
-        if abs(num_bytes) > _MAX_SAFE_INTEGER:
-            raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
-        return float(_EXACT.divide(Decimal(num_bytes), _dec(divisor)))
-    # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
-    # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
-    mult = _BYTE_UNITS.get(unit)
-    if mult is None:
-        return math.nan
-    num_bytes_d = _EXACT.multiply(num, _dec(mult))
-    if abs(num_bytes_d) > _MAX_SAFE_INTEGER:
+        num_bytes_d = num
+    else:
+        # Exact, case-sensitive match — Lightbend's unit table is case-sensitive
+        # (`kB` parses, `KB`/`kb`/`Megabytes` are errors), so no case folding.
+        mult = _BYTE_UNITS.get(unit)
+        if mult is None:
+            return math.nan
+        num_bytes_d = _EXACT.multiply(num, _dec(mult))
+    num_bytes = int(num_bytes_d)  # toward zero: 1.0009kB is 1000, not 1001
+    if abs(num_bytes) > _MAX_SAFE_INTEGER:
         raise OverflowError("byte size overflows representable range (max 2^53-1 bytes)")
     if unit_out == "B":
-        return round(num_bytes_d)  # half-even, like round() on the float before
-    return float(_EXACT.divide(num_bytes_d, _dec(divisor)))
+        return num_bytes
+    return float(_EXACT.divide(Decimal(num_bytes), _dec(divisor)))
 
 
 UnitProblem = Literal["invalid", "negative", "overflow"]
