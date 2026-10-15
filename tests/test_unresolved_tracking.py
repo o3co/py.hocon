@@ -100,3 +100,30 @@ def test_resolve_with_partial_keeps_resolved_paths_readable() -> None:
     assert cfg["a"] == {"x": 1}
     with pytest.raises(NotResolvedError):
         cfg.get("b")
+
+
+def test_mapping_view_lists_unresolved_keys_and_reading_them_raises() -> None:
+    cfg = parse_string("t = ${missing}\nv = 1\nu { x = ${m2}, y = 2 }", resolve_substitutions=False)
+    assert list(cfg) == ["t", "v", "u"]
+    assert len(cfg) == 3
+    assert cfg.keys() == ["t", "v", "u"]
+    assert "t" in cfg  # the key exists; its value does not yet
+    assert "u.x" in cfg
+    assert "zz" not in cfg
+    with pytest.raises(NotResolvedError):
+        "t.q" in cfg  # noqa: B015 — below an unresolved value: unknowable
+    for read in (lambda: dict(cfg), lambda: cfg == {"v": 1}, lambda: list(cfg.items())):
+        with pytest.raises(NotResolvedError):
+            read()
+    assert cfg.get("v") == 1
+
+
+def test_has_raises_on_an_unresolved_path_like_lightbend_haspath() -> None:
+    cfg = parse_string("t = ${missing}\nv = 1\nu { x = ${m2}, y = 2 }", resolve_substitutions=False)
+    with pytest.raises(NotResolvedError):
+        cfg.has("t")
+    with pytest.raises(NotResolvedError):
+        cfg.has("u")
+    assert cfg.has("v")
+    assert cfg.has("u.y")
+    assert not cfg.has("zz")

@@ -267,6 +267,12 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
 `null` は「存在する値」です — `cfg.get(path, default)` は `None` を返し、
 `path in cfg` は `True` になります。
 
+完全には解決されていない config では、キーはすべてそろっていて、値だけが未確定です。
+イテレーション・`len`・`keys()` は未解決のキーも含み、`path in cfg` もそれらに `True` を
+返します。一方、未解決の値を読む操作 (`cfg[path]`、`get`、`items()`、`dict(cfg)`、`==`、
+`to_object()`) は `NotResolvedError` を送出します。`has(path)` も Lightbend の `hasPath` と
+同じく送出し、未解決の値の下にあるパスへの `in` も、まだ答えられないので送出します。
+
 ### 型付き decode
 
 `cfg.decode(cls, path=None)` は config 全体 (または `path` の値) から `cls` の

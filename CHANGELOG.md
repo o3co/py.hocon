@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `to_object()` raise `NotResolvedError` for an unresolved path instead of
     treating it as absent (`get` returned the default, `to_object()` dropped
     the key). Absent paths still return the default / raise `KeyError`.
+  - **BREAKING:** the Mapping view of an unresolved config lists every key:
+    iteration, `len`, `keys()` and `in` include unresolved keys (they used to
+    vanish, so `cfg == {...}` could compare equal without them), and reading
+    their values — `items()`, `values()`, `dict(cfg)`, `==` — raises
+    `NotResolvedError`. `has(path)` raises on an unresolved path, like
+    Lightbend's `hasPath`; `in` raises for a path below an unresolved value.
 
 - **A duration past the float range is an error (extra-spec E21).**
   `get_duration` (and decoding into `int` / `float` with `Duration`) raises
