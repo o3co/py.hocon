@@ -112,9 +112,7 @@ def test_unquoted_number_reads_like_the_getter() -> None:
         d: Annotated[float, Duration("s")]
 
     assert cfg.decode(D) == D(b=cfg.get_bytes("b"), d=cfg.get_duration("d", "s"))
-    # Compare fields: constructing P(...) would run the markers on the values.
-    got = cfg.decode(P)
-    assert (got.b, got.d) == (65536, 1.5)
+    assert cfg.decode(P) == P(b=65536, d=1.5)
 
 
 # --- dataclass path ----------------------------------------------------------
@@ -299,6 +297,70 @@ def test_pydantic_plain_timedelta_keeps_pydantics_own_rules() -> None:
     assert cfg.decode(Plain).d == timedelta(seconds=1000)
     assert cfg.decode(Marked).d == timedelta(milliseconds=1000)
     assert parse_string("d = 30m").decode(Marked).d == timedelta(minutes=30)
+
+
+def test_pydantic_markers_act_only_inside_decode() -> None:
+    # Constructing a model, or validating its own dump, must not re-read the
+    # values as HOCON (90.0 would otherwise become 90 ms = 0.09 s).
+    class P(pydantic.BaseModel):
+        ttl: Annotated[float, Duration("s")]
+        cache: Annotated[float, Bytes("MiB")]
+        timeout: Annotated[timedelta, Duration()]
+
+    got = parse_string("ttl = 1.5m, cache = 512KiB, timeout = 30m").decode(P)
+    assert P(ttl=90.0, cache=0.5, timeout=timedelta(minutes=30)) == got
+    assert P.model_validate(got.model_dump()) == got
+    assert P.model_validate_json(got.model_dump_json()) == got
+    # Outside decode the field is its plain type: a unit string is not read.
+    with pytest.raises(pydantic.ValidationError):
+        P.model_validate({"ttl": "1.5m", "cache": 1, "timeout": 1})
+
+
+def test_pydantic_dataclass_converts_once() -> None:
+    @pydantic.dataclasses.dataclass
+    class PD:
+        ttl: Annotated[float, Duration("s")]
+        cache: Annotated[float, Bytes("MiB")]
+
+    assert parse_string("ttl = 1500, cache = 512KiB").decode(PD) == PD(ttl=1.5, cache=0.5)
+
+
+def test_marker_on_an_optional_constrained_type() -> None:
+    class P(pydantic.BaseModel):
+        v: Annotated[pydantic.PositiveInt | None, Bytes()] = None
+
+    @dataclass
+    class D:
+        v: Annotated[pydantic.PositiveInt | None, Bytes()]
+
+    assert parse_string("v = 1k").decode(P).v == 1024
+    assert parse_string("v = null").decode(P).v is None
+    assert parse_string("v = 1k").decode(D).v == 1024
+    with pytest.raises(pydantic.ValidationError, match="greater than 0"):
+        parse_string("v = 0").decode(P)
+
+
+def test_pydantic_rejects_two_markers() -> None:
+    with pytest.raises(TypeError, match="more than one unit marker"):
+
+        class P(pydantic.BaseModel):
+            v: Annotated[int, Bytes(), Duration()]
+
+
+def test_pydantic_boolean_message_matches_the_getter() -> None:
+    class P(pydantic.BaseModel):
+        v: Annotated[int, Bytes()]
+
+    with pytest.raises(pydantic.ValidationError, match="expected byte size, got boolean"):
+        parse_string("v = true").decode(P)
+
+
+def test_pydantic_timedelta_overflow_is_a_validation_error() -> None:
+    class P(pydantic.BaseModel):
+        t: Annotated[timedelta, Duration()]
+
+    with pytest.raises(pydantic.ValidationError, match="duration overflows"):
+        parse_string("t = 1000000000000 days").decode(P)
 
 
 def test_exponent_form_differs_between_paths() -> None:

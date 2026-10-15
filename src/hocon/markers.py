@@ -7,31 +7,37 @@ through the ``read_*`` functions in :mod:`hocon.coerce`. A marker owns only the
 HOCON unit syntax; constraints (integer, range, …) stay in the annotated type
 and any further metadata.
 
-The markers work in both decode paths:
+A marker acts only while :meth:`Config.decode` reads a config, in both decode
+paths:
 
-- dataclasses and the other hints :meth:`Config.decode` builds itself, where
-  the marker reads the scalar's source text exactly like the getter;
+- dataclasses and the other hints ``decode`` builds itself, where the marker
+  reads the scalar's source text exactly like the getter;
 - Pydantic v2 models, via ``__get_pydantic_core_schema__`` (pydantic is only
-  imported when Pydantic itself asks for the schema). Pydantic receives plain
-  values, so a number is read through its value rather than its source text:
-  a bare number in exponent form (``1e3``) reads as ``1000`` there, while the
-  getters and dataclass decoding reject it as an unknown unit ``e3``.
+  imported when Pydantic itself asks for the schema). Outside ``decode`` —
+  constructing a model, ``model_validate(model.model_dump())``, JSON — the
+  field validates as its plain type, so values never get converted twice.
+  Pydantic receives plain values, so a number is read through its value
+  rather than its source text: a bare number in exponent form (``1e3``)
+  reads as ``1000`` there, while the getters and dataclass decoding reject it
+  as an unknown unit ``e3``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 from types import UnionType
-from typing import Any, ClassVar, Union, get_args, get_origin
+from typing import Annotated, Any, ClassVar, Union, get_args, get_origin
 
 from .coerce import (
     UNIT_BYTE_SIZE,
     UNIT_DURATION,
     ByteUnit,
     DurationUnit,
-    UnitReadError,
     is_byte_unit,
     is_duration_unit,
     read_bytes,
@@ -39,17 +45,34 @@ from .coerce import (
     read_timedelta,
 )
 
-__all__ = ["Bytes", "Duration", "UnitMarker"]
+__all__ = ["Bytes", "Duration"]
+
+# True while Config.decode hands a config to Pydantic: the markers' validators
+# read HOCON values only then.
+_DECODING: ContextVar[bool] = ContextVar("hocon_decoding", default=False)
+# True while a marker builds the schema it wraps: a second marker on the same
+# type would otherwise read the first one's output as a raw unit value.
+_BUILDING: ContextVar[bool] = ContextVar("hocon_marker_building", default=False)
 
 
-class UnitMarker:
-    """Base of the unit markers. ``decode`` recognises any instance."""
+@contextmanager
+def _decoding() -> Iterator[None]:
+    token = _DECODING.set(True)
+    try:
+        yield
+    finally:
+        _DECODING.reset(token)
+
+
+class _UnitMarker:
+    """Base of the unit markers; ``decode`` recognises any instance. Not part
+    of the public API — subclass at your own risk."""
 
     what: ClassVar[str]
     targets: ClassVar[tuple[type, ...]]
 
     def read(self, raw: str) -> float:
-        """The value in this marker's unit. Raises :class:`UnitReadError`."""
+        """The value in this marker's unit. Raises ``UnitReadError``."""
         raise NotImplementedError
 
     def to_target(self, raw: str, target: type) -> int | float | timedelta:
@@ -60,9 +83,10 @@ class UnitMarker:
         return int(n) if float(n).is_integer() else n
 
     def resolve_target(self, target: Any) -> type:
-        """The concrete type this marker decodes into, with ``Optional``
-        stripped. Raises ``TypeError`` for a type the marker cannot produce."""
-        inner = _strip_optional(target)
+        """The concrete type this marker decodes into, with ``Optional`` and
+        nested ``Annotated`` unwrapped. Raises ``TypeError`` for a type the
+        marker cannot produce."""
+        inner = _concrete(target)
         if not (isinstance(inner, type) and inner in self.targets):
             names = " / ".join(t.__name__ for t in self.targets)
             raise TypeError(f"{self!r} decodes into {names}, not {target!r}")
@@ -71,18 +95,25 @@ class UnitMarker:
     def __get_pydantic_core_schema__(self, source_type: Any, handler: Any) -> Any:
         from pydantic_core import core_schema
 
+        if _BUILDING.get():
+            raise TypeError(f"more than one unit marker on {source_type!r}")
         target = self.resolve_target(source_type)
 
         def validate(value: object) -> object:
-            if value is None or isinstance(value, timedelta):
-                return value  # Optional's None, or an already-built value
+            if not _DECODING.get() or value is None:
+                return value  # outside Config.decode, or Optional's None
             return self.to_target(_raw_of(value, self.what), target)
 
-        return core_schema.no_info_before_validator_function(validate, handler(source_type))
+        token = _BUILDING.set(True)
+        try:
+            inner_schema = handler(source_type)
+        finally:
+            _BUILDING.reset(token)
+        return core_schema.no_info_before_validator_function(validate, inner_schema)
 
 
 @dataclass(frozen=True)
-class Bytes(UnitMarker):
+class Bytes(_UnitMarker):
     """Read a HOCON byte size (``64KiB``) in ``unit`` (default bytes), with
     :meth:`Config.get_bytes`' rules. Annotate ``int`` or ``float``."""
 
@@ -100,7 +131,7 @@ class Bytes(UnitMarker):
 
 
 @dataclass(frozen=True)
-class Duration(UnitMarker):
+class Duration(_UnitMarker):
     """Read a HOCON duration (``30m``) with :meth:`Config.get_duration`' rules.
     Annotate ``int`` / ``float`` for a number in ``unit`` (default ms), or
     ``timedelta`` (``unit`` then has no effect)."""
@@ -123,13 +154,19 @@ class Duration(UnitMarker):
         return super().to_target(raw, target)
 
 
-def _strip_optional(target: Any) -> Any:
-    origin = get_origin(target)
-    if origin is Union or origin is UnionType:
-        non_none = [a for a in get_args(target) if a is not type(None)]
-        if len(non_none) == 1:
-            return non_none[0]
-    return target
+def _concrete(target: Any) -> Any:
+    """``target`` with ``Optional[...]`` and ``Annotated[...]`` peeled off."""
+    while True:
+        origin = get_origin(target)
+        if origin is Annotated:
+            target = get_args(target)[0]
+        elif origin is Union or origin is UnionType:
+            non_none = [a for a in get_args(target) if a is not type(None)]
+            if len(non_none) != 1:
+                return target
+            target = non_none[0]
+        else:
+            return target
 
 
 def _raw_of(value: object, what: str) -> str:
@@ -137,8 +174,10 @@ def _raw_of(value: object, what: str) -> str:
     positionally (``1e-07`` → ``0.0000001``) so the reader sees digits only."""
     if isinstance(value, str):
         return value
-    if isinstance(value, int) and not isinstance(value, bool):
+    if isinstance(value, bool):
+        raise ValueError(f"expected {what}, got boolean")
+    if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
         return format(Decimal(repr(value)), "f")
-    raise UnitReadError(what, "invalid", repr(value))
+    raise ValueError(f"expected {what}, got {type(value).__name__}")

@@ -38,7 +38,7 @@ from .coerce import (
 )
 from .config import Config, Period, _hocon_to_py, _read_unit_scalar, _scalar_to_py
 from .errors import ConfigError
-from .markers import UnitMarker
+from .markers import _decoding, _UnitMarker
 from .numeric_array import numeric_object_to_array
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue
 
@@ -86,7 +86,8 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
     # plain object to the model's own validator, which handles its own nesting.
     validate = getattr(target, "model_validate", None)
     if callable(validate):
-        return validate(_hocon_to_py(node))
+        with _decoding():  # unit markers in the model read HOCON values
+            return validate(_hocon_to_py(node))
 
     if issubclass(target, Enum):
         sc = _as_nonnull_scalar(node, target, path)
@@ -114,7 +115,7 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
 def _decode_annotated(node: HoconValue, target: Any, path: str) -> Any:
     # get_args flattens nested Annotated: (base, *metadata).
     base, *metadata = get_args(target)
-    markers = [m for m in metadata if isinstance(m, UnitMarker)]
+    markers = [m for m in metadata if isinstance(m, _UnitMarker)]
     if not markers:
         return decode_node(node, base, path)  # metadata for someone else
     if len(markers) > 1:
@@ -130,8 +131,8 @@ def _decode_annotated(node: HoconValue, target: Any, path: str) -> Any:
     value = _read_unit_scalar(sc, path, marker.what, lambda raw: marker.to_target(raw, inner))
     if inner is int and not isinstance(value, int):
         raise ConfigError(f"expected int at {_p(path)}, got {value!r} from {sc.raw!r}", path)
-    if inner is float:
-        return float(value)  # type: ignore[arg-type]
+    if inner is float and isinstance(value, (int, float)):
+        return float(value)
     return value
 
 

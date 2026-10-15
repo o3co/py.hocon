@@ -261,6 +261,10 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
 - エラーにはキーのパスが入ります (`invalid byte size at server.max-body:
   '64KB'`)。Pydantic モデルでは、そのフィールドの位置の validation error に
   なります。
+- marker が働くのは `Config.decode` が config を読むときだけです。Pydantic
+  モデルを直接構築したときや、`model_validate(model.model_dump())`、JSON の
+  round-trip では、フィールドは素の型として検証されるので、値が二重に変換
+  されることはありません (`Limits(max_body=65536)` は `65536` のまま)。
 - Pydantic モデルには素の値が渡るため、数値はソースのテキストではなく値として
   読まれます。指数表記の単位なし数値 (`1e3`) は Pydantic では `1000` になり、
   getter と dataclass の decode ではエラーです。単位を付けて書いた値は、

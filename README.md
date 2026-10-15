@@ -271,6 +271,10 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   `dict[str, ...]` positions work.
 - Errors carry the key path (`invalid byte size at server.max-body: '64KB'`);
   in a Pydantic model they are validation errors at the field's location.
+- A marker acts only while `Config.decode` reads a config. Constructing a
+  Pydantic model, `model_validate(model.model_dump())` and JSON round-trips
+  validate the field as its plain type, so values are never converted twice
+  (`Limits(max_body=65536)` stays `65536`).
 - Pydantic models receive plain values, so there a number is read through its
   value rather than its source text: a bare number in exponent form (`1e3`)
   reads as `1000`, while the getters and dataclass decoding reject it. Values
