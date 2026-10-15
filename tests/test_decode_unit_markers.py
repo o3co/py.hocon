@@ -471,12 +471,18 @@ def test_duration_past_the_float_range_is_an_error_in_both_paths() -> None:
     class D:
         v: Annotated[float, Duration()]
 
+    @dataclass
+    class DI:
+        v: Annotated[int, Duration("s")]
+
     class P(pydantic.BaseModel):
         v: Annotated[float, Duration("ns")]
 
     cfg = parse_string(f"v = {huge}")
     with pytest.raises(ConfigError, match="duration overflows .* at v"):
         cfg.decode(D)
+    with pytest.raises(ConfigError, match="duration overflows .* at v"):
+        cfg.decode(DI)
     with pytest.raises(pydantic.ValidationError, match="duration overflows"):
         cfg.decode(P)
 

@@ -415,7 +415,8 @@ Lightbend の表どおり大文字小文字を区別します: `B`/`b`、`kB` (1
 まで、小文字の長形式 (`kilobytes`、`mebibytes` など)、1 文字の 2 の冪は大文字・
 小文字の両方 (`K`/`k`、S21.4)。計算は正確な 10 進数で行います (E20): `1.001s` は
 ちょうど `1001` ms、小数の byte サイズは正確な積を 0 方向に切り捨てます
-(`1.0009kB` は `1000` bytes)。
+(`1.0009kB` は `1000` bytes)。float の範囲を超える duration はエラーで、`inf` には
+なりません (E21)。
 
 `get_period` (仕様 S20.1–S20.4) は `Period(years, months, days)` (frozen
 dataclass、rs.hocon の `Period` struct 準拠) を返します。単位: `d`/`day`/`days`

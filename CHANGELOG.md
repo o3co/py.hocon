@@ -26,7 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A duration past the float range is an error (extra-spec E21).**
   `get_duration` (and decoding into `int` / `float` with `Duration`) raises
-  `ConfigError("duration overflows the representable range …")` instead of
+  `ConfigError("duration overflows the representable range …")` (a
+  `ValidationError` with that message in Pydantic models) instead of
   returning `inf` / `-inf` — for `10^400` days and `"1<400 zeros>.5d"` alike
   (fixtures ud12 / ud13). Decoding into `timedelta` already raised past its
   own range.
