@@ -101,5 +101,5 @@ jobs:
       - name: Publish to PyPI
         # Trusted Publishing (OIDC) — no API token. Requires this repo +
         # workflow file to be registered as a trusted publisher for the
-        # `py.hocon` project on PyPI before the first release.
+        # `hocon-parser` project on PyPI (the dist name in pyproject.toml).
         uses: pypa/gh-action-pypi-publish@release/v1

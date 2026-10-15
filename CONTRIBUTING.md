@@ -59,7 +59,8 @@ once to fetch the corpus (git-ignored); the suite skips gracefully if it is abse
   snake_case accessor names)
 - New features must include tests; spec-relevant changes should add or update a
   conformance fixture in xx.hocon, not just a local test
-- Modules under `hocon._internal` are **not** part of the public API
+- Modules under `hocon._internal`, and `hocon.coerce`, are **not** part of the
+  public API
 - Preserve cross-language parity: this parser mirrors
   [ts.hocon](https://github.com/o3co/ts.hocon)'s 3-stage pipeline
   (Lexer → Parser → Resolver). A spec-behavior change here should be reconciled
@@ -72,6 +73,34 @@ once to fetch the corpus (git-ignored); the suite skips gracefully if it is abse
 3. Ensure `make check` passes (ruff + mypy --strict + pytest)
 4. Update `CHANGELOG.md` under `[Unreleased]` for any user-facing change
 5. Open a PR against `main` with a clear description of what and why
+
+## Releasing
+
+**The tag is the version.** `pyproject.toml` stays at `version = "0.0.0"` on
+`main`; the release workflow (`.github/workflows/release.yml`) writes the real
+version from the tag before it builds. Do not bump `pyproject.toml` in a PR
+(the workflow skips the rewrite when the two already agree, but the manifest
+is not where a version is decided).
+
+1. **Release-prep PR** against `main`, with a commit `chore(release): X.Y.Z`
+   that renames `## [Unreleased]` in `CHANGELOG.md` to
+   `## [X.Y.Z] - YYYY-MM-DD` and opens a new empty `## [Unreleased]` above it.
+   Run `make testdata` first (the conformance suite skips without the corpus;
+   release CI fetches xx.hocon `main` at tag time), then `make check`, which
+   includes `tests/test_docs.py` (the doc gate: facts in `README.md`
+   recomputed from `pyproject.toml` and `docs/spec-compliance.md`).
+2. **Tag** the merged commit on `main` with `vX.Y.Z` and push the tag.
+3. **CI** (`release.yml`) then:
+   1. sets the version from the tag;
+   2. fetches the conformance corpus and runs mypy and the tests;
+   3. builds the sdist and wheel;
+   4. extracts the `## [X.Y.Z]` section of `CHANGELOG.md` as the release
+      notes — a missing section fails the run before anything is published;
+   5. creates the GitHub Release, then publishes `hocon-parser` to PyPI via
+      Trusted Publishing.
+
+> **Do not** upload to PyPI by hand. PyPI never accepts the same version
+> twice, so a release has to go through the gated workflow.
 
 ## License
 
