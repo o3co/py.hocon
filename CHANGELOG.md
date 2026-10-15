@@ -15,10 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Annotated[float, hocon.Duration("s")]` a duration (`30m`) with the getters'
   rules, in `Config.decode` dataclasses and in Pydantic v2 models (through
   `__get_pydantic_core_schema__`; pydantic is still never imported unless
-  Pydantic asks for the schema). Errors carry the key path; constraints stay in
-  the annotated type. A marker acts only inside `Config.decode`: constructing
-  a model or validating its own dump leaves values as they are. In Pydantic
-  models a bare number in exponent form
+  Pydantic asks for the schema). Errors carry the key path; constraints stay
+  in the annotated type. A marker acts only on the values `Config.decode`
+  reads from a config: constructing a model or validating its own dump leaves
+  values as they are. In Pydantic models a bare number in exponent form
   (`1e3`) reads through its value, while the getters and dataclass decoding
   read the source text and reject it.
 

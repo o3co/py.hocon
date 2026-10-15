@@ -316,6 +316,51 @@ def test_pydantic_markers_act_only_inside_decode() -> None:
         P.model_validate({"ttl": "1.5m", "cache": 1, "timeout": 1})
 
 
+def test_pydantic_values_built_in_python_during_decode_are_left_alone() -> None:
+    # Only the values decode hands to Pydantic are HOCON values; a model a
+    # default_factory or a validator builds during decode is plain Python.
+    class Inner(pydantic.BaseModel):
+        ttl: Annotated[float, Duration("s")]
+        t: Annotated[timedelta, Duration()]
+
+    class Outer(pydantic.BaseModel):
+        inner: Inner = pydantic.Field(
+            default_factory=lambda: Inner(ttl=90.0, t=timedelta(seconds=5))
+        )
+        size: Annotated[int, Bytes()]
+        echo: Annotated[float, Duration("s")] = 0.0
+
+        @pydantic.model_validator(mode="after")
+        def _rebuild(self) -> "Outer":
+            Inner(ttl=2.0, t=timedelta(seconds=1))  # must not be re-read
+            return self
+
+    got = parse_string("size = 1k").decode(Outer)
+    assert got.inner == Inner(ttl=90.0, t=timedelta(seconds=5))
+    assert (got.size, got.echo) == (1024, 0.0)
+
+
+def test_pydantic_validate_default_reads_the_default_as_hocon() -> None:
+    # validate_default makes the default part of decode's validation, so it is
+    # read like a HOCON value: write it in HOCON form (documented).
+    class P(pydantic.BaseModel):
+        model_config = pydantic.ConfigDict(validate_default=True)
+        ttl: Annotated[float, Duration("s")] = "1.5m"  # type: ignore[assignment]
+        t: Annotated[timedelta, Duration()] = timedelta(seconds=5)
+
+    got = parse_string("{}").decode(P)
+    assert (got.ttl, got.t) == (90.0, timedelta(seconds=5))
+
+
+def test_pydantic_lazy_iterable_reads_under_the_decode_context() -> None:
+    from collections.abc import Iterable
+
+    class P(pydantic.BaseModel):
+        sizes: Iterable[Annotated[int, Bytes()]]
+
+    assert list(parse_string("sizes = [1k, 2k]").decode(P).sizes) == [1024, 2048]
+
+
 def test_pydantic_dataclass_converts_once() -> None:
     @pydantic.dataclasses.dataclass
     class PD:
@@ -341,10 +386,19 @@ def test_marker_on_an_optional_constrained_type() -> None:
 
 
 def test_pydantic_rejects_two_markers() -> None:
-    with pytest.raises(TypeError, match="more than one unit marker"):
+    with pytest.raises(TypeError, match="nested unit markers"):
 
         class P(pydantic.BaseModel):
             v: Annotated[int, Bytes(), Duration()]
+
+
+def test_dataclass_rejects_two_markers_through_optional() -> None:
+    @dataclass
+    class C:
+        v: Annotated[Annotated[int, Bytes()] | None, Duration()]
+
+    with pytest.raises(ConfigError, match="more than one unit marker"):
+        parse_string("v = 1k").decode(C)
 
 
 def test_pydantic_boolean_message_matches_the_getter() -> None:

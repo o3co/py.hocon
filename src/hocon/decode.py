@@ -38,7 +38,7 @@ from .coerce import (
 )
 from .config import Config, Period, _hocon_to_py, _read_unit_scalar, _scalar_to_py
 from .errors import ConfigError
-from .markers import _decoding, _UnitMarker
+from .markers import PYDANTIC_CONTEXT_KEY, _markers_in
 from .numeric_array import numeric_object_to_array
 from .value import HoconArray, HoconObject, HoconScalar, HoconValue
 
@@ -84,10 +84,13 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
 
     # Pydantic v2 (duck-typed so pydantic is never imported): hand the decoded
     # plain object to the model's own validator, which handles its own nesting.
+    # A real Pydantic model gets the validation context under which the unit
+    # markers read HOCON values; any other model_validate gets the object only.
     validate = getattr(target, "model_validate", None)
     if callable(validate):
-        with _decoding():  # unit markers in the model read HOCON values
-            return validate(_hocon_to_py(node))
+        if hasattr(target, "__pydantic_validator__"):
+            return validate(_hocon_to_py(node), context={PYDANTIC_CONTEXT_KEY: True})
+        return validate(_hocon_to_py(node))
 
     if issubclass(target, Enum):
         sc = _as_nonnull_scalar(node, target, path)
@@ -113,9 +116,8 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
 
 
 def _decode_annotated(node: HoconValue, target: Any, path: str) -> Any:
-    # get_args flattens nested Annotated: (base, *metadata).
-    base, *metadata = get_args(target)
-    markers = [m for m in metadata if isinstance(m, _UnitMarker)]
+    base = get_args(target)[0]
+    markers = _markers_in(target)  # through Optional / nested Annotated
     if not markers:
         return decode_node(node, base, path)  # metadata for someone else
     if len(markers) > 1:

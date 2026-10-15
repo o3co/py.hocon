@@ -7,15 +7,19 @@ through the ``read_*`` functions in :mod:`hocon.coerce`. A marker owns only the
 HOCON unit syntax; constraints (integer, range, …) stay in the annotated type
 and any further metadata.
 
-A marker acts only while :meth:`Config.decode` reads a config, in both decode
-paths:
+A marker acts only on the values :meth:`Config.decode` reads from a config,
+in both decode paths:
 
 - dataclasses and the other hints ``decode`` builds itself, where the marker
   reads the scalar's source text exactly like the getter;
 - Pydantic v2 models, via ``__get_pydantic_core_schema__`` (pydantic is only
-  imported when Pydantic itself asks for the schema). Outside ``decode`` —
-  constructing a model, ``model_validate(model.model_dump())``, JSON — the
-  field validates as its plain type, so values never get converted twice.
+  imported when Pydantic itself asks for the schema). ``decode`` marks its
+  ``model_validate`` call with a validation context, and the marker reads a
+  value only under it. Any other validation — constructing a model, a
+  ``default_factory``, ``model_validate(model.model_dump())``, JSON — sees the
+  field as its plain type, so values are not converted twice. A default
+  validated with ``validate_default=True`` is part of decode's validation and
+  is read as a HOCON value.
   Pydantic receives plain values, so a number is read through its value
   rather than its source text: a bare number in exponent form (``1e3``)
   reads as ``1000`` there, while the getters and dataclass decoding reject it
@@ -24,8 +28,6 @@ paths:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import timedelta
@@ -47,21 +49,12 @@ from .coerce import (
 
 __all__ = ["Bytes", "Duration"]
 
-# True while Config.decode hands a config to Pydantic: the markers' validators
-# read HOCON values only then.
-_DECODING: ContextVar[bool] = ContextVar("hocon_decoding", default=False)
+# The Pydantic validation context Config.decode passes to model_validate; the
+# markers' validators read HOCON values only under it.
+PYDANTIC_CONTEXT_KEY = "hocon.decode"
 # True while a marker builds the schema it wraps: a second marker on the same
 # type would otherwise read the first one's output as a raw unit value.
 _BUILDING: ContextVar[bool] = ContextVar("hocon_marker_building", default=False)
-
-
-@contextmanager
-def _decoding() -> Iterator[None]:
-    token = _DECODING.set(True)
-    try:
-        yield
-    finally:
-        _DECODING.reset(token)
 
 
 class _UnitMarker:
@@ -96,12 +89,15 @@ class _UnitMarker:
         from pydantic_core import core_schema
 
         if _BUILDING.get():
-            raise TypeError(f"more than one unit marker on {source_type!r}")
+            raise TypeError(f"nested unit markers on one type (inner: {source_type!r})")
         target = self.resolve_target(source_type)
 
-        def validate(value: object) -> object:
-            if not _DECODING.get() or value is None:
-                return value  # outside Config.decode, or Optional's None
+        def validate(value: object, info: Any) -> object:
+            context = info.context
+            if not (isinstance(context, dict) and context.get(PYDANTIC_CONTEXT_KEY)):
+                return value  # not a value Config.decode read from a config
+            if value is None or isinstance(value, timedelta):
+                return value  # Optional's None, or a validate_default timedelta
             return self.to_target(_raw_of(value, self.what), target)
 
         token = _BUILDING.set(True)
@@ -109,7 +105,7 @@ class _UnitMarker:
             inner_schema = handler(source_type)
         finally:
             _BUILDING.reset(token)
-        return core_schema.no_info_before_validator_function(validate, inner_schema)
+        return core_schema.with_info_before_validator_function(validate, inner_schema)
 
 
 @dataclass(frozen=True)
@@ -152,6 +148,25 @@ class Duration(_UnitMarker):
         if target is timedelta:
             return read_timedelta(raw)
         return super().to_target(raw, target)
+
+
+def _markers_in(target: Any) -> list[_UnitMarker]:
+    """Every unit marker on ``target``, through ``Optional`` and nested
+    ``Annotated`` (the same layers :func:`_concrete` peels)."""
+    found: list[_UnitMarker] = []
+    while True:
+        origin = get_origin(target)
+        if origin is Annotated:
+            base, *metadata = get_args(target)
+            found += [m for m in metadata if isinstance(m, _UnitMarker)]
+            target = base
+        elif origin is Union or origin is UnionType:
+            non_none = [a for a in get_args(target) if a is not type(None)]
+            if len(non_none) != 1:
+                return found
+            target = non_none[0]
+        else:
+            return found
 
 
 def _concrete(target: Any) -> Any:
