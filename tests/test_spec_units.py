@@ -308,3 +308,20 @@ class TestE21DurationOverflow:
         assert read_duration(value) == 1e305
         with pytest.raises(UnitReadError, match="duration overflows"):
             read_duration(value, "ns")
+
+
+class TestS18_1NumberValueDefaultUnit:
+    """S18.1 — a number value (unquoted) takes the default unit, through the
+    same reader as a string: ms for durations, bytes for byte sizes."""
+
+    def test_number_duration_is_milliseconds(self) -> None:
+        cfg = parse("t = 500, f = 1.5")
+        assert cfg.get_duration("t") == 500.0
+        assert cfg.get_duration("t", "s") == 0.5
+        assert cfg.get_duration("f") == 1.5
+
+    def test_number_byte_size_is_bytes(self) -> None:
+        cfg = parse("b = 1024, f = 1024.9")
+        assert cfg.get_bytes("b") == 1024
+        assert cfg.get_bytes("f") == 1024  # truncated toward zero (S21.5)
+        assert cfg.get_bytes("b", "KiB") == 1.0
