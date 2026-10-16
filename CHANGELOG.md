@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`require_unit=True` on the unit markers (ts.hocon#233 parity).** A bare
+  number or a string of the number alone reads in the default unit (ms, bytes,
+  days), so a key migrated from `ttl-seconds = 30` to `ttl = 30` silently
+  becomes 30 ms. `Annotated[int, hocon.Duration("s", require_unit=True)]`
+  (and `hocon.Bytes(..., require_unit=True)`) makes the unit part of the
+  field's contract: a number (`ttl = 30`, `1e3`) or a string without a unit
+  (`"30"`, as an environment variable gives it) is a `ConfigError` at the key,
+  or a Pydantic validation error at the field — `duration must name its unit
+  at ttl`, without the value. `30s`, `"30 s"`, `"1e3ms"`, `64KiB` read as
+  before, and a value that does not read keeps its own error (the reader runs
+  first). Whether a unit is named is decided by the readers' own split. The
+  option is keyword-only and off by default; the getters have none.
+- **`hocon.PeriodUnit` marker.** `Annotated[hocon.Period, hocon.PeriodUnit()]`
+  reads a period with `get_period`'s rules in both decode paths — the first
+  way to read a HOCON period in a Pydantic model — and
+  `PeriodUnit(require_unit=True)` refuses a bare integer (`7`, `"7"`), which
+  would otherwise be days. A plain `Period` field in a dataclass reads as
+  before.
+
 ## [1.14.1] - 2026-10-16
 
 **Patch.** `Config.decode` reads an `Enum` field the way the getters do (an

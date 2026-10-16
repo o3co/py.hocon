@@ -18,7 +18,7 @@ from .errors import (
     ParseError,
     ResolveError,
 )
-from .markers import Bytes, Duration
+from .markers import Bytes, Duration, PeriodUnit
 from .parse import parse, parse_file, parse_string
 from .value import (
     HoconArray,
@@ -60,6 +60,7 @@ __all__ = [
     "PackageLookupError",
     "ParseError",
     "Period",
+    "PeriodUnit",
     "ResolveError",
     "ScalarValueType",
     "__version__",

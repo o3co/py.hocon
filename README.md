@@ -197,8 +197,8 @@ The dataclass fields match the kebab-case keys (`max_body` reads `max-body`), an
   `cfg.get(path, default)`, iteration, `len`, `dict(cfg)`, `**cfg`
 - Typed decoding: `cfg.decode(MyDataclass)` — recursive dataclass
   construction (kebab-case/camelCase key matching, defaults, `Optional`,
-  `list[T]` / `dict[str, T]`, `timedelta` durations, `Enum`, byte sizes and
-  durations via `Annotated[int, hocon.Bytes()]` markers) and Pydantic v2
+  `list[T]` / `dict[str, T]`, `timedelta` durations, `Enum`, byte sizes,
+  durations and periods via `Annotated[int, hocon.Bytes()]` markers) and Pydantic v2
   delegation via `model_validate`
 - HOCON emitter: `cfg.render_hocon()` renders a resolved config back to
   HOCON text with a round-trip guarantee (parsing the output reproduces the
@@ -318,11 +318,12 @@ from the value at `path`), mirroring go.hocon's `Unmarshal` / `UnmarshalPath`:
   between booleans and numbers (`"yes"` does not match `1`), so an Enum whose
   values are all strings, and its `_missing_` hook, only see strings.
 
-#### Unit values: `hocon.Bytes` / `hocon.Duration`
+#### Unit values: `hocon.Bytes` / `hocon.Duration` / `hocon.PeriodUnit`
 
-Annotate a field with a unit marker to read a HOCON byte size or duration with
-the same rules as `get_bytes` / `get_duration` (units are case-sensitive, a
-bare number is bytes / ms, byte sizes are non-negative). The marker owns only
+Annotate a field with a unit marker to read a HOCON byte size, duration or
+period with the same rules as `get_bytes` / `get_duration` / `get_period`
+(units are case-sensitive, a bare number is bytes / ms / days, byte sizes are
+non-negative, periods are integers). The marker owns only
 the unit syntax; constraints stay in the type:
 
 ```python
@@ -339,6 +340,8 @@ class Server:
     cache: Annotated[float, hocon.Bytes("MiB")]      # "512KiB" → 0.5
     timeout: Annotated[timedelta, hocon.Duration()]  # "30m" → 0:30:00
     retry_s: Annotated[float, hocon.Duration("s")]   # "1.5m" → 90.0
+    billing: Annotated[hocon.Period, hocon.PeriodUnit()]  # "1m" → 1 month
+    ttl_s: Annotated[int, hocon.Duration("s", require_unit=True)]  # "30s" → 30; 30 → error
 
 class Limits(BaseModel):  # the same markers work in Pydantic v2 models
     max_body: Annotated[int, hocon.Bytes(), Field(gt=1024)]
@@ -348,8 +351,19 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   annotates `int`, `float`, or `timedelta`. `unit` is an output-unit token
   (`KB`, not `kB`; see [Durations, Periods, and Byte
   Sizes](#durations-periods-and-byte-sizes)). An `int` field rejects a
-  fractional result (`"512B"` in `KiB`). `Optional`, `list[...]` and
+  fractional result (`"512B"` in `KiB`). `PeriodUnit()` annotates
+  `hocon.Period`; a plain `Period` field reads the same in a dataclass, and the
+  marker is how a Pydantic model reads one. `Optional`, `list[...]` and
   `dict[str, ...]` positions work.
+- `require_unit=True` (keyword-only, default `False`, on every marker) refuses
+  a value that does not name its unit: a number (`ttl = 30`, `1e3`) or a
+  string of the number alone (`"30"`, which is what an environment variable
+  gives). Without it such a value reads in the default unit, so a key moved
+  from `ttl-seconds = 30` to `ttl = 30` silently becomes 30 ms. `30s`,
+  `"30 s"`, `"1e3ms"`, `64KiB` and `2w` read as before. The value is read
+  first, so one that does not read keeps its own error; the message for a
+  missing unit leaves the value out (`duration must name its unit at ttl`).
+  The getters have no such option.
 - Errors carry the key path (`invalid byte size at server.max-body: '64KB'`);
   in a Pydantic model they are validation errors at the field's location.
 - A marker acts only on the values `Config.decode` reads from a config (for

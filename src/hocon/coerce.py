@@ -4,7 +4,7 @@ byte sizes.
 **Internal module.** Nothing here is part of the public API, and names and
 signatures may change in any release. The public surface for unit values is
 the ``Config`` getters (``get_duration`` / ``get_bytes`` / ``get_period``) and
-the ``hocon.Duration`` / ``hocon.Bytes`` markers.
+the ``hocon.Duration`` / ``hocon.Bytes`` / ``hocon.PeriodUnit`` markers.
 
 The ``read_*`` functions are the single owner of each unit system's rules:
 the unit grammar plus its invariants (a byte size is non-negative, a period is
@@ -41,6 +41,8 @@ __all__ = [
     "coerce_number",
     "is_byte_unit",
     "is_duration_unit",
+    "names_magnitude_unit",
+    "names_period_unit",
     "parse_bytes",
     "parse_duration",
     "parse_period",
@@ -183,6 +185,14 @@ def _split_unit_value(value: str) -> tuple[Decimal, str] | None:
     return mantissa.scaleb(exponent, _context(mantissa, 0)), unit
 
 
+def names_magnitude_unit(raw: str) -> bool:
+    """Whether a duration or byte size names its unit (``30s``, ``"64 KiB"``,
+    ``1E``), as the readers split it: a bare number (``30``, ``"30"``,
+    ``"1e3"``) does not. Only meaningful for a text the reader accepts."""
+    split = _split_unit_value(raw)
+    return split is not None and split[1] != ""
+
+
 # Unit conversions run in Decimal (E20). A duration is the exact product,
 # rounded to float once (`1.001s` is 1001.0 ms, not 1000.9999999999999); a byte
 # size is the exact product truncated toward zero to whole bytes, then
@@ -237,6 +247,22 @@ _I32_MIN = -(2**31)
 _I32_MAX = 2**31 - 1
 
 
+def _split_period_value(value: str) -> tuple[str, str]:
+    """A period's leading sign-and-digit run and its unit text, both trimmed."""
+    trimmed = _trim_hocon_ws(value)
+    i = 0
+    while i < len(trimmed) and (("0" <= trimmed[i] <= "9") or trimmed[i] in "+-"):
+        i += 1
+    return trimmed[:i], _trim_hocon_ws(trimmed[i:])
+
+
+def names_period_unit(raw: str) -> bool:
+    """Whether a period names its unit (``7d``, ``"2 w"``), as
+    :func:`parse_period` splits it: a bare integer, which is days, does not.
+    Only meaningful for a text the reader accepts."""
+    return _split_period_value(raw)[1] != ""
+
+
 def parse_period(value: str) -> tuple[int, int, int] | None:
     """Parse a HOCON period string into a ``(years, months, days)`` tuple.
 
@@ -246,14 +272,7 @@ def parse_period(value: str) -> tuple[int, int, int] | None:
     integer-only per Lightbend ``Integer.parseInt`` — fractional strings like
     ``"7.5"`` return None (up03), unlike duration/bytes which accept them.
     """
-    trimmed = _trim_hocon_ws(value)
-    if not trimmed:
-        return None
-    i = 0
-    while i < len(trimmed) and (("0" <= trimmed[i] <= "9") or trimmed[i] in "+-"):
-        i += 1
-    num_str = trimmed[:i]
-    unit = _trim_hocon_ws(trimmed[i:])
+    num_str, unit = _split_period_value(value)
     if not num_str:
         return None
     try:
@@ -378,7 +397,9 @@ def parse_bytes(value: str, output_unit: ByteUnit | None = None) -> float:
     return _to_float(_context(out, _FLOAT_GUARD_DIGITS).divide(out, _dec(divisor)))
 
 
-UnitProblem = Literal["invalid", "negative", "overflow"]
+# "missing-unit" is not a reader's problem: the value reads, but the caller
+# asked for its unit to be written (a marker's ``require_unit``).
+UnitProblem = Literal["invalid", "negative", "overflow", "missing-unit"]
 
 # The unit systems' names, as they appear in error messages.
 UNIT_DURATION = "duration"
@@ -394,6 +415,10 @@ class UnitReadError(ValueError):
     The reader does not know the key path; callers attach it with
     :meth:`describe`. A ``ValueError`` so that validators which wrap value
     errors (Pydantic) report it with their own location.
+
+    A ``"missing-unit"`` message leaves the value out: the value reads, so the
+    message is all a reader of the log needs, and a value set under the wrong
+    key can be a secret.
     """
 
     def __init__(self, what: str, problem: UnitProblem, raw: str) -> None:
@@ -404,6 +429,8 @@ class UnitReadError(ValueError):
 
     def describe(self, path: str | None = None) -> str:
         at = f" at {path}" if path is not None else ""
+        if self.problem == "missing-unit":
+            return f"{self.what} must name its unit{at}"
         if self.problem == "negative":
             return f"{self.what} must be non-negative{at}: {self.raw!r}"
         if self.problem == "overflow":

@@ -486,7 +486,8 @@ class Config(Mapping[str, Any]):
         are ignored, and int fields accept whole-number floats (wholeness
         derived from the decimal text). ``timedelta`` fields parse HOCON
         durations; :class:`Period` fields parse periods; ``Annotated[int,
-        hocon.Bytes()]`` / ``hocon.Duration()`` markers read unit values.
+        hocon.Bytes()]`` / ``hocon.Duration()`` / ``hocon.PeriodUnit()``
+        markers read unit values.
 
         Raises :class:`NotResolvedError` when the decoded subtree still
         contains unresolved substitutions, and :class:`ConfigError` on a

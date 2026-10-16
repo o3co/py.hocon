@@ -1,11 +1,20 @@
 """Typing markers that read HOCON unit values in typed decoding.
 
-``Annotated[int, Bytes()]`` reads a byte size (``64KiB``) and
-``Annotated[float, Duration("s")]`` reads a duration (``30m``) with the same
-rules as :meth:`Config.get_bytes` / :meth:`Config.get_duration`: both read
-through the ``read_*`` functions in :mod:`hocon.coerce`. A marker owns only the
-HOCON unit syntax; constraints (integer, range, …) stay in the annotated type
-and any further metadata.
+``Annotated[int, Bytes()]`` reads a byte size (``64KiB``),
+``Annotated[float, Duration("s")]`` a duration (``30m``) and
+``Annotated[Period, PeriodUnit()]`` a period (``2w``) with the same rules as
+:meth:`Config.get_bytes` / :meth:`Config.get_duration` /
+:meth:`Config.get_period`: all read through the ``read_*`` functions in
+:mod:`hocon.coerce`. A marker owns only the HOCON unit syntax; constraints
+(integer, range, …) stay in the annotated type and any further metadata.
+
+``require_unit=True`` on any marker refuses a value that does not name its
+unit — a number (``ttl = 30``) or a string of the number alone (``"30"``, what
+an environment variable gives) — which would otherwise read in the default
+unit (ms, bytes, days). The value is read first, so one that does not read
+keeps its own error; whether a unit is named is decided by the reader's own
+split (:func:`hocon.coerce.names_magnitude_unit` /
+:func:`hocon.coerce.names_period_unit`). The getters have no such option.
 
 A marker acts only on the values :meth:`Config.decode` reads from a config,
 in both decode paths:
@@ -32,7 +41,7 @@ in both decode paths:
 from __future__ import annotations
 
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import timedelta
 from decimal import Decimal
 from types import UnionType
@@ -41,16 +50,22 @@ from typing import Annotated, Any, ClassVar, Union, get_args, get_origin
 from .coerce import (
     UNIT_BYTE_SIZE,
     UNIT_DURATION,
+    UNIT_PERIOD,
     ByteUnit,
     DurationUnit,
+    UnitReadError,
     is_byte_unit,
     is_duration_unit,
+    names_magnitude_unit,
+    names_period_unit,
     read_bytes,
     read_duration,
+    read_period,
     read_timedelta,
 )
+from .config import Period
 
-__all__ = ["Bytes", "Duration"]
+__all__ = ["Bytes", "Duration", "PeriodUnit"]
 
 # The Pydantic validation context Config.decode passes to model_validate; the
 # markers' validators read HOCON values only under it.
@@ -66,17 +81,26 @@ class _UnitMarker:
 
     what: ClassVar[str]
     targets: ClassVar[tuple[type, ...]]
+    require_unit: bool  # a keyword-only dataclass field on each marker
 
-    def read(self, raw: str) -> float:
-        """The value in this marker's unit. Raises ``UnitReadError``."""
+    def to_target(self, raw: str, target: type) -> object:
+        """Read ``raw`` for a ``target`` from :meth:`resolve_target`. Raises
+        ``UnitReadError``."""
         raise NotImplementedError
 
-    def to_target(self, raw: str, target: type) -> int | float | timedelta:
-        """Read ``raw`` for a ``target`` from :meth:`resolve_target`. A whole
-        result comes back as ``int`` so an ``int`` target needs no rounding;
-        a fractional one stays ``float`` and the target type decides."""
-        n = self.read(raw)
-        return int(n) if float(n).is_integer() else n
+    def names_unit(self, raw: str) -> bool:
+        """Whether ``raw`` names its unit, as this marker's reader splits it."""
+        raise NotImplementedError
+
+    def read_scalar(self, raw: str, target: type, *, number: bool) -> object:
+        """Read a scalar's text for ``target``; ``number`` says the scalar is a
+        number, which never names a unit. The reader runs first, so a value
+        that does not read keeps its own error; then ``require_unit`` refuses
+        one that names no unit. Raises ``UnitReadError``."""
+        value = self.to_target(raw, target)
+        if self.require_unit and (number or not self.names_unit(raw)):
+            raise UnitReadError(self.what, "missing-unit", raw)
+        return value
 
     def resolve_target(self, target: Any) -> type:
         """The concrete type this marker decodes into, with ``Optional`` and
@@ -99,9 +123,10 @@ class _UnitMarker:
             context = info.context
             if not (isinstance(context, dict) and context.get(PYDANTIC_CONTEXT_KEY)):
                 return value  # not a value Config.decode read from a config
-            if value is None or isinstance(value, timedelta):
-                return value  # Optional's None, or a validate_default timedelta
-            return self.to_target(_raw_of(value, self.what), target)
+            if value is None or isinstance(value, (timedelta, Period)):
+                return value  # Optional's None, or a validate_default timedelta / Period
+            raw = _raw_of(value, self.what)  # str, int or float past this point
+            return self.read_scalar(raw, target, number=not isinstance(value, str))
 
         token = _BUILDING.set(True)
         try:
@@ -111,16 +136,36 @@ class _UnitMarker:
         return core_schema.with_info_before_validator_function(validate, inner_schema)
 
 
+class _MagnitudeMarker(_UnitMarker):
+    """A marker that reads a number in an output unit (duration, byte size)."""
+
+    def read(self, raw: str) -> float:
+        """The value in this marker's unit. Raises ``UnitReadError``."""
+        raise NotImplementedError
+
+    def to_target(self, raw: str, target: type) -> int | float | timedelta:
+        """A whole result comes back as ``int`` so an ``int`` target needs no
+        rounding; a fractional one stays ``float`` and the target type decides."""
+        n = self.read(raw)
+        return int(n) if float(n).is_integer() else n
+
+    def names_unit(self, raw: str) -> bool:
+        return names_magnitude_unit(raw)
+
+
 @dataclass(frozen=True)
-class Bytes(_UnitMarker):
+class Bytes(_MagnitudeMarker):
     """Read a HOCON byte size (``64KiB``) in ``unit`` (default bytes), with
     :meth:`Config.get_bytes`' rules. Annotate ``int`` or ``float``.
 
     ``unit`` is an output-unit token (``B`` / ``KB`` / ``KiB`` / ``MB`` /
     ``MiB`` / ``GB`` / ``GiB`` / ``TB`` / ``TiB``), not a config spelling:
-    ``Bytes("kB")`` raises ``ValueError``."""
+    ``Bytes("kB")`` raises ``ValueError``. ``require_unit=True`` refuses a
+    value that does not name its unit (``1024``, ``"1024"``), which would
+    otherwise read as bytes."""
 
     unit: ByteUnit = "B"
+    require_unit: bool = field(default=False, kw_only=True)
 
     what: ClassVar[str] = UNIT_BYTE_SIZE
     targets: ClassVar[tuple[type, ...]] = (int, float)
@@ -134,16 +179,18 @@ class Bytes(_UnitMarker):
 
 
 @dataclass(frozen=True)
-class Duration(_UnitMarker):
+class Duration(_MagnitudeMarker):
     """Read a HOCON duration (``30m``) with :meth:`Config.get_duration`' rules.
     Annotate ``int`` / ``float`` for a number in ``unit`` (default ms), or
     ``timedelta`` (``unit`` then has no effect).
 
     ``unit`` is an output-unit token (``ns`` / ``us`` / ``ms`` / ``s`` / ``m``
     / ``h`` / ``d``), not a config spelling: ``Duration("seconds")`` raises
-    ``ValueError``."""
+    ``ValueError``. ``require_unit=True`` refuses a value that does not name
+    its unit (``30``, ``"30"``), which would otherwise read as milliseconds."""
 
     unit: DurationUnit = "ms"
+    require_unit: bool = field(default=False, kw_only=True)
 
     what: ClassVar[str] = UNIT_DURATION
     targets: ClassVar[tuple[type, ...]] = (int, float, timedelta)
@@ -159,6 +206,28 @@ class Duration(_UnitMarker):
         if target is timedelta:
             return read_timedelta(raw)
         return super().to_target(raw, target)
+
+
+@dataclass(frozen=True)
+class PeriodUnit(_UnitMarker):
+    """Read a HOCON period (``2w``) with :meth:`Config.get_period`' rules.
+    Annotate :class:`~hocon.Period`.
+
+    A plain ``Period`` field already reads a period in a dataclass; the marker
+    is how a Pydantic model reads one, and how either asks for the unit:
+    ``require_unit=True`` refuses a value that does not name its unit (``7``,
+    ``"7"``), which would otherwise read as days."""
+
+    require_unit: bool = field(default=False, kw_only=True)
+
+    what: ClassVar[str] = UNIT_PERIOD
+    targets: ClassVar[tuple[type, ...]] = (Period,)
+
+    def to_target(self, raw: str, target: type) -> Period:
+        return Period(*read_period(raw))
+
+    def names_unit(self, raw: str) -> bool:
+        return names_period_unit(raw)
 
 
 def _markers_in(target: Any) -> list[_UnitMarker]:
