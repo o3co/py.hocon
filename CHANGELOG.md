@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-10-16
+
+**Patch.** `Config.decode` reads an `Enum` field the way the getters do (an
+env-var `"8080"` for an `IntEnum`), and the README states that a Pydantic
+model does not read a numeric-keyed object as a list (#56). No value that
+decoded on 1.14.0 changes.
+
 ### Fixed
 
 - **`Config.decode`: an `Enum` field reads a value the way the getters do.**
