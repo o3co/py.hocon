@@ -292,7 +292,7 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
   モデル側に任せます。
 - **対応ヒント**: ネストした dataclass、`list[T]` (S15 数値キーオブジェクト
   含む)、`dict[str, T]`、`Optional[T]` / `T | None`、`Any`、
-  `str` / `bool` / `int` / `float`、`Enum` (値 → 名前の順)、
+  `str` / `bool` / `int` / `float`、`Enum` (下記)、
   `datetime.timedelta` (HOCON duration、例 `"10s"`)、`Period`、`Config`
   (サブツリーを動的なまま保持)。`cls` 自体も任意の対応式でよく、
   `cfg.decode(list[Server], path="servers")` のように使えます。
@@ -300,6 +300,13 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
   `str` は非 null スカラーの raw テキストを受理、`int` は整数値の float を
   受理し、整数性は 10 進テキストから判定します (`3.0` → `3`、`2.5` → エラー)。
   HOCON `null` は optional なフィールドにしか decode されません。
+- **`Enum`** のメンバーは、書かれたとおりの値 → 名前 → getter と同じ規則による
+  スカラーの別の読み方での値、の順で探します: 文字列の `"8080"` (クォート、または
+  環境変数) は `IntEnum` のメンバー `8080` に、`yes` は値 `True` のメンバーに、
+  非クォートの `5` は値 `"5"` のメンバーに一致します。書かれたとおりの値や名前で
+  一致するものはその一致のままです。変換した読み方は、その種類の値を持つメンバーが
+  あるときだけ試し、真偽値と数値をまたいだ一致はしません (`"yes"` は `1` に
+  一致しない)。値がすべて文字列の Enum と、その `_missing_` には文字列だけが渡ります。
 
 #### 単位つきの値: `hocon.Bytes` / `hocon.Duration`
 

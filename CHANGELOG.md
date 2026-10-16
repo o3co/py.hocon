@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Config.decode`: an `Enum` field reads a value the way the getters do.**
+  An `IntEnum` field given a string, such as an env var (`port = ${PORT}` with
+  `PORT=8080`) or a quoted `"8080"`, failed with `invalid Port`, though
+  `get_int` and Pydantic read it; and a literal `5` did not match a member
+  valued `"5"`. A member is now looked up by value as written, then by name
+  (both as before), then by value through the scalar's number, boolean, and
+  text readings. A coerced reading is tried only when some member's value is
+  of its kind, and never crosses between booleans and numbers (`"yes"` does
+  not match a member valued `1`), so an Enum whose values are all strings (and
+  its `_missing_` hook) is only asked about strings. Values that decoded
+  before decode to the same member.
+
 ## [1.14.0] - 2026-10-16
 
 A minor release that contains breaking spec fixes (marked **BREAKING**
