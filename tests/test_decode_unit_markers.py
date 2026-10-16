@@ -18,7 +18,7 @@ import pydantic
 import pytest
 
 import hocon
-from hocon import Bytes, ConfigError, Duration, parse_string
+from hocon import Bytes, ConfigError, Duration, PeriodUnit, parse_string
 
 # --- parity: getter == dataclass decode == Pydantic decode -------------------
 
@@ -500,3 +500,292 @@ def test_exponent_form_reads_the_same_in_every_path(text: str) -> None:
 
     cfg = parse_string(text)
     assert cfg.get_bytes("v") == cfg.decode(D).v == cfg.decode(P).v == 1000
+
+
+# --- PeriodUnit ----------------------------------------------------------------
+
+_PERIOD_CASES = ["2w", "7d", "3 m", "1y", "7", "-3d", "7.5", "1 W", "3000000000", "lots"]
+
+
+@pytest.mark.parametrize("text", _PERIOD_CASES)
+def test_period_parity_with_get_period(text: str) -> None:
+    cfg = parse_string(f'v = "{text}"')
+
+    @dataclass
+    class D:
+        v: Annotated[hocon.Period, PeriodUnit()]
+
+    @dataclass
+    class Plain:
+        v: hocon.Period
+
+    class P(pydantic.BaseModel):
+        v: Annotated[hocon.Period, PeriodUnit()]
+
+    getter = _outcome(lambda: cfg.get_period("v"))
+    via_plain = _outcome(lambda: cfg.decode(Plain).v)
+    via_dataclass = _outcome(lambda: cfg.decode(D).v)
+    via_pydantic = _outcome(lambda: cfg.decode(P).v)
+    assert getter[0] == via_plain[0] == via_dataclass[0] == via_pydantic[0]
+    if getter[0] == "ok":
+        assert getter[1] == via_plain[1] == via_dataclass[1] == via_pydantic[1]
+
+
+def test_period_unit_targets_period_only() -> None:
+    @dataclass
+    class D:
+        v: Annotated[int, PeriodUnit()]
+
+    with pytest.raises(ConfigError, match="decodes into Period"):
+        parse_string("v = 2w").decode(D)
+    with pytest.raises(TypeError, match="decodes into Period"):
+
+        class P(pydantic.BaseModel):
+            v: Annotated[int, PeriodUnit()]
+
+
+# --- require_unit (o3co/ts.hocon#233 parity) -----------------------------------
+
+# One field per unit system: (annotation, a value that names its unit, what it
+# reads as, the value a bare 30 reads as without the option).
+_REQUIRE_UNIT_SYSTEMS: dict[str, tuple[Any, Any, Any]] = {
+    "duration": (
+        Annotated[float, Duration("s", require_unit=True)],
+        Annotated[float, Duration("s")],
+        30 / 1000,
+    ),
+    "timedelta": (
+        Annotated[timedelta, Duration(require_unit=True)],
+        Annotated[timedelta, Duration()],
+        timedelta(milliseconds=30),
+    ),
+    "byte size": (
+        Annotated[int, Bytes(require_unit=True)],
+        Annotated[int, Bytes()],
+        30,
+    ),
+    "period": (
+        Annotated[hocon.Period, PeriodUnit(require_unit=True)],
+        Annotated[hocon.Period, PeriodUnit()],
+        hocon.Period(0, 0, 30),
+    ),
+}
+
+_WHAT = {"duration": "duration", "timedelta": "duration", "byte size": "byte size",
+         "period": "period"}
+
+
+def _decoders(annotation: Any) -> dict[str, Any]:
+    """``cfg -> value of v`` through the dataclass path and the Pydantic path."""
+
+    @dataclass
+    class D:
+        v: annotation  # type: ignore[valid-type]
+
+    class P(pydantic.BaseModel):
+        v: annotation  # type: ignore[valid-type]
+
+    return {"dataclass": lambda cfg: cfg.decode(D).v, "pydantic": lambda cfg: cfg.decode(P).v}
+
+
+def _missing_unit_message(error: Exception) -> str:
+    if isinstance(error, pydantic.ValidationError):
+        (err,) = error.errors()
+        assert err["loc"] == ("v",)
+        return str(err["msg"])
+    return str(error)
+
+
+_BARE = [
+    pytest.param("v = 30", None, id="number"),
+    pytest.param('v = "30"', None, id="string"),
+    pytest.param("v = ${?V}", {"V": "30"}, id="env"),
+    pytest.param('v = "1e3"', None, id="exponent-string"),
+    pytest.param("v = 1e3", None, id="exponent-number"),
+    pytest.param('v = " 30 "', None, id="padded"),
+]
+
+
+@pytest.mark.parametrize("path", ["dataclass", "pydantic"])
+@pytest.mark.parametrize("system", list(_REQUIRE_UNIT_SYSTEMS))
+@pytest.mark.parametrize(("text", "env"), _BARE)
+def test_require_unit_refuses_a_value_without_its_unit(
+    text: str, env: dict[str, str] | None, system: str, path: str
+) -> None:
+    annotation = _REQUIRE_UNIT_SYSTEMS[system][0]
+    cfg = parse_string(text, env=env)
+    if system == "period" and "1e3" in text:
+        expected = "invalid period"  # integer-only: the reader refuses it first
+    else:
+        expected = f"{_WHAT[system]} must name its unit"
+    with pytest.raises((ConfigError, pydantic.ValidationError)) as e:
+        _decoders(annotation)[path](cfg)
+    message = _missing_unit_message(e.value)
+    assert expected in message
+    if path == "dataclass":
+        assert isinstance(e.value, ConfigError)
+        assert e.value.path == "v"
+        assert " at v" in message
+
+
+_WITH_UNIT: dict[str, list[tuple[str, Any]]] = {
+    "duration": [("30s", 30.0), ('"30 s"', 30.0), ('"1e3ms"', 1.0), ("1.5m", 90.0)],
+    "timedelta": [("30s", timedelta(seconds=30)), ('"1e3ms"', timedelta(seconds=1))],
+    "byte size": [("64KiB", 65536), ('"64 KiB"', 65536), ('"1e3B"', 1000), ("1k", 1024)],
+    "period": [("2w", hocon.Period(0, 0, 14)), ('"2 w"', hocon.Period(0, 0, 14)),
+               ("3m", hocon.Period(0, 3, 0)), ("1y", hocon.Period(1, 0, 0))],
+}
+
+
+@pytest.mark.parametrize("path", ["dataclass", "pydantic"])
+@pytest.mark.parametrize(
+    ("system", "text", "expected"),
+    [(s, t, x) for s, cases in _WITH_UNIT.items() for t, x in cases],
+)
+def test_require_unit_reads_a_value_with_its_unit(
+    system: str, text: str, expected: Any, path: str
+) -> None:
+    annotation = _REQUIRE_UNIT_SYSTEMS[system][0]
+    assert _decoders(annotation)[path](parse_string(f"v = {text}")) == expected
+
+
+def test_require_unit_reads_an_env_value_with_its_unit() -> None:
+    cfg = parse_string("v = ${?V}", env={"V": "30s"})
+    for read in _decoders(Annotated[float, Duration("s", require_unit=True)]).values():
+        assert read(cfg) == 30.0
+
+
+# The reader runs first: a value that does not read keeps its own error, even
+# when it also names no unit.
+_OWN_ERRORS = [
+    ("duration", 'v = "5 parsecs"', "invalid duration"),
+    ("duration", 'v = "1 S"', "invalid duration"),
+    ("duration", 'v = "1e400"', "duration overflows"),
+    ("timedelta", 'v = "1e20d"', "duration overflows"),
+    ("byte size", "v = 64KB", "invalid byte size"),
+    ("byte size", "v = -1k", "byte size must be non-negative"),
+    ("byte size", "v = -5", "byte size must be non-negative"),
+    ("byte size", "v = 10PB", "byte size overflows"),
+    ("period", "v = 7.5", "invalid period"),
+    ("period", 'v = "3000000000"', "invalid period"),
+    ("period", 'v = "1 W"', "invalid period"),
+]
+
+
+@pytest.mark.parametrize("path", ["dataclass", "pydantic"])
+@pytest.mark.parametrize(("system", "text", "expected"), _OWN_ERRORS)
+def test_require_unit_keeps_the_readers_own_errors(
+    system: str, text: str, expected: str, path: str
+) -> None:
+    annotation = _REQUIRE_UNIT_SYSTEMS[system][0]
+    with pytest.raises((ConfigError, pydantic.ValidationError)) as e:
+        _decoders(annotation)[path](parse_string(text))
+    message = _missing_unit_message(e.value)
+    assert expected in message
+    assert "must name its unit" not in message
+
+
+@pytest.mark.parametrize("path", ["dataclass", "pydantic"])
+@pytest.mark.parametrize("system", list(_REQUIRE_UNIT_SYSTEMS))
+@pytest.mark.parametrize("text", ["v = ${?V}", "v = 31337"])
+def test_require_unit_message_leaves_the_value_out(system: str, text: str, path: str) -> None:
+    # A value set under the wrong key can be a secret; the message names the
+    # problem and the path only.
+    annotation = _REQUIRE_UNIT_SYSTEMS[system][0]
+    cfg = parse_string(text, env={"V": "31337"})
+    with pytest.raises((ConfigError, pydantic.ValidationError)) as e:
+        _decoders(annotation)[path](cfg)
+    message = _missing_unit_message(e.value)
+    assert "31337" not in message
+    if path == "dataclass":
+        assert message == f"{_WHAT[system]} must name its unit at v"
+    else:
+        assert message == f"Value error, {_WHAT[system]} must name its unit"
+
+
+@pytest.mark.parametrize("path", ["dataclass", "pydantic"])
+@pytest.mark.parametrize("system", list(_REQUIRE_UNIT_SYSTEMS))
+def test_require_unit_off_reads_a_bare_number_in_the_default_unit(system: str, path: str) -> None:
+    _, annotation, expected = _REQUIRE_UNIT_SYSTEMS[system]
+    for text in ("v = 30", 'v = "30"'):
+        assert _decoders(annotation)[path](parse_string(text)) == expected
+
+
+def test_require_unit_leaves_the_getters_alone() -> None:
+    cfg = parse_string('d = 30, b = "30", p = 30')
+    assert cfg.get_duration("d") == 30
+    assert cfg.get_bytes("b") == 30
+    assert cfg.get_period("p") == hocon.Period(0, 0, 30)
+
+
+def test_require_unit_with_optional_and_defaults() -> None:
+    marker = Duration("s", require_unit=True)
+
+    @dataclass
+    class D:
+        a: Annotated[float | None, marker]
+        b: Annotated[float, marker] | None
+        c: Annotated[hocon.Period | None, PeriodUnit(require_unit=True)] = None
+
+    class P(pydantic.BaseModel):
+        a: Annotated[float | None, marker]
+        b: Annotated[float, marker] | None
+        c: Annotated[hocon.Period | None, PeriodUnit(require_unit=True)] = None
+
+    cfg = parse_string("a = null, b = null")
+    assert cfg.decode(D) == D(a=None, b=None)
+    assert cfg.decode(P) == P(a=None, b=None)
+    cfg = parse_string("a = 1s, b = 2s, c = 1w")
+    assert cfg.decode(D) == D(a=1.0, b=2.0, c=hocon.Period(0, 0, 7))
+    assert cfg.decode(P) == P(a=1.0, b=2.0, c=hocon.Period(0, 0, 7))
+    with pytest.raises(ConfigError, match="duration must name its unit at b"):
+        parse_string("a = 1s, b = 2").decode(D)
+    with pytest.raises(ConfigError, match="null cannot decode"):
+
+        @dataclass
+        class Required:
+            v: Annotated[float, marker]
+
+        parse_string("v = null").decode(Required)
+
+
+def test_require_unit_in_containers() -> None:
+    @dataclass
+    class D:
+        sizes: list[Annotated[int, Bytes(require_unit=True)]]
+
+    assert parse_string("sizes = [1k, 2k]").decode(D) == D(sizes=[1024, 2048])
+    with pytest.raises(ConfigError, match=r"byte size must name its unit at sizes\[1\]"):
+        parse_string("sizes = [1k, 2048]").decode(D)
+
+
+def test_require_unit_is_keyword_only_and_part_of_the_marker() -> None:
+    with pytest.raises(TypeError):
+        Bytes("B", True)  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        PeriodUnit(True)  # type: ignore[misc]
+    assert Duration("s", require_unit=True) != Duration("s")
+    assert Duration().require_unit is False
+    assert PeriodUnit() == PeriodUnit(require_unit=False)
+    assert hocon.PeriodUnit is PeriodUnit
+    assert {Bytes(require_unit=True), Bytes(require_unit=True)} == {Bytes(require_unit=True)}
+
+
+@pytest.mark.parametrize(
+    ("text", "named"),
+    [("30s", True), ('"30 s"', True), ("1E", True), ("64KiB", True), ("30", False),
+     ("1e3", False), (" 30 ", False), ("1e3ms", True)],
+)
+def test_names_magnitude_unit_follows_the_readers_split(text: str, named: bool) -> None:
+    from hocon.coerce import names_magnitude_unit
+
+    assert names_magnitude_unit(text.strip('"')) is named
+
+
+@pytest.mark.parametrize(
+    ("text", "named"), [("2w", True), ("2 w", True), ("7", False), (" -7 ", False), ("+7d", True)]
+)
+def test_names_period_unit_follows_the_readers_split(text: str, named: bool) -> None:
+    from hocon.coerce import names_period_unit
+
+    assert names_period_unit(text) is named

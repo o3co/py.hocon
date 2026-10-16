@@ -120,7 +120,10 @@ def _decode_annotated(node: HoconValue, target: Any, path: str) -> Any:
     except TypeError as e:
         raise ConfigError(f"{e} at {_p(path)}", path) from None
     sc = _as_nonnull_scalar(node, base, path)
-    value = _read_unit_scalar(sc, path, marker.what, lambda raw: marker.to_target(raw, inner))
+    number = sc.value_type == "number"
+    value = _read_unit_scalar(
+        sc, path, marker.what, lambda raw: marker.read_scalar(raw, inner, number=number)
+    )
     if inner is int and not isinstance(value, int):
         raise ConfigError(f"expected int at {_p(path)}, got {value!r} from {sc.raw!r}", path)
     if inner is float and isinstance(value, (int, float)):

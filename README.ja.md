@@ -193,7 +193,7 @@ dataclass のフィールドは kebab-case のキーに一致し (`max_body` は
 - 型付き decode: `cfg.decode(MyDataclass)` — dataclass の再帰構築
   (kebab-case / camelCase のキーマッチ、default、`Optional`、`list[T]` /
   `dict[str, T]`、`timedelta` duration、`Enum`、`Annotated[int, hocon.Bytes()]`
-  marker による byte サイズ / duration) と Pydantic v2 への
+  marker による byte サイズ / duration / period) と Pydantic v2 への
   `model_validate` 委譲
 - HOCON emitter: `cfg.render_hocon()` は解決済みの config を HOCON テキストに戻し、
   round-trip を保証します (出力をパースし直すと値ツリーが再現される)
@@ -308,11 +308,12 @@ Mapping の意味論は `dict` に従います: 等価性は値ベース (`Confi
   あるときだけ試し、真偽値と数値をまたいだ一致はしません (`"yes"` は `1` に
   一致しない)。値がすべて文字列の Enum と、その `_missing_` には文字列だけが渡ります。
 
-#### 単位つきの値: `hocon.Bytes` / `hocon.Duration`
+#### 単位つきの値: `hocon.Bytes` / `hocon.Duration` / `hocon.PeriodUnit`
 
-フィールドに単位 marker を付けると、HOCON の byte サイズ / duration を
-`get_bytes` / `get_duration` と同じ規則で読みます (単位は大文字小文字を区別、
-単位なしの数値は bytes / ms、byte サイズは非負)。marker が受け持つのは単位の
+フィールドに単位 marker を付けると、HOCON の byte サイズ / duration / period を
+`get_bytes` / `get_duration` / `get_period` と同じ規則で読みます (単位は大文字
+小文字を区別、単位なしの数値は bytes / ms / 日、byte サイズは非負、period は
+整数)。marker が受け持つのは単位の
 構文だけで、制約は型の側に置きます:
 
 ```python
@@ -329,6 +330,8 @@ class Server:
     cache: Annotated[float, hocon.Bytes("MiB")]      # "512KiB" → 0.5
     timeout: Annotated[timedelta, hocon.Duration()]  # "30m" → 0:30:00
     retry_s: Annotated[float, hocon.Duration("s")]   # "1.5m" → 90.0
+    billing: Annotated[hocon.Period, hocon.PeriodUnit()]  # "1m" → 1 か月
+    ttl_s: Annotated[int, hocon.Duration("s", require_unit=True)]  # "30s" → 30、30 はエラー
 
 class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使える
     max_body: Annotated[int, hocon.Bytes(), Field(gt=1024)]
@@ -337,8 +340,18 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
 - `Bytes(unit="B")` は `int` / `float` に、`Duration(unit="ms")` は `int` /
   `float` / `timedelta` に付けます。`unit` は出力単位の token です (`kB` ではなく
   `KB`。[Duration / Period / Byte サイズ](#duration--period--byte-サイズ) を参照)。`int` フィールドは結果が整数でなければ
-  エラーです (`"512B"` を `KiB` で読む場合など)。`Optional`、`list[...]`、
-  `dict[str, ...]` の中でも使えます。
+  エラーです (`"512B"` を `KiB` で読む場合など)。`PeriodUnit()` は
+  `hocon.Period` に付けます。dataclass では marker のない `Period` フィールドも
+  同じように読み、Pydantic モデルで period を読むにはこの marker を使います。
+  `Optional`、`list[...]`、`dict[str, ...]` の中でも使えます。
+- `require_unit=True` (キーワード専用、既定は `False`、どの marker にもある) は、
+  単位を書いていない値を拒否します: 数値 (`ttl = 30`、`1e3`) と、数値だけの
+  文字列 (`"30"`。環境変数はこの形で渡ります)。これがないと、そうした値は既定の
+  単位で読まれるので、`ttl-seconds = 30` から `ttl = 30` に移したキーは黙って
+  30 ms になります。`30s`、`"30 s"`、`"1e3ms"`、`64KiB`、`2w` はこれまでどおり
+  読みます。値は先に読まれるので、読めない値はそれ自身のエラーのままです。単位が
+  ないときのメッセージには値を入れません (`duration must name its unit at ttl`)。
+  getter にはこのオプションはありません。
 - エラーにはキーのパスが入ります (`invalid byte size at server.max-body:
   '64KB'`)。Pydantic モデルでは、そのフィールドの位置の validation error に
   なります。
