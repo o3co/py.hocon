@@ -361,6 +361,10 @@ class Limits(BaseModel):  # Pydantic v2 モデルでも同じ marker が使え�
   読まれます。結果は同じです (`1e3` はどの経路でも `1000`)。違うのは、float が
   保てる桁数より有効桁の多い非クォートの数値 (Pydantic には丸められた値が渡る) と、
   非クォートの `-0` (Pydantic には `0` が渡る) だけです。
+- 数値キーのオブジェクト (`xs { "0" = 5, "1" = 6 }`) は Pydantic モデルには
+  オブジェクトのまま渡るので、そこの `list[int]` フィールドは受け付けません。
+  dataclass の経路と `get_list` はリストとして読みます (S15)。配列で書くか、
+  dataclass に decode してください ([#56](https://github.com/o3co/py.hocon/issues/56))。
 - Pydantic モデルで marker のない `timedelta` フィールドは、Pydantic 自身の
   規則 (ISO 8601、単位なしの数値は秒) で読まれます。HOCON の duration として
   読むには `Annotated[timedelta, hocon.Duration()]` を使います。

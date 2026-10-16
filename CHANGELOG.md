@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its `_missing_` hook) is only asked about strings. Values that decoded
   before decode to the same member.
 
+### Documented
+
+- **`Config.decode`: a numeric-keyed object is not a list in a Pydantic
+  model.** The README now states that a Pydantic `list[...]` field refuses a
+  numeric-keyed object (`xs { "0" = 5 }`), which the dataclass path and
+  `get_list` read as a list (S15), and gives the workarounds. A fix is tracked
+  in [#56](https://github.com/o3co/py.hocon/issues/56).
+
 ## [1.14.0] - 2026-10-16
 
 A minor release that contains breaking spec fixes (marked **BREAKING**
