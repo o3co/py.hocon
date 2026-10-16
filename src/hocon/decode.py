@@ -20,6 +20,7 @@ go.hocon's ``hocon:"-"`` tag.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import MISSING, is_dataclass
 from dataclasses import fields as dataclass_fields
 from datetime import timedelta
@@ -93,18 +94,7 @@ def decode_node(node: HoconValue, target: Any, path: str) -> Any:
         return validate(_hocon_to_py(node))
 
     if issubclass(target, Enum):
-        sc = _as_nonnull_scalar(node, target, path)
-        value = _scalar_to_py(sc.raw, sc.value_type)
-        try:
-            return target(value)
-        except ValueError:
-            pass
-        try:
-            return target[sc.raw]
-        except KeyError:
-            raise ConfigError(
-                f"invalid {target.__name__} at {_p(path)}: {sc.raw!r}", path
-            ) from None
+        return _decode_enum(node, target, path)
 
     if is_dataclass(target):
         return _decode_dataclass(node, target, path)
@@ -184,6 +174,82 @@ def _decode_dataclass(node: HoconValue, target: type, path: str) -> Any:
             raise ConfigError(f"missing required field at {missing}", missing)
         kwargs[f.name] = decode_node(child, hints.get(f.name, Any), _child(path, found_key))
     return target(**kwargs)
+
+
+def _decode_enum(node: HoconValue, target: type[Enum], path: str) -> Any:
+    """Enum member for a scalar: exact matches first, then the coerced readings.
+
+    1. by value, as written (``5`` → 5, ``true`` → True, ``low`` → "low");
+    2. by name (``HIGH``);
+    3. by value, through the scalar's other readings: its raw text (a literal
+       ``5`` matches a member valued ``"5"``), its number (an env-var or quoted
+       ``"5"`` matches a member valued 5, as ``get_int`` reads it), and its
+       boolean (``"yes"`` matches a member valued True, as ``get_boolean``
+       reads it). A coerced reading is tried only when some member's value is
+       of its kind, and never crosses between bool and number (``"yes"`` does
+       not match a member valued 1) — the getters keep the two apart, though
+       Python's ``True == 1`` would not.
+
+    Steps 1–2 are the order this function had before the coerced readings were
+    added, so a value that matched then still matches the same member.
+    """
+    sc = _as_nonnull_scalar(node, target, path)
+    written = _scalar_to_py(sc.raw, sc.value_type)
+    try:
+        return target(written)
+    except ValueError:
+        pass
+    try:
+        return target[sc.raw]
+    except KeyError:
+        pass
+    # A reading is tried only when some member's value is of its kind, so the
+    # Enum (and its `_missing_` hook, often written for strings) is only asked
+    # about a value of a kind it holds; the member found must be of that kind
+    # too (an IntFlag builds a pseudo-member valued True for `True`).
+    kinds = {_value_kind(m.value) for m in target.__members__.values()}
+    for reading in _enum_readings(sc.raw, kinds):
+        if type(reading) is type(written) and reading == written:
+            continue  # step 1 already tried it
+        try:
+            member = target(reading)
+        except ValueError:
+            continue
+        # An IntFlag with boundary=EJECT gives a plain int for a value outside
+        # its mask: not a member.
+        if isinstance(member, target) and _value_kind(member.value) == _value_kind(reading):
+            return member
+    raise ConfigError(f"invalid {target.__name__} at {_p(path)}: {sc.raw!r}", path)
+
+
+def _enum_readings(raw: str, kinds: set[str]) -> Iterator[object]:
+    """The scalar's text, number and boolean readings, of the kinds in ``kinds``.
+
+    A reading is computed only when an Enum member holds a value of its kind, and
+    a number that cannot be read (past Python's int digit limit) is no reading.
+    """
+    if "other" in kinds:
+        yield raw
+    if "number" in kinds:
+        try:
+            n = coerce_number(raw)
+        except ValueError:
+            n = None
+        if n is not None:
+            yield n
+    if "bool" in kinds:
+        b = coerce_boolean(raw)
+        if b is not None:
+            yield b
+
+
+def _value_kind(v: object) -> str:
+    """``bool``, ``number`` or ``other`` — the getters keep bool and number apart."""
+    if isinstance(v, bool):
+        return "bool"
+    if isinstance(v, (int, float)):
+        return "number"
+    return "other"
 
 
 def _decode_scalar(node: HoconValue, target: type, path: str) -> Any:

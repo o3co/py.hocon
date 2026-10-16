@@ -300,7 +300,7 @@ from the value at `path`), mirroring go.hocon's `Unmarshal` / `UnmarshalPath`:
   themselves.
 - **Supported hints**: nested dataclasses, `list[T]` (S15 numeric-keyed
   objects included), `dict[str, T]`, `Optional[T]` / `T | None`, `Any`,
-  `str` / `bool` / `int` / `float`, `Enum` (by value, then by name),
+  `str` / `bool` / `int` / `float`, `Enum` (see below),
   `datetime.timedelta` (HOCON durations, e.g. `"10s"`), `Period`, and
   `Config` (keeps a subtree dynamic). `cls` itself may be any supported
   expression, e.g. `cfg.decode(list[Server], path="servers")`.
@@ -309,6 +309,14 @@ from the value at `path`), mirroring go.hocon's `Unmarshal` / `UnmarshalPath`:
   whole-number floats with wholeness derived from the decimal text
   (`3.0` → `3`, `2.5` → error). HOCON `null` only decodes into an
   optional field.
+- **`Enum`** members are looked up by value as written, then by name, then by
+  value through the scalar's other readings with the getters' rules: a string
+  `"8080"` (quoted, or from an env var) matches an `IntEnum` member `8080`,
+  `yes` a member valued `True`, and an unquoted `5` a member valued `"5"`. A
+  value that matches as written or by name keeps that match. A coerced reading
+  is tried only when some member's value is of its kind and never crosses
+  between booleans and numbers (`"yes"` does not match `1`), so an Enum whose
+  values are all strings, and its `_missing_` hook, only see strings.
 
 #### Unit values: `hocon.Bytes` / `hocon.Duration`
 

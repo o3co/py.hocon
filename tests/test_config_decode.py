@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import timedelta
-from enum import Enum
+from enum import EJECT, Enum, IntEnum, IntFlag
 from typing import Any, Optional
 
 import pytest
@@ -31,6 +31,29 @@ class Level(Enum):
 
     LOW = "low"
     HIGH = "high"
+
+
+class Port(IntEnum):
+    HTTP = 80
+    ALT = 8080
+
+
+class Code(Enum):
+    """String values that read as numbers / booleans in HOCON text."""
+
+    FIVE = "5"
+    YES = "true"
+
+
+class Clash(Enum):
+    """Values and names that collide, to pin the lookup order."""
+
+    INT = 5
+    STR = "5"
+    A = "B"  # value "B" is also the name of the next member
+    B = "b"
+    on = "enabled"  # a name that is also a boolean spelling
+    FLAG = True
 
 
 @dataclass
@@ -289,6 +312,103 @@ def test_enum_by_value_and_by_name() -> None:
     assert parse_string("level = HIGH").decode(C).level is Level.HIGH
     with pytest.raises(ConfigError, match="Level"):
         parse_string("level = nope").decode(C)
+
+
+@dataclass
+class HasPort:
+    port: Port
+
+
+def test_int_enum_from_number_string_and_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PY_HOCON_TEST_PORT", "8080")
+    assert parse_string("port = 8080").decode(HasPort).port is Port.ALT
+    # a string — quoted, or an env var — is read as a number, as get_int does
+    assert parse_string('port = "8080"').decode(HasPort).port is Port.ALT
+    assert parse_string("port = ${PY_HOCON_TEST_PORT}").decode(HasPort).port is Port.ALT
+    assert parse_string("port = 80.0").decode(HasPort).port is Port.HTTP
+    assert parse_string("port = HTTP").decode(HasPort).port is Port.HTTP
+    with pytest.raises(ConfigError, match=r"invalid Port at port: '81'"):
+        parse_string('port = "81"').decode(HasPort)
+
+
+def test_str_enum_from_number_and_boolean_literals() -> None:
+    # the literal's raw text matches a member whose value is that text
+    assert parse_string("a = 5").decode(Code, path="a") is Code.FIVE
+    assert parse_string("a = true").decode(Code, path="a") is Code.YES
+
+
+def test_enum_coerced_reading_keeps_bool_and_number_apart() -> None:
+    # get_int rejects "yes" and get_boolean rejects "1"; so does an enum
+    with pytest.raises(ConfigError, match="invalid Port"):
+        parse_string('a = "yes"').decode(Port, path="a")
+    with pytest.raises(ConfigError, match="invalid Clash"):
+        parse_string('a = "1"').decode(Clash, path="a")
+    assert parse_string('a = "yes"').decode(Clash, path="a") is Clash.FLAG
+
+
+class Mode(Enum):
+    """A `_missing_` hook written for strings, as such hooks usually are."""
+
+    FAST = "fast"
+    SAFE = "safe"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Mode | None:
+        return cls.__members__.get(str(value).upper()) if isinstance(value, str) else None
+
+
+class Perm(IntFlag):
+    READ = 1
+    WRITE = 2
+
+
+class EjectPerm(IntFlag, boundary=EJECT):
+    """Gives a plain int, not a member, for a value outside its mask."""
+
+    READ = 1
+    WRITE = 2
+
+
+def test_enum_coerced_reading_only_of_a_kind_the_enum_holds() -> None:
+    # Mode holds only strings: "5" / yes never reach _missing_ as 5 / True
+    for src in ('a = "5"', "a = yes", 'a = "yes"'):
+        with pytest.raises(ConfigError, match="invalid Mode"):
+            parse_string(src).decode(Mode, path="a")
+    assert parse_string("a = FAST").decode(Mode, path="a") is Mode.FAST
+    assert parse_string("a = Safe").decode(Mode, path="a") is Mode.SAFE  # via _missing_
+    # IntFlag(True) builds a pseudo-member valued True; "yes" is not a flag value
+    with pytest.raises(ConfigError, match="invalid Perm"):
+        parse_string("a = yes").decode(Perm, path="a")
+    assert parse_string('a = "2"').decode(Perm, path="a") is Perm.WRITE
+
+
+def test_enum_coerced_reading_failures_are_config_errors() -> None:
+    # past Python's int digit limit: no number reading, for any Enum
+    huge = '"' + "9" * 5000 + '"'
+    for enum in (Mode, Port):
+        with pytest.raises(ConfigError, match=f"invalid {enum.__name__}"):
+            parse_string(f"a = {huge}").decode(enum, path="a")
+    # an EJECT flag's plain int for an out-of-mask value is not a member
+    with pytest.raises(ConfigError, match="invalid EjectPerm"):
+        parse_string('a = "4"').decode(EjectPerm, path="a")
+    assert parse_string('a = "2"').decode(EjectPerm, path="a") is EjectPerm.WRITE
+
+
+def test_enum_lookup_order() -> None:
+    def dec(src: str) -> Clash:
+        return parse_string(src).decode(Clash, path="a")
+
+    # 1. by value as written: the number 5 and the string "5" are different values
+    assert dec("a = 5") is Clash.INT
+    assert dec('a = "5"') is Clash.STR
+    # 1 before 2: "B" is a member's value and another member's name
+    assert dec("a = B") is Clash.A
+    # 2. by name
+    assert dec("a = INT") is Clash.INT
+    # 2 before 3: "on" is a member's name and a boolean spelling of FLAG's value
+    assert dec("a = on") is Clash.on
+    # 3. by a coerced reading
+    assert dec("a = yes") is Clash.FLAG
 
 
 def test_numeric_keyed_object_as_list() -> None:
