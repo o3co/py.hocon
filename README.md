@@ -371,6 +371,10 @@ class Limits(BaseModel):  # the same markers work in Pydantic v2 models
   `1000` in every path) except for an unquoted number with more significant
   digits than a float holds, which Pydantic sees already rounded, and an
   unquoted `-0`, which Pydantic sees as `0`.
+- A numeric-keyed object (`xs { "0" = 5, "1" = 6 }`) reaches a Pydantic model
+  as an object, so a `list[int]` field there refuses it; the dataclass path and
+  `get_list` read it as a list (S15). Write the value as an array, or decode
+  into a dataclass ([#56](https://github.com/o3co/py.hocon/issues/56)).
 - A plain `timedelta` field in a Pydantic model keeps Pydantic's own parsing
   (ISO 8601, bare numbers as seconds); use `Annotated[timedelta,
   hocon.Duration()]` for HOCON durations.
