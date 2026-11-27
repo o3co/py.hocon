@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A substitution cycle written twice raised a `ParseError`** instead of
+  resolving (py counterpart of go.hocon#218 / rs.hocon#199, where it crashed
+  the process). For `a = ${?b}` / `b = ${?a}` written twice, the resolver
+  re-entered a key's saved prior forever until the recursion limit turned it
+  into "input is nested too deeply … or contains a cycle". A re-entry in an
+  unchanged in-progress state is now treated as an unbreakable cycle: an
+  optional substitution is nonexistent and a required one is a
+  `ResolveError`, as in Lightbend (`{}` and `UnresolvedSubstitution` for the
+  input above). Every input that loaded before reads the same. Some inputs
+  that hit the recursion limit (a cycle through string concatenation, for
+  example) now return a value that still differs from Lightbend's; that is
+  left to the resolver redesign in o3co/xx.hocon#67 / #125, which replaces
+  this interim guard.
 - **BREAKING (spec fix, S1.2.4): a raw control character inside a quoted
   string is a parse error ([xx.hocon#130](https://github.com/o3co/xx.hocon/issues/130)).**
   A raw C0 control character (U+0000–U+001F) inside a double-quoted string is
