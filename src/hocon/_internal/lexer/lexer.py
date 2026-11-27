@@ -366,6 +366,17 @@ class _Lexer:
         while self.pos < len(self.input) and self._peek() != '"':
             if self._peek() == "\n":
                 raise ParseError("unterminated string", open_line, open_col)
+            if self._peek() < " ":
+                # S1.2.4: JSON forbids a raw C0 control inside a quoted string,
+                # as Lightbend does. Triple-quoted and unquoted strings keep
+                # controls verbatim.
+                code = ord(self._peek())
+                raise ParseError(
+                    f"unescaped control character U+{code:04X} in quoted string; "
+                    f"use a backslash escape (\\u{code:04x})",
+                    self.line,
+                    self.col,
+                )
             if self._peek() == "\\":
                 esc_col = self.col
                 self._advance()  # consume '\'

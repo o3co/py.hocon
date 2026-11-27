@@ -116,7 +116,7 @@ Citation shorthand used on `tests:` lines:
   tests: error: subst-tokenize/st-err03 (short), st-err04 (non-hex)
   status: ✅
 - **S1.2.4** Unescaped control char / raw newline in quoted string is rejected — §Unchanged from JSON (L118)
-  tests: error: subst-tokenize/st-err07 (raw newline in quoted string)
+  tests: error: subst-tokenize/st-err07 (raw newline in quoted string); quoted-control/qc01–qc08 (tab / U+0001 / NUL / U+001F / CR in value, key, substitution-path and include position, xx.hocon#130); success: quoted-control/qc09–qc12 (escaped, DEL / C1, triple-quoted, unquoted); `tests/test_issue130_quoted_control.py` (full C0 sweep + positions + emitter escaping, E18 decision 5)
   status: ✅
 - **S1.2.5** Unterminated quoted string is rejected — §Unchanged from JSON (L118)
   tests: error: subst-tokenize/st-err06
