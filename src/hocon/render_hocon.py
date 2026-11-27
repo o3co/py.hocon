@@ -106,11 +106,15 @@ def _render_key(k: str) -> str:
     # the parser (and Lightbend: "include keyword is not followed by a quoted
     # string") rejects ``include = 1``, so the key must be quoted to
     # round-trip.
+    #
+    # A key always takes the JSON-quoted form (E18 decision 3), never triple
+    # quotes: this parser does not accept a triple-quoted key, so an LF key
+    # is written as ``"a\nb"``.
     if k == "include":
-        return _quote_string(k)
+        return _escape_quoted(k)
     if _SAFE_UNQUOTED_KEY_RE.fullmatch(k):
         return k
-    return _quote_string(k)
+    return _escape_quoted(k)
 
 
 # A string value that cannot be misread as another type: an identifier that is
@@ -129,25 +133,49 @@ def _render_string(s: str) -> str:
 
 def _quote_string(s: str) -> str:
     # A string containing newlines is triple-quoted when that is unambiguous
-    # and lossless: no embedded `"""`, no trailing `"`, and no carriage return
-    # (this lexer preserves a CR verbatim — as does Lightbend, probe
-    # 2026-08-19 — but an invisible raw CR inside triple quotes is ambiguous
-    # to readers and editors, so CR strings take the escaped form below).
-    if "\n" in s and "\r" not in s and '"""' not in s and not s.endswith('"'):
+    # and lossless: no embedded `"""`, no trailing `"`, and no C0 control
+    # other than LF and TAB (E18 decision 5). Raw controls are valid inside
+    # triple quotes (S9.1, and this lexer preserves CR verbatim per S9.2), but
+    # an invisible one is ambiguous to readers, so such strings take the
+    # escaped form below.
+    if (
+        "\n" in s
+        and '"""' not in s
+        and not s.endswith('"')
+        and _CONTROL_OTHER_THAN_LF_TAB_RE.search(s) is None
+    ):
         return f'"""{s}"""'
+    return _escape_quoted(s)
+
+
+def _escape_quoted(s: str) -> str:
+    """The JSON-quoted form of *s* (E18 decision 5)."""
     out = ['"']
     for ch in s:
-        if ch == '"':
-            out.append('\\"')
-        elif ch == "\\":
-            out.append("\\\\")
-        elif ch == "\n":
-            out.append("\\n")
-        elif ch == "\r":
-            out.append("\\r")
-        elif ch == "\t":
-            out.append("\\t")
+        short = _SHORT_ESCAPES.get(ch)
+        if short is not None:
+            out.append(short)
+        elif ch < " ":
+            # S1.2.4: a raw C0 control inside quotes is a parse error, so every
+            # other one is written as \u00xx (lowercase, as Lightbend's renderer
+            # does). DEL and C1 are legal and stay verbatim.
+            out.append(f"\\u{ord(ch):04x}")
         else:
             out.append(ch)
     out.append('"')
     return "".join(out)
+
+
+_SHORT_ESCAPES = {
+    '"': '\\"',
+    "\\": "\\\\",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+    "\b": "\\b",
+    "\f": "\\f",
+}
+
+
+# A C0 control (U+0000–U+001F) other than LF and TAB.
+_CONTROL_OTHER_THAN_LF_TAB_RE = re.compile("[\x00-\x08\x0b-\x1f]")

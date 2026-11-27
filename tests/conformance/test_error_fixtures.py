@@ -71,6 +71,9 @@ _FAMILY_ERROR: dict[str, tuple[type[Exception], ...]] = {
     "concat-errors": (ResolveError,),
     "env-var-list": (ResolveError,),
     "include-reservation": (ParseError,),
+    # S1.2.4: a raw control in a quoted string must fail in the lexer, not
+    # later (qc07's key exists, so only the lexer can reject it).
+    "quoted-control": (ParseError,),
     "self-ref-lookback": (ResolveError,),
 }
 
@@ -91,6 +94,8 @@ _KNOWN_GAPS: dict[str, str] = {}
 #   13 legacy -expected-error.json  (cycle, test13, st-err01–11)
 # + 22 .error sidecars             (ce×12, ev×2, ir×5, pw×1, sr×1, us×1)
 # +  3 per-impl overrides          (ce05, ir03, ir04)
+# quoted-control qc01–qc08 (xx.hocon#130) add 8 more once xx main carries
+# them; the floor stays at the pre-#130 census so CI keeps passing until then.
 _ERROR_FIXTURE_FLOOR = 38
 
 
