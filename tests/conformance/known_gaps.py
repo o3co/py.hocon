@@ -15,6 +15,11 @@ _XX123 = (
     "o3co/xx.hocon#123: py.hocon gives o = {} — an optional cycle through an "
     "object does not yet remove the enclosing substitution"
 )
+_XX123_WINDOW = (
+    "o3co/xx.hocon#123 (moved into the #67 window): py.hocon gives "
+    'db.url = "jdbc://" — ${db.host} in a concatenation inside the object is '
+    "dropped instead of reading the kept prior (localhost)"
+)
 _XX125 = (
     "o3co/xx.hocon#125: a value stack of 3+ layers loses its bottom layer "
     "(single saved prior); needs the multi-level prior (with #123)"
@@ -51,4 +56,5 @@ SUCCESS_KNOWN_GAPS: dict[str, str] = {
     "subst-removed-target/rq31-two-optionals-then-reference-pending-125": _XX125,
     "subst-removed-target/rq32-forward-reference-two-optionals-pending-125": _XX125,
     "subst-removed-target/rq33-self-ref-chain-then-reference-pending-125": _XX125,
+    "subst-removed-target/rq34-default-then-env-override-in-object-window": _XX123_WINDOW,
 }
