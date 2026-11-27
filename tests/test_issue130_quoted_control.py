@@ -72,7 +72,7 @@ class TestRawControlInQuotedStringRejected:
             hocon.parse_string('a = "x\ny"\n', env={})
 
 
-class TestControlCharsLegalOutsideSingleQuotes:
+class TestControlCharsLegalOutsideQuotedStrings:
     """The boundary the rejection must not cross."""
 
     @pytest.mark.parametrize(

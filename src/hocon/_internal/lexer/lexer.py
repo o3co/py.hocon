@@ -363,21 +363,24 @@ class _Lexer:
     def _read_quoted_string_body(self, open_line: int, open_col: int) -> str:
         """Read body of a quoted string. Opening ``"`` already consumed."""
         value = ""
-        while self.pos < len(self.input) and self._peek() != '"':
-            if self._peek() == "\n":
+        while self.pos < len(self.input):
+            ch = self.input[self.pos]
+            if ch == '"':
+                break
+            if ch == "\n":
                 raise ParseError("unterminated string", open_line, open_col)
-            if self._peek() < " ":
+            if ch < " ":
                 # S1.2.4: JSON forbids a raw C0 control inside a quoted string,
                 # as Lightbend does. Triple-quoted and unquoted strings keep
                 # controls verbatim.
-                code = ord(self._peek())
+                code = ord(ch)
                 raise ParseError(
                     f"unescaped control character U+{code:04X} in quoted string; "
                     f"use a backslash escape (\\u{code:04x})",
                     self.line,
                     self.col,
                 )
-            if self._peek() == "\\":
+            if ch == "\\":
                 esc_col = self.col
                 self._advance()  # consume '\'
                 if self.pos >= len(self.input):

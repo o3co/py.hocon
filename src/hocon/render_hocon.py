@@ -140,9 +140,9 @@ def _quote_string(s: str) -> str:
     # escaped form below.
     if (
         "\n" in s
-        and not _has_control_other_than_lf_tab(s)
         and '"""' not in s
         and not s.endswith('"')
+        and _CONTROL_OTHER_THAN_LF_TAB_RE.search(s) is None
     ):
         return f'"""{s}"""'
     return _escape_quoted(s)
@@ -177,6 +177,5 @@ _SHORT_ESCAPES = {
 }
 
 
-def _has_control_other_than_lf_tab(s: str) -> bool:
-    """Whether *s* holds a C0 control (U+0000–U+001F) other than LF and TAB."""
-    return any(ch < " " and ch not in "\n\t" for ch in s)
+# A C0 control (U+0000–U+001F) other than LF and TAB.
+_CONTROL_OTHER_THAN_LF_TAB_RE = re.compile("[\x00-\x08\x0b-\x1f]")
