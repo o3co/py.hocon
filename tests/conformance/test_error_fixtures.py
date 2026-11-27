@@ -121,6 +121,12 @@ _KNOWN_GAPS: dict[str, str] = {
             "rq29-include-fixed-up-removed-original-set",
         )
     },
+    # a.n = ${?a} closes a cycle over a prior object: py invents o from it.
+    "subst-removed-target/rq40-optional-closes-cycle-over-prior-object-window": (
+        "o3co/xx.hocon#123 (moved into the #67 window): an optional cycle over a "
+        "prior object is not removed, so the required ${a.n} resolves to an "
+        "invented value instead of raising"
+    ),
 }
 
 # On-disk error-fixture census at the time of writing (guard floor):

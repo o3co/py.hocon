@@ -20,6 +20,11 @@ _XX123_WINDOW = (
     'db.url = "jdbc://" — ${db.host} in a concatenation inside the object is '
     "dropped instead of reading the kept prior (localhost)"
 )
+_XX123_WINDOW_SIBLINGS = (
+    "o3co/xx.hocon#123 (moved into the #67 window): py.hocon gives "
+    'url = "jdbc://:5432" and db = {port = 5432} — one undefined optional '
+    "override per leaf drops db.host's default when db.port is merged in"
+)
 _XX125 = (
     "o3co/xx.hocon#125: a value stack of 3+ layers loses its bottom layer "
     "(single saved prior); needs the multi-level prior (with #123)"
@@ -47,6 +52,7 @@ SUCCESS_KNOWN_GAPS: dict[str, str] = {
             "io08-optional-path-reference",
             "io16-object-subst-merges-prior",
             "io18-scoped-prior-not-leaked",
+            "io20-self-ref-folded-under-included-concat",
         )
     },
     "optional-cycle-repeat/oc01-optional-cycle-twice": _XX128,
@@ -57,4 +63,7 @@ SUCCESS_KNOWN_GAPS: dict[str, str] = {
     "subst-removed-target/rq32-forward-reference-two-optionals-pending-125": _XX125,
     "subst-removed-target/rq33-self-ref-chain-then-reference-pending-125": _XX125,
     "subst-removed-target/rq34-default-then-env-override-in-object-window": _XX123_WINDOW,
+    "subst-removed-target/rq39-sibling-leaf-overrides-keep-defaults-window": (
+        _XX123_WINDOW_SIBLINGS
+    ),
 }
