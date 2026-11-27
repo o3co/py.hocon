@@ -87,8 +87,47 @@ _IMPL_OVERRIDE_ERRORS = (
 
 # Known gaps: the sidecar demands an error, but py.hocon accepts the input.
 # Each is a strict xfail, so an XPASS (the gap closed) fails the run for
-# triage. None at present (us15 closed by the E8 `+` reservation).
-_KNOWN_GAPS: dict[str, str] = {}
+# triage; an entry whose fixture is not on disk has no effect. (us15 closed by
+# the E8 `+` reservation.)
+_XX123 = (
+    "o3co/xx.hocon#123: a required substitution of a field removed by an "
+    "undefined optional is silently dropped instead of raising (S13.10)"
+)
+_XX115 = (
+    "o3co/xx.hocon#115: the including file's a = ${missing} under an included "
+    "object is not live (E16), so the unresolved required reference is not seen"
+)
+_KNOWN_GAPS: dict[str, str] = {
+    "include-optional-prior/io19-live-prior-required-missing": _XX115,
+    **{
+        f"subst-removed-target/{name}": _XX123
+        for name in (
+            "rq01-required-to-removed-field",
+            "rq02-forward-ref",
+            "rq03-both-optionals-undefined",
+            "rq04-array-element",
+            "rq05-string-concat",
+            "rq06-object-concat",
+            "rq07-array-concat",
+            "rq08-nested-path",
+            "rq09-optional-cycle",
+            "rq10-optional-self-ref",
+            "rq11-optional-closes-cycle",
+            "rq12-include-fixed-up-path",
+            "rq13-include-both-paths-removed",
+            "rq14-include-original-path-removed",
+            "rq15-merged-not-hidden",
+            "rq16-kept-prior-is-required-ref",
+            "rq29-include-fixed-up-removed-original-set",
+        )
+    },
+    # a.n = ${?a} closes a cycle over a prior object: py invents o from it.
+    "subst-removed-target/rq40-optional-closes-cycle-over-prior-object-window": (
+        "o3co/xx.hocon#123 (moved into the #67 window): an optional cycle over a "
+        "prior object is not removed, so the required ${a.n} resolves to an "
+        "invented value instead of raising"
+    ),
+}
 
 # On-disk error-fixture census at the time of writing (guard floor):
 #   13 legacy -expected-error.json  (cycle, test13, st-err01–11)
@@ -143,7 +182,13 @@ def _params() -> list:
         excs = _FAMILY_ERROR.get(family, _ANY_ERROR)
         marks = []
         if base in _KNOWN_GAPS:
-            marks.append(pytest.mark.xfail(strict=True, reason=_KNOWN_GAPS[base]))
+            # Only "DID NOT RAISE" is the known gap: any other exception (an
+            # error of the wrong class, a crash) still fails the run.
+            marks.append(
+                pytest.mark.xfail(
+                    strict=True, raises=pytest.fail.Exception, reason=_KNOWN_GAPS[base]
+                )
+            )
         params.append(pytest.param(base, conf, excs, id=base, marks=marks))
     return params
 

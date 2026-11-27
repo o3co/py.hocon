@@ -22,10 +22,15 @@ The **empty-file group (6)** is part of the corpus: an empty document parses to
 ``test_empty_file_parses_to_empty`` additionally pins the group explicitly.
 
 Error fixtures (``-expected-error.json``) are not part of the corpus either.
+
+Fixtures whose Lightbend result py.hocon does not produce yet are strict-xfail
+known gaps, declared once in ``known_gaps.py`` (shared with the adapter
+differential in ``tests/test_hocon_json_adapter.py``).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -42,6 +47,20 @@ _CONF = _TESTDATA / "hocon"
 
 # Held-out fixtures (see module docstring).
 _JVM_XFAIL = {"test01", "test03"}
+
+
+def _load_known_gaps() -> dict[str, str]:
+    """Success-side known gaps, declared once in ``known_gaps.py``."""
+    spec = importlib.util.spec_from_file_location("known_gaps", _HERE / "known_gaps.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    gaps: dict[str, str] = mod.SUCCESS_KNOWN_GAPS
+    return gaps
+
+
+# Known gaps (strict xfail — an XPASS fails the run for triage).
+_KNOWN_GAPS = _load_known_gaps()
 
 pytestmark = pytest.mark.skipif(
     not _EXPECTED.is_dir() or not _CONF.is_dir(),
@@ -114,6 +133,8 @@ def _params() -> list:
                     strict=False,
                 )
             )
+        if base in _KNOWN_GAPS:
+            marks.append(pytest.mark.xfail(strict=True, reason=_KNOWN_GAPS[base]))
         params.append(pytest.param(base, conf, expected, id=base, marks=marks))
     return params
 
