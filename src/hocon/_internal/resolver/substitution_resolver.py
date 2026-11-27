@@ -52,6 +52,10 @@ class SubstitutionResolver:
         # a shape the fold could not see through — report it as unresolvable
         # instead of recursing forever.
         self.resolving_prefix_priors: set[str] = set()
+        # In-progress sets seen when a key's saved prior started resolving in
+        # the in-progress branch of _resolve_subst, one per enclosing
+        # resolution of that prior. See the guard there.
+        self.prior_reentry: dict[str, list[frozenset[str]]] = {}
 
     def _origin_prefix(self) -> str:
         return f"{self.opts.origin_description}: " if self.opts.origin_description else ""
@@ -224,13 +228,29 @@ class SubstitutionResolver:
         if key in self.resolving:
             # Cycle detected: try prior value for self-referential substitutions.
             prior = self._lookup_prior(s, scope)
-            if prior is not None:
+            # A prior can reach another in-progress key and resolve that key's
+            # prior, which can come back here. Re-entering is legal and usually
+            # terminates, because the keys entered in between take a different
+            # branch the second time. But `a = ${?b}` / `b = ${?a}` written twice
+            # re-entered in the same state forever, until the recursion limit
+            # turned it into a ParseError. A re-entry whose in-progress set
+            # equals an enclosing one repeats it: the cycle cannot be broken, so
+            # the optional form is nonexistent and the required form an error,
+            # as in Lightbend. The cache is deliberately not part of the state:
+            # a cycle through nested objects adds a deeper cache key each lap.
+            # py counterpart of go.hocon#218 / rs.hocon#199; interim guard, the
+            # full fix is the resolver redesign in o3co/xx.hocon#67 / #125.
+            state = frozenset(self.resolving)
+            outer = self.prior_reentry.setdefault(key, [])
+            if prior is not None and state not in outer:
+                outer.append(state)
                 saved = self.resolving
                 self.resolving = set(saved)
                 try:
                     return self._resolve_val(prior, scope)
                 finally:
                     self.resolving = saved
+                    outer.pop()
             if s.optional:
                 return None
             raise ResolveError(
