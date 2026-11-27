@@ -106,11 +106,15 @@ def _render_key(k: str) -> str:
     # the parser (and Lightbend: "include keyword is not followed by a quoted
     # string") rejects ``include = 1``, so the key must be quoted to
     # round-trip.
+    #
+    # A key always takes the JSON-quoted form (E18 decision 3), never triple
+    # quotes: this parser does not accept a triple-quoted key, so an LF key
+    # is written as ``"a\nb"``.
     if k == "include":
-        return _quote_string(k)
+        return _escape_quoted(k)
     if _SAFE_UNQUOTED_KEY_RE.fullmatch(k):
         return k
-    return _quote_string(k)
+    return _escape_quoted(k)
 
 
 # A string value that cannot be misread as another type: an identifier that is
@@ -141,6 +145,11 @@ def _quote_string(s: str) -> str:
         and not s.endswith('"')
     ):
         return f'"""{s}"""'
+    return _escape_quoted(s)
+
+
+def _escape_quoted(s: str) -> str:
+    """The JSON-quoted form of *s* (E18 decision 5)."""
     out = ['"']
     for ch in s:
         short = _SHORT_ESCAPES.get(ch)

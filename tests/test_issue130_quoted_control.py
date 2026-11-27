@@ -1,7 +1,7 @@
 r"""S1.2.4 raw C0 controls inside quoted strings
 ([xx.hocon#130](https://github.com/o3co/xx.hocon/issues/130)).
 
-A raw control character (U+0000–U+001F) inside a single-quoted string is a
+A raw control character (U+0000–U+001F) inside a double-quoted string is a
 parse error, as in JSON and Lightbend 1.4.9. The lexer rejected only LF; tab,
 CR, U+0001, U+001F and NUL were accepted in value, key, substitution-path and
 include position. Triple-quoted (S9.1) and unquoted (S8.8) strings keep
@@ -37,23 +37,28 @@ class TestRawControlInQuotedStringRejected:
         ("label", "src"),
         [
             ("key", '"a\tb" = 1\n'),
-            ("path-segment", 'a."b\x01" = 1\n'),
+            ("dotted-key-segment", 'a."b\x01" = 1\n'),
+            ("quoted-dotted-key", '"a"."b\tc" = 1\n'),
+            ("space-joined-key", 'a "b\tc" = 1\n'),
+            ("adjacent-key", 'a"b\tc" = 1\n'),
+            ("numeric-tail-key", '123abc."x\t= 1\n'),
+            ("nested-key", 'o { "a\tb" = 1 }\n'),
             ("array-element", 'a = ["x\x00"]\n'),
-            ("subst-path", 'x = 1\na = ${"x\t"}\n'),
+            # The key exists (escaped tab), so only the lexer can fail.
+            ("subst-path", '"x\\t" = 1\na = ${"x\t"}\n'),
             ("optional-subst", 'a = ${?"x\x1f"}\n'),
             ("concat", 'a = foo "x\x01" bar\n'),
+            ("append", 'a = [1]\na += "x\ty"\n'),
+            ("include", 'include "x\ty"\n'),
+            ("include-required", 'include required("x\ty")\n'),
+            ("include-file", 'include file("x\ty")\n'),
+            ("include-package-id", 'include package("p\tq", "f.conf")\n'),
+            ("include-package-file", 'include package("p", "f\td.conf")\n'),
+            ("include-nested", 'a { include "x\ty" }\n'),
         ],
     )
     def test_other_positions(self, label: str, src: str) -> None:
-        with pytest.raises(ParseError, match="control character"):
-            hocon.parse_string(src, env={})
-
-    @pytest.mark.parametrize(
-        "src",
-        ['include "x\ty"\n', 'include required("x\ty")\n', 'include file("x\ty")\n'],
-    )
-    def test_include_argument_reports_lexer_error(self, src: str) -> None:
-        with pytest.raises(ParseError, match="control character U\\+0009"):
+        with pytest.raises(ParseError, match=r"control character U\+00(09|01|00|1F)"):
             hocon.parse_string(src, env={})
 
     def test_error_points_at_the_character(self) -> None:
@@ -96,6 +101,7 @@ class TestRenderHoconEscapesControlChars:
         "bare-but-control": "abc\x01def",
         "k\x01ey": "key quotes only because of the control",
         "\x00": "nul key",
+        "multi\nline key": "LF key",
         "multi-ctrl": "line1\x01\nline2\x00",
         "multi-tab": "col1\tcol2\nrow2",
         "del-c1": "x\x7f\u0085y",
@@ -127,3 +133,8 @@ class TestRenderHoconEscapesControlChars:
 
     def test_del_c1_verbatim(self) -> None:
         assert "x\x7f\u0085y" in self._render()
+
+    def test_lf_key_takes_escaped_form(self) -> None:
+        # Keys never triple-quote (E18 decision 3): this parser rejects a
+        # triple-quoted key, so the LF is written as an escape.
+        assert '"multi\\nline key"' in self._render()

@@ -19,14 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unescaped control character U+0009 in quoted string; use a backslash
   escape (\u0009)`.
   **Workaround**: write the character as an escape (`\t`, `\r`, `\b`, `\f`
-  or `\u0001`), or use a triple-quoted string (`"""..."""`), which keeps
-  control characters verbatim. Unquoted strings, DEL (U+007F) and C1
-  (U+0080–U+009F) are unchanged and still accepted.
+  or `\u0001`). For a value, a triple-quoted string (`"""..."""`) also
+  works, since it keeps control characters verbatim; a `${...}` path has no
+  triple-quoted form, so there the escape is the only fix. Unquoted strings,
+  DEL (U+007F) and C1 (U+0080–U+009F) are unchanged and still accepted.
 - **`render_hocon` escapes every C0 control** (xx.hocon E18 decision 5): `\b`
   and `\f` as short forms, the others as `\u00xx` (lowercase hex), in values
   and keys. Before, they were written raw, which the parser now rejects. A
-  multi-line string is triple-quoted only when its only C0 characters are LF
-  and TAB. DEL and C1 are still written verbatim.
+  multi-line value is triple-quoted only when its only C0 characters are LF
+  and TAB. A key is never triple-quoted (an LF in a key is written as `\n`):
+  before, a key holding LF was triple-quoted and the output did not re-parse.
+  DEL and C1 are still written verbatim.
 
 ## [1.14.2] - 2026-10-17
 
