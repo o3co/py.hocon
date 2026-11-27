@@ -36,6 +36,21 @@ _CONF = _TESTDATA / "hocon"
 # parsers cap here exactly as in the conformance harness.
 _JVM_SKIP = {"test01", "test03"}
 
+
+def _load_known_gaps() -> dict[str, str]:
+    """Success-side known gaps, declared once in ``known_gaps.py``."""
+    path = _HERE / "conformance" / "known_gaps.py"
+    spec = importlib.util.spec_from_file_location("known_gaps", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    gaps: dict[str, str] = mod.SUCCESS_KNOWN_GAPS
+    return gaps
+
+
+# Known gaps shared with the conformance harness (strict xfail).
+_KNOWN_GAPS = _load_known_gaps()
+
 pytestmark = pytest.mark.skipif(
     not _EXPECTED.is_dir() or not _CONF.is_dir(),
     reason="conformance corpus not synced — run `make testdata`",
@@ -98,7 +113,24 @@ def _spec_fixtures() -> list[tuple[str, Path, Any]]:
 _SPEC = _spec_fixtures()
 
 
-@pytest.mark.parametrize("base,conf,expected", [pytest.param(b, c, e, id=b) for b, c, e in _SPEC])
+def _spec_params() -> list:
+    return [
+        pytest.param(
+            b,
+            c,
+            e,
+            id=b,
+            marks=(
+                [pytest.mark.xfail(strict=True, reason=_KNOWN_GAPS[b])]
+                if b in _KNOWN_GAPS
+                else []
+            ),
+        )
+        for b, c, e in _SPEC
+    ]
+
+
+@pytest.mark.parametrize("base,conf,expected", _spec_params())
 def test_adapter_matches_oracle(base: str, conf: Path, expected: Any, capsys: Any) -> None:
     """Adapter success output equals the Lightbend expected tree (in-process)."""
     sidecar = conf.with_suffix(".env")
