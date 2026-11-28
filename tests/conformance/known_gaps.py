@@ -7,6 +7,12 @@ declared once. Each entry is a strict xfail: when the gap closes, the XPASS
 fails the run and the entry must be removed. An entry whose fixture is not on
 disk (an older corpus) has no effect. Must-error gaps live in
 ``test_error_fixtures.py`` (``_KNOWN_GAPS``).
+
+``PENDING_STEP_B`` holds the resolution-model/ cases whose sidecar has
+``kind: pending-step-b``: their expected JSON is the E23 final value, which
+needs window step (b). The xx.hocon runner contract (docs/fixture-conventions.md
+"resolution-model/" → Runner contract) has runners skip them until then,
+rather than pin them as a gap, so both harnesses skip these.
 """
 
 from __future__ import annotations
@@ -99,11 +105,17 @@ SUCCESS_KNOWN_GAPS: dict[str, str] = {
             "rv110-tsk-k3",
             "rv113-e23-x3-swap",
             "rv114-fo-e23-p2-bfirst",
-            "rv121-e23-x5-pending-step-b",
             "rv124-alias-presence-other-view",
             "rv126-pe013-nonempty-base",
             "rv129-substituted-object-drops-ignored-fallbacks",
             "rv131-view-reentry-through-resolve-time-merge",
         )
     },
+}
+
+PENDING_STEP_B: dict[str, str] = {
+    "resolution-model/rv121-e23-x5-pending-step-b": (
+        "pending E23 window step (b) — see xx.hocon docs/resolution-model.md §6.3; "
+        "the interim result (an error) is what py.hocon gives today"
+    ),
 }

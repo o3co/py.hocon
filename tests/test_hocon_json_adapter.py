@@ -37,19 +37,21 @@ _CONF = _TESTDATA / "hocon"
 _JVM_SKIP = {"test01", "test03"}
 
 
-def _load_known_gaps() -> dict[str, str]:
-    """Success-side known gaps, declared once in ``known_gaps.py``."""
+def _load_known_gaps() -> tuple[dict[str, str], dict[str, str]]:
+    """Success-side known gaps and pending-step-b skips, declared once in ``known_gaps.py``."""
     path = _HERE / "conformance" / "known_gaps.py"
     spec = importlib.util.spec_from_file_location("known_gaps", path)
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     gaps: dict[str, str] = mod.SUCCESS_KNOWN_GAPS
-    return gaps
+    pending: dict[str, str] = mod.PENDING_STEP_B
+    return gaps, pending
 
 
-# Known gaps shared with the conformance harness (strict xfail).
-_KNOWN_GAPS = _load_known_gaps()
+# Known gaps (strict xfail) and pending-step-b skips, shared with the
+# conformance harness.
+_KNOWN_GAPS, _PENDING_STEP_B = _load_known_gaps()
 
 pytestmark = pytest.mark.skipif(
     not _EXPECTED.is_dir() or not _CONF.is_dir(),
@@ -123,6 +125,8 @@ def _spec_params() -> list:
             marks=(
                 [pytest.mark.xfail(strict=True, reason=_KNOWN_GAPS[b])]
                 if b in _KNOWN_GAPS
+                else [pytest.mark.skip(reason=_PENDING_STEP_B[b])]
+                if b in _PENDING_STEP_B
                 else []
             ),
         )
