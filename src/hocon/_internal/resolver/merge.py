@@ -113,6 +113,7 @@ def merge_included(obj: Obj, included: Obj, path: Path) -> None:
 
 _CANONICAL_INT = re.compile(r"(?:0|[1-9][0-9]*)")
 _I32_MAX = 2_147_483_647
+_I32_DIGITS = len(str(_I32_MAX))
 
 
 def _numeric_obj_to_list(o: Obj) -> Lst | None:
@@ -121,7 +122,8 @@ def _numeric_obj_to_list(o: Obj) -> Lst | None:
     eligible (an empty object included)."""
     eligible: list[tuple[int, Val]] = []
     for k, s in o.fields.items():
-        if _CANONICAL_INT.fullmatch(k) and int(k) <= _I32_MAX:
+        # The length check comes first: int() refuses very long digit strings.
+        if len(k) <= _I32_DIGITS and _CANONICAL_INT.fullmatch(k) and int(k) <= _I32_MAX:
             eligible.append((int(k), s.stack[0]))
     if not eligible:
         return None

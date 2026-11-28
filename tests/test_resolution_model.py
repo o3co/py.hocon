@@ -146,6 +146,19 @@ def test_resolve_with_keeps_only_the_receivers_keys_for_a_stacked_field() -> Non
     assert receiver.resolve_with(source).to_object() == {"a": {"p": 1}}
 
 
+def test_resolve_with_keeps_what_a_receiver_substitution_brings_in() -> None:
+    # The top of the receiver's `a` is a substitution, so its whole resolved
+    # value is kept, including `c` from the source's `template`.
+    receiver = parse("a = {b = 1}\na = ${template}", resolve_substitutions=False)
+    source = from_map({"template": {"c": 2}})
+    assert receiver.resolve_with(source).to_object() == {"a": {"b": 1, "c": 2}}
+
+
+def test_allow_unresolved_still_aborts_on_a_cycle_after_an_unresolved_piece() -> None:
+    with pytest.raises(ResolveError, match="cycle"):
+        parse("a = ${missing}${a}", resolve_substitutions=False).resolve(allow_unresolved=True)
+
+
 def test_allow_unresolved_concatenation_of_an_unresolved_object_stays_unresolved() -> None:
     cfg = parse("a = {x = ${nope}}\nb = ${a} [1]", resolve_substitutions=False).resolve(
         allow_unresolved=True

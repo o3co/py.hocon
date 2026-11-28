@@ -93,31 +93,17 @@ def partial_root(tree: Tree) -> HoconObject:
 
 
 def tree_key_shape(tree: Tree) -> HoconObject:
-    """The keys a tree defines, for ``resolve_with`` (E12 decision 9): at each
-    level, the union of the keys of the object entries of every stack, and a
-    null for a key none of whose entries is an object. A key that only a
-    substitution brings in is not part of the shape."""
+    """The keys a tree defines, for ``resolve_with`` (E12 decision 9). A key
+    whose top assignment is an object is walked into (adjacent object
+    assignments are already one merged object); any other key is a null,
+    which keeps its whole resolved value. This is the shape py.hocon used
+    before the window: a field whose top is an object keeps only the keys
+    written in it, and a field whose top is a substitution keeps everything
+    the substitution brings in."""
     fields: dict[str, HoconValue] = {}
     for k, s in tree.fields.items():
-        objs = [e for e in s.stack if isinstance(e, Obj)]
-        if not objs:
-            fields[k] = HoconScalar("", "null")
-            continue
-        shape = HoconObject({})
-        for o in reversed(objs):  # bottom first, so document order is kept
-            shape = _union_shape(shape, tree_key_shape(o))
-        fields[k] = shape
-    return HoconObject(fields)
-
-
-def _union_shape(a: HoconObject, b: HoconObject) -> HoconObject:
-    fields = dict(a.fields)
-    for k, v in b.fields.items():
-        prev = fields.get(k)
-        if isinstance(prev, HoconObject) and isinstance(v, HoconObject):
-            fields[k] = _union_shape(prev, v)
-        elif not isinstance(prev, HoconObject):
-            fields[k] = v
+        top = s.stack[0]
+        fields[k] = tree_key_shape(top) if isinstance(top, Obj) else HoconScalar("", "null")
     return HoconObject(fields)
 
 

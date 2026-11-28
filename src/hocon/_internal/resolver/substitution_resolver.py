@@ -196,6 +196,7 @@ class SubstitutionResolver:
         if hit is not None:
             return hit
         resolved: list[Val] = []
+        unresolved: Unresolved | None = None
         for p in c.pieces:
             if isinstance(p, Subst):
                 r = self._resolve_subst(p, view, None)
@@ -204,16 +205,21 @@ class SubstitutionResolver:
             if isinstance(r, Missing):  # §1.3: an omitted optional piece
                 continue
             if isinstance(r, Unresolved):
-                return r
+                # allow_unresolved: the concatenation stays unresolved, but the
+                # other pieces are still resolved, so a cycle in them aborts.
+                unresolved = unresolved or r
+                continue
             resolved.append(r)
-        if self.allow_unresolved and not all(is_resolved(r) for r in resolved):
-            # An object or a list piece that holds an unresolved value cannot
-            # be joined; the concatenation stays unresolved as a whole.
-            return Unresolved(c)
+        if unresolved is not None:
+            return unresolved
         result: Result = MISSING  # every piece omitted
         if resolved:
             joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)
             if len(joined) != 1:
+                if self.allow_unresolved:
+                    # An unresolved object next to a list cannot be joined
+                    # yet. A type mismatch already known still raised above.
+                    return Unresolved(c)
                 raise ResolveError("internal: concatenation did not join", "", c.line, c.col)
             result = joined[0]
         hit = self.memo.concat(key)  # first completed result wins
