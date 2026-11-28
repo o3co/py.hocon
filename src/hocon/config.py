@@ -19,6 +19,7 @@ from ._internal.resolver.resolver import (
     partial_root,
     pending_view,
     resolve_tree,
+    resolve_with_tree,
     same_marks,
     strip_placeholders,
     tree_from_value,
@@ -430,10 +431,9 @@ class Config(Mapping[str, Any]):
 
         receiver_tree = self._res_obj_root or tree_from_value(self._root)
         src_tree = tree_from_value(source._root)
-        merged = with_fallback_tree(receiver_tree, src_tree)
 
         resolve_opts = self._effective_resolve_opts(allow_unresolved, use_system_environment)
-        resolved = resolve_tree(merged, resolve_opts)
+        resolved = resolve_with_tree(receiver_tree, src_tree, resolve_opts)
         if not isinstance(resolved, HoconObject):
             raise RuntimeError("resolve_with: expected object root")
 

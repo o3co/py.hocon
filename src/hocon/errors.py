@@ -43,7 +43,9 @@ class ResolutionLimitError(ResolveError):
     more than 10,000 weight units per document value built, in the region of
     an optional cycle break. A subclass of ``ResolveError``, so
     ``except ResolveError`` still catches it; no optional substitution does.
-    The message starts with "resolution limit exceeded after a cycle break".
+    The message contains "resolution limit exceeded after a cycle break",
+    after the origin description when one is set, as for the other
+    substitution errors.
     """
 
 

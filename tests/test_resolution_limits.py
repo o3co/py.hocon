@@ -11,11 +11,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 import hocon
 from hocon import ResolutionLimitError, ResolveError
+from hocon._internal.resolver import limits
 
 
 def _dense(k: int) -> str:  # k keys, each reading all k, written twice
@@ -57,7 +59,7 @@ def test_limit_probe_outcome(name: str, build: Callable[[], str], want: str) -> 
         hocon.parse(build(), env={}).to_object()
         got = "loads"
     except ResolutionLimitError as e:
-        assert str(e).startswith("resolution limit exceeded after a cycle break: ")
+        assert "resolution limit exceeded after a cycle break: " in str(e)
         got = "limit"
     assert got == want
 
@@ -134,3 +136,107 @@ def test_escaped_surrogates_are_weighed_without_error() -> None:
     # region must not raise UnicodeEncodeError.
     src = 'r = ${?t}\nt = [${?r}, ${s}]\ns = "\\ud83d\\ude00"\nl = "\\ud800"\nq = [${?r}, ${l}]\n'
     assert hocon.parse(src, env={}).to_object()["t"] == ["\ud83d\ude00"]
+
+
+def test_message_carries_the_origin_like_the_cycle_error() -> None:
+    # §10.3 asks that the message contain the text; py puts the origin
+    # description first, as for its other substitution errors.
+    with pytest.raises(ResolutionLimitError) as e:
+        hocon.parse(
+            "r = ${?t}\nt = [${?r}, ${s}]\n" + _CHAIN, env={}, origin_description="app.conf"
+        )
+    want = "app.conf: resolution limit exceeded after a cycle break: "
+    assert str(e.value).startswith(want)
+
+
+# --- allow_unresolved: an unresolved value weighs what it keeps ---
+
+
+def test_unresolved_ring_stops_on_weight() -> None:
+    # limit_probes ring_str_unresolved20: a doubling ring that also carries an
+    # undefined required reference. Under allow_unresolved each lap keeps
+    # every piece of the last one; an unresolved value weighs 1 plus the
+    # pieces it keeps, so it is charged as it doubles and stops (charged 1
+    # per value, it ran for minutes).
+    cfg = hocon.parse(_ring(20, "${?a%}${?a%}x${missing}"), env={}, resolve_substitutions=False)
+    with pytest.raises(ResolutionLimitError, match="weight units"):
+        cfg.resolve(allow_unresolved=True, use_system_environment=False)
+
+
+_S99 = 's = "' + "x" * 99 + '"\n'
+
+
+@pytest.mark.parametrize(
+    ("doc", "weight"),
+    [
+        ("r = ${?t}\nt = [${?r}, ${a}]\na = ${U}\n", 4),
+        ("r = ${?t}\nt = [${?r}, ${a}]\na = ${U} x\n", 8),
+        ("r = ${?t}\nt = [${?r}, ${a}]\na = ${U} ${s}\n" + _S99, 29),
+        ("r = ${?t}\nt = [${?r}, ${b}]\nb = [${a}, ${a}]\na = ${U} ${s} ${s}\n" + _S99, 126),
+    ],
+)
+def test_unresolved_weight_as_the_reference_model_counts(
+    doc: str, weight: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An unresolved concatenation is kept, not joined: it is not charged at a
+    # join, and a lookup that returns it charges 1 plus the written-out
+    # weight of each piece it kept. The totals are the reference model's.
+    seen: list[limits.Limits] = []
+    init = limits.Limits.__init__
+
+    def record(self: limits.Limits, *args: Any, **kwargs: Any) -> None:
+        init(self, *args, **kwargs)
+        seen.append(self)
+
+    monkeypatch.setattr(limits.Limits, "__init__", record)
+    cfg = hocon.parse(doc, env={}, resolve_substitutions=False)
+    cfg.resolve(allow_unresolved=True, use_system_environment=False)
+    assert seen[-1]._weight == weight
+
+
+def test_unresolved_values_outside_a_region_still_load() -> None:
+    cfg = hocon.parse("a = ${U} x\nb = [${a}, ${a}]\n", env={}, resolve_substitutions=False)
+    assert not cfg.resolve(allow_unresolved=True, use_system_environment=False).is_resolved()
+
+
+# --- resolve_with: V is the receiver's values plus the source's ---
+
+_RECEIVER = "r = ${?t}\nt = [${?r}, ${s}]\n" + _CHAIN + "big = 5\n"
+
+
+def test_resolve_with_counts_receiver_and_source() -> None:
+    # The receiver alone has 36 values (B = 360,000); the chain read in the
+    # r/t region builds 405,531 units. The source's 12 values raise B to
+    # 480,000, though the merged lookup tree drops them (big = 5 hides the
+    # list), so counting the merged tree would fail.
+    recv = hocon.parse(_RECEIVER, env={}, resolve_substitutions=False)
+    src = hocon.parse("big = [" + ", ".join(["1"] * 10) + "]\n")
+    got = recv.resolve_with(src, use_system_environment=False).to_object()
+    assert got["t"] == [{}]
+
+
+def test_resolve_with_small_source_still_fails() -> None:
+    # The control: a 2-value source leaves B at 380,000, below the chain.
+    recv = hocon.parse(_RECEIVER, env={}, resolve_substitutions=False)
+    with pytest.raises(ResolutionLimitError, match="weight units"):
+        recv.resolve_with(hocon.parse("other = 1"), use_system_environment=False)
+
+
+def test_resolve_with_allow_unresolved_still_limited() -> None:
+    recv = hocon.parse(_RECEIVER + "u = ${U}\n", env={}, resolve_substitutions=False)
+    with pytest.raises(ResolutionLimitError, match="weight units"):
+        recv.resolve_with(
+            hocon.parse("other = 1"), allow_unresolved=True, use_system_environment=False
+        )
+
+
+def test_with_fallback_counts_the_combined_root() -> None:
+    # After with_fallback, V is the combined root: the fallback's list under
+    # `big` is dropped by the merge (big = 5 is on top) and does not count;
+    # under a key of its own it does.
+    ten = "[" + ", ".join(["1"] * 10) + "]"
+    recv = hocon.parse(_RECEIVER, env={}, resolve_substitutions=False)
+    with pytest.raises(ResolutionLimitError, match="weight units"):
+        recv.with_fallback(hocon.parse(f"big = {ten}")).resolve(use_system_environment=False)
+    combined = recv.with_fallback(hocon.parse(f"more = {ten}"))
+    assert combined.resolve(use_system_environment=False).to_object()["t"] == [{}]

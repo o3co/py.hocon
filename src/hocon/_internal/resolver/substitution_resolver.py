@@ -13,6 +13,7 @@ on its path, each restricted to the next key (§3.3, §3.4).
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Literal
 
 from ...errors import ResolveError
@@ -62,7 +63,9 @@ class _ReEntry(Exception):
 
 
 class SubstitutionResolver:
-    def __init__(self, root: Obj, opts: ResolveOptions) -> None:
+    def __init__(
+        self, root: Obj, opts: ResolveOptions, documents: Sequence[Obj] | None = None
+    ) -> None:
         self.root = root
         self.opts = opts
         self.memo = Memo()
@@ -74,8 +77,11 @@ class SubstitutionResolver:
         self.substituted: dict[tuple[int, int], tuple[Substituted, Obj]] = {}
         # §6.1: the active (Subst, View) pairs.
         self.active: set[tuple[int, ViewKey]] = set()
-        # §10.3: the limits after a cycle break.
-        self.limits = Limits(root)
+        # §10.3: the limits after a cycle break. V counts ``documents``, the
+        # documents resolved together (default: the root alone).
+        self.limits = Limits(
+            documents if documents is not None else (root,), opts.origin_description
+        )
         self.use_env = opts.use_system_environment is not False
         self.allow_unresolved = bool(opts.allow_unresolved)
 
@@ -256,10 +262,15 @@ class SubstitutionResolver:
             resolved.append(r)
         result: Result = MISSING  # every piece omitted
         if resolved:
-            self.limits.joined(resolved, c)  # §10.3: charged before the join
+            if unresolved is None:  # §10.3: charged before the join
+                self.limits.joined(resolved, c)
             joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)
             if unresolved is not None:
-                return Unresolved(c, joined)
+                # Kept, not joined: weighed by its pieces when a lookup
+                # returns it (§10.3).
+                kept = Unresolved(c, joined)
+                self.limits.kept(kept, resolved)
+                return kept
             if len(joined) != 1:
                 if self.allow_unresolved:
                     # An unresolved object next to a list cannot be joined

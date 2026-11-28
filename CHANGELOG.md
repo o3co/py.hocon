@@ -106,9 +106,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outermost substitution being resolved finishes. Inside regions a resolve
   may start at most 100,000 lookups and build at most 10,000 weight units per
   value of the document (a value weighs 1, plus 1 per 16 UTF-8 bytes of scalar
-  text; keys weigh nothing). Past either limit it fails with the new
-  `hocon.ResolutionLimitError` ("resolution limit exceeded after a cycle
-  break: …"), a subclass of `ResolveError`; no optional substitution catches
+  text; keys weigh nothing; under `allow_unresolved` an unresolved value
+  weighs 1 plus the pieces it keeps; for `resolve_with` the receiver's values
+  and the source's count). Past either limit it fails with the new
+  `hocon.ResolutionLimitError` (its message contains "resolution limit
+  exceeded after a cycle break", after the origin description when one is
+  given), a subclass of `ResolveError`; no optional substitution catches
   it. This stops a dense web of optional cycles or a ring of them that
   doubles its value on every lap, where Lightbend runs for minutes or out of
   memory. It replaces the interim bounds of py.hocon#68 (`substitution cycle

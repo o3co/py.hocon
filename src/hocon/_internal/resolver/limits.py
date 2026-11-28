@@ -6,7 +6,8 @@ a substitution meeting only itself) arms the limits. They stay armed until the
 outermost active substitution frame finishes: that is the break's region.
 While armed, a resolve may start at most :data:`LOOKUP_LIMIT` lookups and
 build at most :data:`WEIGHT_PER_VALUE` × V weight units, V being the number of
-values in the document. Past either limit it fails with
+values in the documents resolved together (the receiver and the source of a
+``resolve_with``, each counted as its own root). Past either limit it fails with
 :class:`~hocon.errors.ResolutionLimitError`, which no optional catches.
 
 The resolver tells :class:`Limits` where it is (a frame starts or ends, a
@@ -16,11 +17,13 @@ about counting and weighing lives here.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from ...errors import ResolutionLimitError
 from .merge import is_whitespace_string
 from .substituted import Substituted
 from .utils import path_to_key
-from .values import Concat, Lst, Obj, Scalar, Subst, Val
+from .values import Concat, Lst, Obj, Scalar, Subst, Unresolved, Val
 
 __all__ = ["LOOKUP_LIMIT", "WEIGHT_PER_VALUE", "Limits", "document_values"]
 
@@ -73,28 +76,12 @@ def _utf8_length(text: str) -> int:
         return len(joined.encode("utf-8"))
 
 
-def _join_weight(pieces: list[Val]) -> int:
-    """What a join builds: a scalar's own weight, 1 plus the items of a list,
-    1 for an object. Whitespace that §1.3 rule 3 drops (after a list or an
-    object) counts nothing."""
-    w = 0
-    prev: Val | None = None
-    for v in pieces:
-        if isinstance(prev, (Lst, Obj)) and is_whitespace_string(v):
-            continue
-        if isinstance(v, Lst):
-            w += 1 + len(v.items)
-        else:
-            w += _own_weight(v)  # a scalar's own weight; 1 for an object
-        prev = v
-    return w
-
-
 class Limits:
     """The §10.3 state of one resolve."""
 
-    def __init__(self, root: Obj) -> None:
-        self._root = root
+    def __init__(self, documents: Sequence[Obj], origin: str | None = None) -> None:
+        self._documents = documents
+        self._origin = origin  # the origin description errors start with
         self._budget: int | None = None  # B, counted the first time it is needed
         self.armed = False
         self._depth = 0  # active substitution frames (§6.1 step 3)
@@ -104,6 +91,8 @@ class Limits:
         # B (each instance is weighed once); the value is held so its id stays
         # unique.
         self._weights: dict[int, tuple[int, Val]] = {}
+        # The pieces each unresolved concatenation keeps (see ``kept``).
+        self._kept: dict[int, tuple[Unresolved, list[Val]]] = {}
 
     @property
     def budget(self) -> int:
@@ -111,7 +100,7 @@ class Limits:
             # V is a property of the document, which never changes while
             # resolving, so counting it at the first charge gives the value
             # counted before resolving.
-            self._budget = WEIGHT_PER_VALUE * document_values(self._root)
+            self._budget = WEIGHT_PER_VALUE * sum(document_values(d) for d in self._documents)
         return self._budget
 
     # ---- where the resolver is
@@ -143,6 +132,13 @@ class Limits:
         if self.armed:
             self._charge(_join_weight(pieces), c)
 
+    def kept(self, u: Unresolved, pieces: list[Val]) -> None:
+        """allow_unresolved: a concatenation was kept unjoined as ``u``
+        because one of its resolved ``pieces`` is unresolved. It is not
+        charged as a join; ``u`` weighs 1 plus the written-out weight of each
+        of these pieces when a lookup returns it."""
+        self._kept[id(u)] = (u, pieces)
+
     def looked_up(self, v: Val, s: Subst) -> None:
         """An unrestricted lookup finished with ``v``."""
         if self.armed:
@@ -171,7 +167,7 @@ class Limits:
             v, children_done = todo.pop()
             if id(v) in done:
                 continue
-            parts = _parts(v)
+            parts = self._parts(v)
             if not children_done:
                 todo.append((v, True))
                 todo.extend((_unwrap(p), False) for p in parts if id(_unwrap(p)) not in done)
@@ -185,9 +181,25 @@ class Limits:
             done[id(v)] = (w, v)
         return done[id(_unwrap(root))][0]
 
+    def _parts(self, v: Val) -> list[Val]:
+        """What a value's written-out weight adds to its own: a list's items,
+        every entry of an object's slots, the pieces an unresolved value
+        keeps (allow_unresolved: an unresolved substitution keeps none)."""
+        if isinstance(v, Lst):
+            return v.items
+        if isinstance(v, Obj):
+            return [x for s in v.fields.values() for x in s.stack]
+        if isinstance(v, Unresolved):
+            kept = self._kept.get(id(v))
+            if kept is not None:
+                return kept[1]
+            return v.pieces or []
+        return []
+
     def _error(self, detail: str, at: Subst | Concat) -> ResolutionLimitError:
         key = path_to_key(at.path) if isinstance(at, Subst) else path_to_key(at.fpath)
-        return ResolutionLimitError(f"{_MESSAGE}: {detail}", key, at.line, at.col)
+        origin = f"{self._origin}: " if self._origin else ""  # as the cycle error
+        return ResolutionLimitError(f"{origin}{_MESSAGE}: {detail}", key, at.line, at.col)
 
 
 def _unwrap(v: Val) -> Val:
@@ -197,9 +209,18 @@ def _unwrap(v: Val) -> Val:
     return v
 
 
-def _parts(v: Val) -> list[Val]:
-    if isinstance(v, Lst):
-        return v.items
-    if isinstance(v, Obj):
-        return [x for s in v.fields.values() for x in s.stack]
-    return []
+def _join_weight(pieces: list[Val]) -> int:
+    """What a join builds: a scalar's own weight, 1 plus the items of a list,
+    1 for an object. Whitespace that §1.3 rule 3 drops (after a list or an
+    object) counts nothing."""
+    w = 0
+    prev: Val | None = None
+    for v in pieces:
+        if isinstance(prev, (Lst, Obj)) and is_whitespace_string(v):
+            continue
+        if isinstance(v, Lst):
+            w += 1 + len(v.items)
+        else:
+            w += _own_weight(v)  # a scalar's own weight; 1 for an object
+        prev = v
+    return w
