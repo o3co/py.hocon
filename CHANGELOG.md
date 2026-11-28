@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: a new resolution layer — keep every assignment, and resolve
+  `${}` only when a value is taken out** (the #67 window:
+  [xx.hocon#67](https://github.com/o3co/xx.hocon/issues/67) /
+  [#115](https://github.com/o3co/xx.hocon/issues/115) /
+  [#123](https://github.com/o3co/xx.hocon/issues/123) /
+  [#125](https://github.com/o3co/xx.hocon/issues/125)–[#128](https://github.com/o3co/xx.hocon/issues/128);
+  contract: xx.hocon `docs/resolution-model.md`). Each key now keeps an
+  ordered stack of all its assignments (built at parse time with Lightbend's
+  fallback rules), and a substitution looks back at the part of its own
+  field's stack below it, instead of the single saved "prior" value the
+  resolver kept before. Ships in the window's lockstep minor.
+
+  **Inputs that now error** (as in Lightbend 1.4.9), with workarounds:
+  - A required `${a}` whose target was removed by an undefined optional
+    (`a = 1`, `a = ${?unset}`, `b = ${a}`), including through an include and
+    through a path (`${x.y}`), and an included object over
+    `a = ${missing}` in the including file (#123, #115). Before, the
+    reference was dropped silently. **Workaround**: `${?a}`, or give the
+    optional a default.
+  - A required self-reference with nothing below it inside a concatenation
+    entry (`foo : "x "${foo.a}`, then `foo : { a : 1 }`), and a list entry
+    that reads its own field (`foo : [${foo.a}]` over a later
+    `foo : { b : 2 }`): a list entry gets no look-back, so it reads the
+    final value (#127). **Workaround**: `${?foo.a}`.
+  - A cycle that only an optional substitution closes, where the
+    substitution that re-enters it is required (`d = yes${?c}`,
+    `c = ${d}`; `e += ${?c}`, `c = ${e}`; zig-hocon rows 024, 025, 039,
+    045, 046, 065, 066): `${d} is part of a cycle` (#128). This is the
+    interim rule; window step (b) (E23 rule 1) turns these into values.
+    **Workaround**: make the re-entering substitution optional too.
+  - `+=` inside a list value (also inside an object that is a list element,
+    and inside the value of another `+=`), and an `include` of a file with
+    substitutions inside a list or a `+=` value: a `ParseError`
+    (Lightbend's parser limitation). **Workaround**: write the list out, or
+    move the `+=` / include out of the list.
+  - An undefined optional followed by whitespace and a list or an object
+    (`a = ${?absent} ${x}` with `x = [1]`): the whitespace is a string, so
+    this is a concatenation type error. **Workaround**: drop the space
+    (`${?absent}${x}`).
+  - A concatenation type error written literally (`a = [1] "x"`) is now
+    raised when the document is parsed, also with
+    `resolve_substitutions=False`.
+
+  **Wrong values corrected** (now Lightbend's):
+  - A stack of three or more assignments no longer loses its bottom layer,
+    and an included file keeps the including file's earlier values
+    (#125, #115).
+  - A value hidden by a later one that ignores fallbacks is never evaluated,
+    so an error in it no longer surfaces (#126).
+  - Look-back and aliases: an alias read inside a look-back sees the field's
+    lower layers; an object below a substitution looks forward; a path into
+    a self-referential field looks back (#127).
+  - An object that replaced a non-object in its own field's history (`r =
+    null`, `r = ${v}`) ignores fallbacks wherever it is substituted:
+    `a = { helper = 0 }`, `a = ${r}` gives `a = r`, without `helper`.
+  - An undefined optional that a cycle runs through resolves to nothing
+    exactly once (`oc01`, `oc03`; #128).
+  - Once substitutions are resolved, an unquoted string after a list or an
+    object is dropped, as in Lightbend: `b = ${a}x` with `a = [1]` gives
+    `[1]`, and so does `c = [1] ${x}` with `x = s`. Both were type errors.
+    Unquoted text written right after a list or object literal
+    (`a = { b: 1 } x`) is still an error (E5).
+  - `with_fallback` keeps the receiver's keys first at every merged level
+    (E12, `dr31` / `dr32`).
+
+  Under `allow_unresolved`, a field whose stack walk reaches an undefined
+  required substitution is unresolved as a whole; before, a lower layer
+  could stand in for it.
+
 ### Fixed
 
 - **BREAKING (extra-spec E8, xx.hocon#140): an unquoted run that starts with
