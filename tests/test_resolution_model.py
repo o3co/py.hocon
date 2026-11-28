@@ -328,3 +328,39 @@ def test_text_after_a_list_or_object_is_an_error(src: str) -> None:
     # and when resolving alike (Lightbend 1.4.10).
     with pytest.raises(ResolveError, match="cannot concatenate"):
         _resolve(src)
+
+
+_FB_HELPER = {"a": {"helper": 0}}
+
+
+def test_resolve_with_result_keeps_ignoring_fallbacks() -> None:
+    # resolve_with rebuilds the receiver's objects; `a` still ignores a later
+    # fallback (Lightbend 1.4.10: {a: {x: 1}, b: 1}).
+    cfg = parse("a = null\na = {x = 1}\nb = ${c}", resolve_substitutions=False)
+    got = cfg.resolve_with(from_map({"c": 1})).with_fallback(from_map(_FB_HELPER)).resolve()
+    assert got.to_object() == {"a": {"x": 1}, "b": 1}
+
+
+def test_unresolved_parse_keeps_ignoring_fallbacks() -> None:
+    # A Config read from an unresolved tree (get_config of a deferred parse).
+    cfg = parse("p { a = null\na = {x = 1} }", resolve_substitutions=False)
+    got = cfg.get_config("p").with_fallback(from_map(_FB_HELPER)).resolve()
+    assert got.to_object() == {"a": {"x": 1}}
+
+
+def test_allow_unresolved_result_keeps_ignoring_fallbacks() -> None:
+    # A partially resolved Config: its resolved part is copied without the
+    # unresolved values, and `a` still ignores fallbacks.
+    cfg = parse("a = null\na = {x = 1}\nb = ${missing}", resolve_substitutions=False)
+    partial = cfg.resolve(allow_unresolved=True)
+    got = partial.get_config("a").with_fallback(from_map({"helper": 0})).resolve()
+    assert got.to_object() == {"x": 1}
+
+
+def test_allow_unresolved_partial_concatenation_is_joined_again() -> None:
+    # `${a}` is a partial concatenation ({p: 1} after an unresolved piece);
+    # joined with "x" it is a type error whatever ${missing} becomes
+    # (Lightbend flattens it and raises WrongType).
+    src = 'a = ${missing} {p = 1}\nb = ${a} "x"'
+    with pytest.raises(ResolveError, match="cannot concatenate"):
+        parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)

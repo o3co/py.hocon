@@ -41,6 +41,7 @@ __all__ = [
     "pending_view",
     "resolve",
     "resolve_tree",
+    "same_marks",
     "strip_placeholders",
     "tree_from_value",
     "tree_key_shape",

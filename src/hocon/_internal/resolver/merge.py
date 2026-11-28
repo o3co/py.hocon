@@ -415,7 +415,13 @@ def consolidate(
     out: list[Val] = []
     own: Overlay | None = None  # an overlay this call made (resolve time)
     for p in pieces:
-        for q in p.pieces if isinstance(p, Concat) else [p]:
+        if isinstance(p, Concat):
+            flat = p.pieces
+        elif isinstance(p, Unresolved) and p.pieces is not None:
+            flat = p.pieces  # a partial concatenation substituted in
+        else:
+            flat = [p]
+        for q in flat:
             if not out:
                 out.append(q)
             elif own is not None and out[-1] is own and isinstance(q, Obj) and not q.flag:

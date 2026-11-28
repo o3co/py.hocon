@@ -39,7 +39,9 @@ __all__ = [
 
 
 # Public values made from an unquoted string, and from an object that ignores
-# fallbacks (see the module docstring).
+# fallbacks (see the module docstring). Keyed by identity: the public value
+# classes must keep identity equality and hashing. Every code path that copies
+# a public object with fields dropped goes through :func:`same_marks`.
 _UNQUOTED: weakref.WeakSet[HoconScalar] = weakref.WeakSet()
 _IGNORES_FALLBACKS: weakref.WeakSet[HoconObject] = weakref.WeakSet()
 
@@ -119,7 +121,10 @@ def pending_view(o: Obj) -> HoconObject:
             fields[k] = to_hocon(s.stack[0])
         else:
             fields[k] = cast("HoconValue", Placeholder(s.stack))
-    return HoconObject(fields)
+    out = HoconObject(fields)
+    if o.flag:
+        _IGNORES_FALLBACKS.add(out)
+    return out
 
 
 def val_contains_placeholders(v: object) -> bool:

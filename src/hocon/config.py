@@ -19,6 +19,7 @@ from ._internal.resolver.resolver import (
     partial_root,
     pending_view,
     resolve_tree,
+    same_marks,
     strip_placeholders,
     tree_from_value,
     tree_key_shape,
@@ -711,7 +712,7 @@ def _filter_by_receiver_shape(resolved: HoconObject, receiver_shape: HoconObject
             fields[k] = _filter_by_receiver_shape(rv, receiver_val)
         else:
             fields[k] = rv
-    return HoconObject(fields)
+    return same_marks(resolved, HoconObject(fields))
 
 
 # RFC 8259 JSON number grammar — gates the numeric render fast-path.

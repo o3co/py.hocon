@@ -315,12 +315,12 @@ class SubstitutionResolver:
                 )
             joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)
             if unresolved is not None:
-                return unresolved
+                return Unresolved(c, joined)
             if len(joined) != 1:
                 if self.allow_unresolved:
                     # An unresolved object next to a list cannot be joined
                     # yet. A type mismatch already known still raised above.
-                    return Unresolved(c)
+                    return Unresolved(c, joined)
                 raise ResolveError("internal: concatenation did not join", "", c.line, c.col)
             result = joined[0]
         hit = self.memo.concat(key)  # first completed result wins

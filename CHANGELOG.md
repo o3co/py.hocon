@@ -86,6 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     exactly once (`oc01`, `oc03`; #128).
   - `with_fallback` keeps the receiver's keys first at every merged level
     (E12, `dr31` / `dr32`).
+  - A resolved Config merged again (`with_fallback`, `resolve_with`) behaves
+    as one resolve of the same text: an object that replaced a non-object in
+    its field's history (`a = null`, `a = { x = 1 }`) still ignores a
+    fallback's `a`, also through `get_config` (`cfg.get_config("a")
+    .with_fallback(defaults)` keeps only `x`, as in Lightbend), and a value
+    that resolved to unquoted whitespace is still dropped after a list.
 
   Under `allow_unresolved`, a field whose stack walk reaches an undefined
   required substitution is unresolved as a whole (`a = ${nope}`,

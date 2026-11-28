@@ -290,13 +290,17 @@ class Partial:
 class Unresolved:
     """What stays unresolved under ``allow_unresolved`` (§8.2): an undefined
     required substitution, or a concatenation holding one. It absorbs the
-    field, list item or concatenation it appears in. ``value`` is the model
-    value that could not be resolved."""
+    field or list item it appears in. ``value`` is the model value that could
+    not be resolved. For a concatenation, ``pieces`` are its pieces joined as
+    far as they go; a concatenation it is substituted into joins them again,
+    so a type error among known pieces still raises (as in Lightbend, which
+    flattens a partial concatenation)."""
 
-    __slots__ = ("value",)
+    __slots__ = ("pieces", "value")
 
-    def __init__(self, value: Subst | Concat) -> None:
+    def __init__(self, value: Subst | Concat, pieces: list[Val] | None = None) -> None:
         self.value = value
+        self.pieces = pieces
 
 
 class Missing:
