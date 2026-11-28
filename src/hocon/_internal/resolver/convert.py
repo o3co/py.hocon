@@ -38,12 +38,36 @@ __all__ = [
 ]
 
 
+class _Marks:
+    """A set of objects by identity, holding them weakly. It never hashes or
+    compares the objects themselves, so it works for any value, including a
+    subclass that defines ``__eq__`` without ``__hash__``."""
+
+    __slots__ = ("_refs",)
+
+    def __init__(self) -> None:
+        self._refs: dict[int, weakref.ref[object]] = {}
+
+    def add(self, obj: object) -> None:
+        key = id(obj)
+        refs = self._refs
+
+        def drop(ref: weakref.ref[object], key: int = key) -> None:
+            if refs.get(key) is ref:
+                del refs[key]
+
+        refs[key] = weakref.ref(obj, drop)
+
+    def __contains__(self, obj: object) -> bool:
+        ref = self._refs.get(id(obj))
+        return ref is not None and ref() is obj
+
+
 # Public values made from an unquoted string, and from an object that ignores
-# fallbacks (see the module docstring). Keyed by identity: the public value
-# classes must keep identity equality and hashing. Every code path that copies
-# a public object with fields dropped goes through :func:`same_marks`.
-_UNQUOTED: weakref.WeakSet[HoconScalar] = weakref.WeakSet()
-_IGNORES_FALLBACKS: weakref.WeakSet[HoconObject] = weakref.WeakSet()
+# fallbacks (see the module docstring). Every code path that copies a public
+# object with fields dropped goes through :func:`same_marks`.
+_UNQUOTED = _Marks()
+_IGNORES_FALLBACKS = _Marks()
 
 
 class Placeholder:

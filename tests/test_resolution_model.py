@@ -21,6 +21,10 @@ import pytest
 
 from hocon import NotResolvedError, ResolveError, from_map, parse
 
+# allow_unresolved without the process environment, so a variable that
+# happens to be named like a missing key cannot change a test.
+_PARTIAL: dict[str, bool] = {"allow_unresolved": True, "use_system_environment": False}
+
 
 def _resolve(src: str, env: dict[str, str] | None = None) -> Any:
     return parse(src, env=env or {}).to_object()
@@ -59,9 +63,7 @@ def _outcome(src: str) -> Any:
         return ERR
 
 
-@pytest.mark.parametrize(
-    "src,interim", [pytest.param(s, i, id=r) for r, s, i, _ in _INTERIM_ROWS]
-)
+@pytest.mark.parametrize("src,interim", [pytest.param(s, i, id=r) for r, s, i, _ in _INTERIM_ROWS])
 def test_interim_value(src: str, interim: Any) -> None:
     assert _outcome(src) == interim
 
@@ -156,13 +158,11 @@ def test_resolve_with_keeps_what_a_receiver_substitution_brings_in() -> None:
 
 def test_allow_unresolved_still_aborts_on_a_cycle_after_an_unresolved_piece() -> None:
     with pytest.raises(ResolveError, match="cycle"):
-        parse("a = ${missing}${a}", resolve_substitutions=False).resolve(allow_unresolved=True)
+        parse("a = ${missing}${a}", resolve_substitutions=False).resolve(**_PARTIAL)
 
 
 def test_allow_unresolved_concatenation_of_an_unresolved_object_stays_unresolved() -> None:
-    cfg = parse("a = {x = ${nope}}\nb = ${a} [1]", resolve_substitutions=False).resolve(
-        allow_unresolved=True
-    )
+    cfg = parse("a = {x = ${nope}}\nb = ${a} [1]", resolve_substitutions=False).resolve(**_PARTIAL)
     assert not cfg.is_resolved()
     with pytest.raises(NotResolvedError):
         cfg.get("b")
@@ -171,9 +171,7 @@ def test_allow_unresolved_concatenation_of_an_unresolved_object_stays_unresolved
 def test_allow_unresolved_field_whose_walk_reaches_an_undefined_substitution() -> None:
     # Lightbend keeps the whole delayed merge unresolved; py used to answer
     # with the object layer alone.
-    cfg = parse("a = ${nope}\na = {x = 1}", resolve_substitutions=False).resolve(
-        allow_unresolved=True
-    )
+    cfg = parse("a = ${nope}\na = {x = 1}", resolve_substitutions=False).resolve(**_PARTIAL)
     assert not cfg.is_resolved()
     with pytest.raises(NotResolvedError):
         cfg.get("a")
@@ -263,7 +261,7 @@ def test_allow_unresolved_reads_a_memoized_unresolved_leaf(src: str) -> None:
     # Reading a.x after `a` was memoized with an unresolved leaf used to raise
     # "internal: cannot resolve Unresolved" in one line order. Lightbend
     # leaves both a.x and b unresolved.
-    cfg = parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)
+    cfg = parse(src, resolve_substitutions=False).resolve(**_PARTIAL)
     assert not cfg.is_resolved()
     with pytest.raises(NotResolvedError):
         cfg.get("b")
@@ -274,7 +272,7 @@ def test_allow_unresolved_still_rejects_a_known_concatenation_type_error() -> No
     # becomes: Lightbend raises WrongType here even under allowUnresolved.
     src = 'a = ${missing}${obj}${text}\nobj = {p = 1}\ntext = "x"'
     with pytest.raises(ResolveError, match="cannot concatenate"):
-        parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)
+        parse(src, resolve_substitutions=False).resolve(**_PARTIAL)
 
 
 def test_deferred_merge_keeps_an_unquoted_whitespace_value() -> None:
@@ -352,7 +350,7 @@ def test_allow_unresolved_result_keeps_ignoring_fallbacks() -> None:
     # A partially resolved Config: its resolved part is copied without the
     # unresolved values, and `a` still ignores fallbacks.
     cfg = parse("a = null\na = {x = 1}\nb = ${missing}", resolve_substitutions=False)
-    partial = cfg.resolve(allow_unresolved=True)
+    partial = cfg.resolve(**_PARTIAL)
     got = partial.get_config("a").with_fallback(from_map({"helper": 0})).resolve()
     assert got.to_object() == {"x": 1}
 
@@ -363,4 +361,22 @@ def test_allow_unresolved_partial_concatenation_is_joined_again() -> None:
     # (Lightbend flattens it and raises WrongType).
     src = 'a = ${missing} {p = 1}\nb = ${a} "x"'
     with pytest.raises(ResolveError, match="cannot concatenate"):
-        parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)
+        parse(src, resolve_substitutions=False).resolve(**_PARTIAL)
+
+
+def test_merge_with_unhashable_public_value_subclasses() -> None:
+    # The resolver's marks on public values are kept by identity, so a value
+    # subclass that defines __eq__ without __hash__ still merges.
+    from hocon import Config
+    from hocon.value import HoconObject, HoconScalar
+
+    class Scalar(HoconScalar):
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, HoconScalar) and other.raw == self.raw
+
+    class Obj(HoconObject):
+        def __eq__(self, other: object) -> bool:
+            return isinstance(other, HoconObject) and other.fields == self.fields
+
+    cfg = Config(Obj({"a": Scalar("1", "number")}))
+    assert cfg.with_fallback(from_map({"b": 2})).resolve().to_object() == {"a": 1, "b": 2}
