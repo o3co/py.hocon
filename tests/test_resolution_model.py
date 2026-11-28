@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from hocon import ResolveError, parse
+from hocon import NotResolvedError, ResolveError, from_map, parse
 
 
 def _resolve(src: str, env: dict[str, str] | None = None) -> Any:
@@ -132,3 +132,35 @@ def test_environment_case(src: str, env: dict[str, str], want: Any) -> None:
     except ResolveError:
         got = ERR
     assert got == want
+
+
+# --- deferred API (E12) on top of the stacks ---
+
+
+def test_resolve_with_keeps_only_the_receivers_keys_for_a_stacked_field() -> None:
+    # The receiver's `a` has two assignments. Its key shape is the union of
+    # its object entries, so the source's own `a.q` is not copied into the
+    # result (E12 decision 9).
+    receiver = parse("a = ${x}\na = {p = 1}", resolve_substitutions=False)
+    source = from_map({"a": {"q": 2, "p": 0}, "x": {"y": 1}})
+    assert receiver.resolve_with(source).to_object() == {"a": {"p": 1}}
+
+
+def test_allow_unresolved_concatenation_of_an_unresolved_object_stays_unresolved() -> None:
+    cfg = parse("a = {x = ${nope}}\nb = ${a} [1]", resolve_substitutions=False).resolve(
+        allow_unresolved=True
+    )
+    assert not cfg.is_resolved()
+    with pytest.raises(NotResolvedError):
+        cfg.get("b")
+
+
+def test_allow_unresolved_field_whose_walk_reaches_an_undefined_substitution() -> None:
+    # Lightbend keeps the whole delayed merge unresolved; py used to answer
+    # with the object layer alone.
+    cfg = parse("a = ${nope}\na = {x = 1}", resolve_substitutions=False).resolve(
+        allow_unresolved=True
+    )
+    assert not cfg.is_resolved()
+    with pytest.raises(NotResolvedError):
+        cfg.get("a")

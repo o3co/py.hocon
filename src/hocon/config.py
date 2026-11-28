@@ -21,6 +21,7 @@ from ._internal.resolver.resolver import (
     resolve_tree,
     strip_placeholders,
     tree_from_value,
+    tree_key_shape,
     val_contains_placeholders,
     with_fallback_tree,
 )
@@ -435,7 +436,7 @@ class Config(Mapping[str, Any]):
         if not isinstance(resolved, HoconObject):
             raise RuntimeError("resolve_with: expected object root")
 
-        receiver_shape = _key_shape(pending_view(receiver_tree))
+        receiver_shape = tree_key_shape(receiver_tree)
         filtered = _filter_by_receiver_shape(resolved, receiver_shape)
 
         if allow_unresolved:
@@ -698,18 +699,6 @@ def _hocon_to_py(v: HoconValue) -> Any:
     if isinstance(v, HoconArray):
         return [_hocon_to_py(item) for item in v.items]
     return {k: _hocon_to_py(val) for k, val in v.fields.items()}
-
-
-def _key_shape(tree: HoconObject) -> HoconObject:
-    """The receiver's keys: objects walked into, every other value (an
-    unresolved one included) a null."""
-    fields: dict[str, HoconValue] = {}
-    for k, v in tree.fields.items():
-        if isinstance(v, HoconObject):
-            fields[k] = _key_shape(v)
-        else:
-            fields[k] = HoconScalar("", "null")
-    return HoconObject(fields)
 
 
 def _filter_by_receiver_shape(resolved: HoconObject, receiver_shape: HoconObject) -> HoconObject:

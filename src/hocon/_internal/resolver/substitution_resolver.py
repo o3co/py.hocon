@@ -206,6 +206,10 @@ class SubstitutionResolver:
             if isinstance(r, Unresolved):
                 return r
             resolved.append(r)
+        if self.allow_unresolved and not all(is_resolved(r) for r in resolved):
+            # An object or a list piece that holds an unresolved value cannot
+            # be joined; the concatenation stays unresolved as a whole.
+            return Unresolved(c)
         result: Result = MISSING  # every piece omitted
         if resolved:
             joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)

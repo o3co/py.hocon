@@ -75,8 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (E12, `dr31` / `dr32`).
 
   Under `allow_unresolved`, a field whose stack walk reaches an undefined
-  required substitution is unresolved as a whole; before, a lower layer
-  could stand in for it.
+  required substitution is unresolved as a whole (`a = ${nope}`,
+  `a = { x = 1 }`: `a` is unresolved; before, `a = { x: 1 }`), and so is a
+  concatenation with an unresolved object or list piece (before, a type
+  error).
 
 ### Fixed
 

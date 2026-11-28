@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from ...value import HoconObject, HoconValue
+from ...value import HoconObject, HoconScalar, HoconValue
 from ..parser.ast import AstNode
 from .convert import Placeholder, pending_view, to_hocon, tree_from_hocon, val_contains_placeholders
 from .include_loader import IncludeLoader
@@ -34,7 +34,9 @@ __all__ = [
     "pending_view",
     "resolve",
     "resolve_tree",
+    "strip_placeholders",
     "tree_from_value",
+    "tree_key_shape",
     "val_contains_placeholders",
     "with_fallback_tree",
 ]
@@ -88,6 +90,35 @@ def partial_root(tree: Tree) -> HoconObject:
     """The resolved part of an unresolved tree: :func:`pending_view` without
     its placeholders (an object keeps its resolved fields)."""
     return strip_placeholders(pending_view(tree))[0]
+
+
+def tree_key_shape(tree: Tree) -> HoconObject:
+    """The keys a tree defines, for ``resolve_with`` (E12 decision 9): at each
+    level, the union of the keys of the object entries of every stack, and a
+    null for a key none of whose entries is an object. A key that only a
+    substitution brings in is not part of the shape."""
+    fields: dict[str, HoconValue] = {}
+    for k, s in tree.fields.items():
+        objs = [e for e in s.stack if isinstance(e, Obj)]
+        if not objs:
+            fields[k] = HoconScalar("", "null")
+            continue
+        shape = HoconObject({})
+        for o in reversed(objs):  # bottom first, so document order is kept
+            shape = _union_shape(shape, tree_key_shape(o))
+        fields[k] = shape
+    return HoconObject(fields)
+
+
+def _union_shape(a: HoconObject, b: HoconObject) -> HoconObject:
+    fields = dict(a.fields)
+    for k, v in b.fields.items():
+        prev = fields.get(k)
+        if isinstance(prev, HoconObject) and isinstance(v, HoconObject):
+            fields[k] = _union_shape(prev, v)
+        elif not isinstance(prev, HoconObject):
+            fields[k] = v
+    return HoconObject(fields)
 
 
 def strip_placeholders(v: HoconObject) -> tuple[HoconObject, bool]:

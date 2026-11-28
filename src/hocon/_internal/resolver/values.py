@@ -171,13 +171,15 @@ class Partial:
 
 
 class Unresolved:
-    """An undefined required substitution under ``allow_unresolved`` (§8.2).
-    It absorbs the field, list item or concatenation it appears in."""
+    """What stays unresolved under ``allow_unresolved`` (§8.2): an undefined
+    required substitution, or a concatenation holding one. It absorbs the
+    field, list item or concatenation it appears in. ``value`` is the model
+    value that could not be resolved."""
 
-    __slots__ = ("subst",)
+    __slots__ = ("value",)
 
-    def __init__(self, subst: Subst) -> None:
-        self.subst = subst
+    def __init__(self, value: Subst | Concat) -> None:
+        self.value = value
 
 
 class Missing:
