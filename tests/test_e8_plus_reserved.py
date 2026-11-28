@@ -125,6 +125,9 @@ _SHARED_TABLE_MORE: list[tuple[str, object]] = [
     ("1e+5e5", ParseError),
     ("1e+5-", ParseError),
     ("1.e+5", 100000.0),
+    # Since Lightbend 1.4.10 a run starting with "-." is not a number
+    # (xx.hocon#140), so this is a run with '+' that is not a number.
+    ("-.5e+3", ParseError),
 ]
 
 
@@ -159,8 +162,13 @@ def test_shared_table_key_position(document: str, expected: object) -> None:
         ("1.", 1.0),
         ("1.e5", 100000.0),
         ("-1.", -1.0),
-        ("-.5", -0.5),
-        ("-.5e+3", -500.0),
+        ("-0.5", -0.5),
+        ("-5.", -5.0),
+        # Text since Lightbend 1.4.10 (xx.hocon#140), like ".5".
+        ("-.5", "-.5"),
+        ("-.5e3", "-.5e3"),
+        ("-.5e999", "-.5e999"),
+        ("-.5ms", "-.5ms"),
         ("1.5.", "1.5."),
         (".5", ".5"),
         ("-.", "-."),
@@ -189,6 +197,7 @@ def test_long_malformed_run_is_rejected_quickly() -> None:
     [
         ("x = [1]\n1 = [1]\n1+= 2", ParseError),  # the number run takes the '+'
         ("1e5 = [1]\n1e5+= 2", ParseError),
+        ("x = [1]\n-.5+= 2", ParseError),  # not a number, but still a number run
         ("1 = [1]\n1 += 2", {"1": [1, 2]}),  # workaround: a space before +=
         ("a = [1]\na+= 2", {"a": [1, 2]}),  # a text key is not number-lexed
         ("1x = [1]\n1x+= 2", {"1x": [1, 2]}),  # the number run stops at 'x'
