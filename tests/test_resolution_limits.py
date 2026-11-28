@@ -2,7 +2,7 @@
 
 The shapes are those of xx.hocon ``generate/reference-model/limit_probes.py``
 that run quickly; each must have the same outcome as in the reference model.
-The ``o3co-limit`` fixtures (rv140, rv142, rv147) are asserted here to fail
+The ``o3co-limit`` fixtures (rv140, rv142, rv147, rv149) are asserted here to fail
 with ``ResolutionLimitError`` itself, as the runner contract asks; the
 conformance harness only checks that they error.
 """
@@ -89,6 +89,7 @@ _FIXTURES = Path(__file__).parent / "conformance" / "testdata" / "hocon" / "reso
         "rv140-limit-dense5",
         "rv142-limit-budget-40-values",
         "rv147-limit-budget-61-values-edge-cases",
+        "rv149-limit-budget-escaped-surrogates-fails",
     ],
 )
 def test_o3co_limit_fixture_fails_with_the_limit(name: str) -> None:
