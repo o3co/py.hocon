@@ -764,7 +764,7 @@ def _render_hocon_as_json(v: HoconValue) -> str:
             norm = _normalize_leading_zero_number(v.raw)
             if _JSON_NUMBER_RE.fullmatch(norm):
                 return norm
-            # A HOCON number spelled outside JSON's grammar (`1.`, `-.5`,
+            # A HOCON number spelled outside JSON's grammar (`1.`, `-1.`,
             # `1.e5`) is still a number: render its value, not its text.
             n = coerce_number(v.raw)
             return json.dumps(n) if n is not None else json.dumps(v.raw)

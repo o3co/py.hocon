@@ -210,3 +210,37 @@ def test_number_key_directly_before_plus_equals(document: str, expected: object)
     else:
         got = parse_string(document).to_object()
         assert {k: got[k] for k in expected} == expected  # type: ignore[attr-defined]
+
+
+# A run that starts with "-." in every position (Lightbend 1.4.10,
+# xx.hocon#140): it is text, and with a '+' it is an error.
+@pytest.mark.parametrize(
+    ("document", "expected"),
+    [
+        ("-.5 = 1", {"-": {"5": 1}}),
+        ("-.5e+3 = 1", ParseError),
+        ("a = x -.5e+3", ParseError),
+        ("a = -.5 b", {"a": "-.5 b"}),
+        ("a = [-.5]", {"a": ["-.5"]}),
+        ("a = [-.5e+3]", ParseError),
+        ("b = 1\na = ${b}-.5", {"a": "1-.5", "b": 1}),
+        ("b = 1\na = ${b}-.5e+3", ParseError),
+        ("a = -.5e+3ms", ParseError),
+    ],
+)
+def test_negative_leading_dot_in_every_position(document: str, expected: object) -> None:
+    if expected is ParseError:
+        with pytest.raises(ParseError, match="reserved character '\\+'"):
+            parse_string(document)
+    else:
+        assert parse_string(document).to_object() == expected
+
+
+def test_negative_leading_dot_error_points_at_plus() -> None:
+    with pytest.raises(ParseError) as info:
+        parse_string("a = -.5e+3")
+    assert (info.value.line, info.value.col) == (1, 9)
+
+
+def test_get_float_still_coerces_negative_leading_dot_text() -> None:
+    assert parse_string("a = -.5").get_float("a") == -0.5
