@@ -455,6 +455,7 @@ def _validate_success(
         assert cfg.is_resolved() is expect["isResolved"], (
             f"{stem}: is_resolved() = {cfg.is_resolved()}, want {expect['isResolved']}"
         )
+    mismatch: _TreeMismatch | None = None
     if cfg.is_resolved():
         expected_file = _DR_EXPECTED / f"{stem}-expected.json"
         raw = (
@@ -466,9 +467,13 @@ def _validate_success(
             got = _norm(json.loads(cfg._render_json_for_test()))
             want = _norm(json.loads(raw))
             if got != want:
-                raise _TreeMismatch(f"{stem}: JSON tree mismatch\n got:  {got}\n want: {want}")
+                mismatch = _TreeMismatch(f"{stem}: JSON tree mismatch\n got:  {got}\n want: {want}")
+    # Getters run before a tree mismatch is raised, so a known gap's getters
+    # are still checked.
     for g in expect.get("getter", []):
         _assert_getter(stem, cfg, g)
+    if mismatch is not None:
+        raise mismatch
 
 
 def _validate_error(
