@@ -23,7 +23,7 @@ from .merge import fallback
 from .structure_builder import StructureBuilder
 from .substitution_resolver import SubstitutionResolver
 from .types import ResolveOptions
-from .values import Obj, is_resolved
+from .values import Obj, freeze, is_resolved
 
 __all__ = [
     "Placeholder",
@@ -50,7 +50,9 @@ def build_tree(ast: AstNode, opts: ResolveOptions) -> Tree:
     expanded (each included file is built with its own options)."""
     loader = IncludeLoader(opts)
     loader.on_build = build_tree
-    return StructureBuilder(loader).build(ast)
+    tree = StructureBuilder(loader).build(ast)
+    freeze(tree)  # the tree never changes again (§10.2)
+    return tree
 
 
 def resolve_tree(tree: Tree, opts: ResolveOptions) -> HoconValue:
@@ -78,6 +80,7 @@ def with_fallback_tree(receiver: Tree, fallback_tree: Tree) -> Tree:
     merged = fallback([receiver], [fallback_tree], synth=False, receiver_first=True)
     top = merged[0]
     assert len(merged) == 1 and isinstance(top, Obj)
+    freeze(top)
     return top
 
 

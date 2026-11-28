@@ -21,7 +21,7 @@ from ..parser.ast import (
 )
 from .include_loader import IncludeLoader
 from .merge import consolidate, fallback, merge_included
-from .values import Concat, Lst, Obj, Path, Scalar, Slot, Subst, Val, Whitespace, is_resolved
+from .values import Concat, Lst, Obj, Path, Scalar, Slot, Subst, Val, is_resolved
 
 __all__ = ["StructureBuilder", "relativize"]
 
@@ -41,7 +41,7 @@ class StructureBuilder:
     # counts as one (§2.3, Lightbend ConfigParser.java:275 ``arrayCount``).
 
     def _body(self, ast: AstObject, path: Path, depth: int) -> Obj:
-        obj = Obj()
+        obj = Obj(frozen=False)
         for fld in ast.fields:
             self._apply_field(obj, fld, path, depth)
         return obj
@@ -90,8 +90,7 @@ class StructureBuilder:
 
     def _value(self, ast: AstNode, path: Path, depth: int) -> Val:
         if isinstance(ast, AstScalar):
-            if ast.separator:
-                return Whitespace(ast.raw)
+            # A parser-inserted separator is unquoted whitespace (§1.3 rule 3).
             return Scalar(ast.raw, ast.value_type, ast.quoted)
         if isinstance(ast, AstArray):
             return Lst([self._value(i, path, depth + 1) for i in ast.items])
@@ -137,7 +136,7 @@ def _put(obj: Obj, keys: tuple[str, ...], v: Val, path: Path) -> None:
     new value on top with :func:`fallback`."""
     k = keys[0]
     for j in range(len(keys) - 1, 0, -1):
-        v = Obj({keys[j]: Slot(keys[j], [v], path + keys[: j + 1])})
+        v = Obj({keys[j]: Slot(keys[j], [v], path + keys[: j + 1])}, frozen=False)
     existing = obj.fields.get(k)
     if existing is not None:
         existing.stack = fallback([v], existing.stack, synth=False)
@@ -175,5 +174,6 @@ def _relativize(v: Val, prefix: Path) -> Val:
                 for k, s in v.fields.items()
             },
             v.flag,
+            frozen=False,
         )
     return v

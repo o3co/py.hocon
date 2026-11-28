@@ -177,3 +177,15 @@ def test_allow_unresolved_field_whose_walk_reaches_an_undefined_substitution() -
     assert not cfg.is_resolved()
     with pytest.raises(NotResolvedError):
         cfg.get("a")
+
+
+@pytest.mark.parametrize(
+    "src",
+    ["a.x.y = ${?unset}\nb = ${?a.x.y}", "b = ${?a.x.y}\na.x.y = ${?unset}"],
+    ids=["reader-last", "reader-first"],
+)
+def test_j2_presence_on_the_whole_raw_path_ignores_the_environment(src: str) -> None:
+    # §5.3 / J2 (rv127 / rv128 with the environment set): a.x.y is
+    # raw-present, so it is found, resolves to nothing, and §7.2 never reaches
+    # the environment, in both line orders.
+    assert _resolve(src, {"a.x.y": "ENV"}) == {"a": {"x": {}}}

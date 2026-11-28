@@ -1,18 +1,21 @@
 """Look-back views (xx.hocon ``docs/resolution-model.md`` §4).
 
-A :class:`View` maps document slots to a **substitute**: the part of the slot's
-stack below the entry being resolved (a stack), or :class:`Empty` when there is
+A :class:`View` maps slots to a **substitute**: the part of the slot's stack
+below the entry being resolved (a stack), or :class:`Empty` when there is
 nothing below. A ``${}`` written in a stack entry is resolved in a view where
 its own slot shows only what is below it; that is the whole of "look-back".
 
-Views are immutable and only ever map document slots (§3.5, §10), and
-:class:`Substitutes` hands out one substitute instance per ``(stack, index)``
-(§4.2), so the set of views a resolve can create is finite.
+A view maps a document slot by identity (through its ``origin``, §3.4), and a
+synthesized slot, a merged leaf, by its path and the entry instances it is
+built from (§3.5). Only the document-slot mappings count for the cycle markers
+(:attr:`View.slot_key`, §6.1), which keeps resolution finite (§10.1).
+:class:`Substitutes` hands out one substitute per ``(stack, index)`` (§4.2),
+folded only when a lookup reads it (§10.2).
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 
 from .values import Concat, Lst, Obj, Path, Slot, Stack, Subst, Val
 
@@ -37,10 +40,9 @@ Substitute = Stack | Empty
 
 
 class Below:
-    """``substitute(st, start)`` (§4.2) as a handle: the entries
+    """``substitute(st, start)`` (§4.2) as a reference: the entries
     ``st[start:]`` as one substitute, folded only when a lookup first reads
-    them. A view maps a slot to a handle, so making a view costs nothing until
-    the slot is reached; the handle's identity is the substitute's identity."""
+    them (§10.2). Its identity is the substitute's identity."""
 
     __slots__ = ("_fold", "_start", "_st", "_value")
 
@@ -66,44 +68,55 @@ class Below:
         return v
 
 
-# A view's identity for memo keys and markers: (slot id, substitute id) pairs.
+# A view's identity for memo keys and markers: (mapping key, substitute id)
+# pairs, where a mapping key is a document slot's id or a merged leaf's
+# (path, entry ids).
 #
-# Keys are ids, not objects, so that a key stays cheap to hash. That is safe
-# only because every object whose id appears in a key outlives the resolve:
-# a view maps document slots only (§3.5), which the root keeps alive, and
-# every substitute handle is held by :class:`Substitutes`. A port must keep
-# the same invariant (or key by the objects themselves).
-ViewKey = frozenset[tuple[int, int]]
+# Ids are used so that a key stays cheap to hash. That is safe only because
+# every object whose id appears in a key outlives the resolve: a view maps
+# document slots, which the root keeps alive, and merged leaves by the ids of
+# entries that the tree or the resolver's caches hold; every substitute is
+# held by :class:`Substitutes`. A port must keep the same invariant (or key
+# by the objects themselves).
+ViewKey = frozenset[tuple[Hashable, int]]
 
 _NO_MAPPINGS: ViewKey = frozenset()
 
 
+def _mapping_key(slot: Slot) -> Hashable:
+    if slot.synth:
+        return (slot.path, slot.content())
+    return id(slot.origin)
+
+
 class View:
-    """An immutable map from document slot to substitute (§4.1). Two views are
-    equal when they map the same slots to the same substitute instances,
-    which is what :attr:`key` captures."""
+    """An immutable map to substitutes (§4.1). Two views are equal when they
+    map the same slots and paths to the same substitute instances, which is
+    what :attr:`key` captures; :attr:`slot_key` is the document-slot part."""
 
-    __slots__ = ("_m", "key")
+    __slots__ = ("_m", "key", "slot_key")
 
-    def __init__(self, m: dict[Slot, tuple[Below, Path]] | None = None) -> None:
-        self._m: dict[Slot, tuple[Below, Path]] = m or {}
-        self.key: ViewKey = (
-            frozenset((id(s), id(sub)) for s, (sub, _) in self._m.items())
-            if self._m
-            else _NO_MAPPINGS
-        )
+    def __init__(self, m: dict[Hashable, tuple[Below, Path, bool]] | None = None) -> None:
+        # mapping key -> (substitute, path of the slot, is a document slot)
+        self._m: dict[Hashable, tuple[Below, Path, bool]] = m or {}
+        if self._m:
+            self.key: ViewKey = frozenset((k, id(sub)) for k, (sub, _, _) in self._m.items())
+            self.slot_key: ViewKey = frozenset(
+                (k, id(sub)) for k, (sub, _, doc) in self._m.items() if doc
+            )
+        else:
+            self.key = self.slot_key = _NO_MAPPINGS
 
     def get(self, slot: Slot) -> Substitute | None:
-        """The slot's substitute, or None when the view does not map it.
-        A synthesized slot is never mapped (§3.5)."""
-        if slot.synth or not self._m:
+        """The slot's substitute, or None when the view does not map it."""
+        if not self._m:
             return None
-        entry = self._m.get(slot)
+        entry = self._m.get(_mapping_key(slot))
         return entry[0].value() if entry is not None else None
 
     def with_(self, slot: Slot, sub: Below) -> View:
         m = dict(self._m)
-        m[slot] = (sub, slot.path)
+        m[_mapping_key(slot)] = (sub, slot.path, not slot.synth)
         return View(m)
 
     def below(self, path: Path, *, strict: bool = False) -> ViewKey:
@@ -113,8 +126,8 @@ class View:
             return _NO_MAPPINGS
         n = len(path)
         return frozenset(
-            (id(s), id(sub))
-            for s, (sub, p) in self._m.items()
+            (k, id(sub))
+            for k, (sub, p, _) in self._m.items()
             if p[:n] == path and (len(p) > n or not strict)
         )
 
@@ -123,16 +136,16 @@ ROOT_VIEW = View()
 
 
 class Substitutes:
-    """One :class:`Below` handle per ``(st, start)`` (§4.2: the same
-    ``(st, i)`` always gives the same substitute instance).
+    """One :class:`Below` per ``(st, start)`` (§4.2: the same ``(st, i)``
+    always gives the same substitute instance).
 
-    ``fold`` is :func:`.merge.fold_entries` as used while resolving; it is
-    passed in so that this module does not depend on the merge rules.
+    ``fold`` is :func:`.merge.fold_entries`; it is passed in so that this
+    module does not depend on the merge rules.
     """
 
     def __init__(self, fold: Callable[[Stack], Stack]) -> None:
         self._fold = fold
-        # id(stack) -> (stack, {start: handle}); the stack is kept alive so
+        # id(stack) -> (stack, {start: substitute}); the stack is kept alive so
         # its id is never reused while the cache holds it.
         self._cache: dict[int, tuple[Stack, dict[int, Below]]] = {}
 

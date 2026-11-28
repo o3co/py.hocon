@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field's stack below it, instead of the single saved "prior" value the
   resolver kept before. Ships in the window's lockstep minor.
 
-  **Inputs that now error** (as in Lightbend 1.4.9), with workarounds:
+  **Inputs that now error** (as in Lightbend 1.4.10, the oracle since
+  xx.hocon#141), with workarounds:
   - A required `${a}` whose target was removed by an undefined optional
     (`a = 1`, `a = ${?unset}`, `b = ${a}`), including through an include and
     through a path (`${x.y}`), and an included object over
@@ -48,9 +49,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`a = ${?absent} ${x}` with `x = [1]`): the whitespace is a string, so
     this is a concatenation type error. **Workaround**: drop the space
     (`${?absent}${x}`).
-  - A concatenation type error written literally (`a = [1] "x"`) is now
-    raised when the document is parsed, also with
-    `resolve_substitutions=False`.
+  - Any text after a list or an object in a concatenation, other than
+    whitespace, is a type error, also when a substitution brings it in or
+    the list comes from one (`b = ${a}x` with `a = [1]`; `c = [1] ${x}` with
+    `x = s`) — E5, now as in Lightbend 1.4.10. Written literally, as in
+    `a = { b: 1 } x`, it was already an error; it is now raised when the
+    document is parsed, also with `resolve_substitutions=False`.
+    **Workaround**: quote the text into its own field, or drop it.
+  - An object substituted over a field's earlier assignments no longer hides
+    them (below), so they are evaluated: `r = null`, `r = { y = 1 }`,
+    `a = { x = ${missing} }`, `a = ${r}` is an error (zig-hocon
+    duplicate-keys-and-object-merging/015). **Workaround**: fix or remove
+    the earlier assignment.
 
   **Wrong values corrected** (now Lightbend's):
   - A stack of three or more assignments no longer loses its bottom layer,
@@ -61,16 +71,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Look-back and aliases: an alias read inside a look-back sees the field's
     lower layers; an object below a substitution looks forward; a path into
     a self-referential field looks back (#127).
-  - An object that replaced a non-object in its own field's history (`r =
-    null`, `r = ${v}`) ignores fallbacks wherever it is substituted:
-    `a = { helper = 0 }`, `a = ${r}` gives `a = r`, without `helper`.
+  - A substituted object does not carry "ignore fallbacks" from its own
+    field's history (Lightbend 1.4.10): with `r = null`, `r = ${v}`,
+    `a = { helper = 0 }`, `a = ${r}` keeps `helper` next to `r`'s keys, and
+    `b = {k = {d = 2}}`, `b = ${r}` with `r = {k = "", k = {c = 1}}` gives
+    `b.k = {c: 1, d: 2}`.
+  - A look-back through a merged field sees the lower layers:
+    `d { x = [] }`, `c = ${d}`, `c { x += 1, x += 2 }` gives `c.x = [1, 2]`
+    (before, `[2]`).
+  - A path that exists in the document is found, whatever was resolved
+    first: `a.x.y = ${?unset}`, `b = ${?a.x.y}` omits `b` in both line
+    orders, and never reads an environment variable `a.x.y`.
   - An undefined optional that a cycle runs through resolves to nothing
     exactly once (`oc01`, `oc03`; #128).
-  - Once substitutions are resolved, an unquoted string after a list or an
-    object is dropped, as in Lightbend: `b = ${a}x` with `a = [1]` gives
-    `[1]`, and so does `c = [1] ${x}` with `x = s`. Both were type errors.
-    Unquoted text written right after a list or object literal
-    (`a = { b: 1 } x`) is still an error (E5).
   - `with_fallback` keeps the receiver's keys first at every merged level
     (E12, `dr31` / `dr32`).
 
@@ -98,25 +111,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolving (py counterpart of go.hocon#218 / rs.hocon#199, where it crashed
   the process). For `a = ${?b}` / `b = ${?a}` written twice, the resolver
   re-entered a key's saved prior forever until the recursion limit turned it
-  into "input is nested too deeply … or contains a cycle". A re-entry in an
-  unchanged resolver state is now treated as a cycle that cannot be broken:
-  an optional substitution is nonexistent and a required one is a
-  `ResolveError`, as in Lightbend (`{}` and `UnresolvedSubstitution` for the
-  input above). The state is the in-progress keys, the S13a.12 prefix-prior
-  guard, the relevant part of the field path, the concatenations being
-  resolved and the scope.
-- **Two new errors bound what such a cycle may still cost** once the guard
-  has cut it, where a cycle through nested objects can otherwise nest its
-  value exponentially or keep branching: `resolved value too large: <path>
-  keeps growing (a cycle through nested objects?)` and `substitution cycle
-  too complex to resolve: ${<path>}`. Neither applies before a cut, so an
-  acyclic config, however large or deeply nested, is never limited.
-- No config that loaded before was found to read differently, over ~160,000
-  generated and corpus inputs compared against the previous release; this is
-  measured, not proven. Some inputs that hit the recursion limit (a cycle
-  through string concatenation, for example) now return a value that still
-  differs from Lightbend's. Getting those right is the resolver redesign in
-  o3co/xx.hocon#67 / #125, which replaces this interim guard.
+  into "input is nested too deeply … or contains a cycle". It now gives
+  Lightbend's `{}` (an optional that closes a cycle is nonexistent, a
+  required one a `ResolveError`). py.hocon#68 fixed this with an interim
+  guard; the resolution layer above replaces it.
+- **Two errors bound what a broken cycle may still cost**, where a dense web
+  of optional cycles keeps branching or a ring of them doubles its value on
+  every lap (the reference model and Lightbend run for minutes or out of
+  memory): `substitution cycle too complex to resolve: ${<path>}` and
+  `resolved value too large: <path> keeps growing`. Neither applies unless a
+  cycle was broken, so a config without one, however large or deeply nested,
+  is never limited.
 - **BREAKING (spec fix, S1.2.4): a raw control character inside a quoted
   string is a parse error ([xx.hocon#130](https://github.com/o3co/xx.hocon/issues/130)).**
   A raw C0 control character (U+0000–U+001F) inside a double-quoted string is

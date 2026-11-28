@@ -9,11 +9,15 @@ Nothing outside this package sees them.
 - :class:`Slot` is the pair (object, key) that holds a **stack**: every
   assignment of the key that was not dropped, top (latest) first. A stack is a
   plain ``list`` and never contains a stack.
+- An object is read through :meth:`Obj.get_field` / :meth:`Obj.field_keys` /
+  :attr:`Obj.fields`. Objects built while resolving are lazy (§10.2): the
+  merge overlay (:class:`.merge.Overlay`), the restricted :class:`Patch`, and
+  the §5.5 :class:`.substituted.Substituted`. They compute a field only when
+  it is asked for, and the full field map only when the object is iterated.
 - :class:`Partial` is a multi-entry merged value. It exists only while
   resolving under a restriction (§3.4).
-- :class:`Unresolved` is what an undefined required substitution resolves to
-  under ``allow_unresolved`` (§8.2). It is py's stand-in for Lightbend leaving
-  the reference in place.
+- :class:`Unresolved` is what stays unresolved under ``allow_unresolved``
+  (§8.2). It is py's stand-in for Lightbend leaving the reference in place.
 - :data:`MISSING` is "no value" (an undefined optional, an empty
   concatenation, a stack where nothing contributed).
 
@@ -35,6 +39,7 @@ __all__ = [
     "Missing",
     "Obj",
     "Partial",
+    "Patch",
     "Path",
     "Result",
     "Scalar",
@@ -43,7 +48,9 @@ __all__ = [
     "Subst",
     "Unresolved",
     "Val",
-    "Whitespace",
+    "carries_stack",
+    "freeze",
+    "has_path",
     "ignores_fallbacks",
     "is_resolved",
     "stack_ignores_fallbacks",
@@ -55,9 +62,8 @@ Path = tuple[str, ...]
 class Scalar:
     """A string, number, boolean or null. ``raw`` is the source text (or the
     joined text of a concatenation). ``quoted`` records whether a string was
-    written quoted: an unquoted string after a list or an object is dropped by
-    a concatenation (§1.3 rule 3). Parser-inserted whitespace between pieces
-    is an unquoted string."""
+    written quoted: only an unquoted whitespace string after a list or an
+    object is dropped by a concatenation (§1.3 rule 3)."""
 
     __slots__ = ("quoted", "raw", "value_type")
 
@@ -68,16 +74,6 @@ class Scalar:
 
     def is_unquoted_string(self) -> bool:
         return self.value_type == "string" and not self.quoted
-
-
-class Whitespace(Scalar):
-    """The whitespace the parser keeps between two concatenation pieces: an
-    unquoted string."""
-
-    __slots__ = ()
-
-    def __init__(self, raw: str) -> None:
-        super().__init__(raw, "string", False)
 
 
 class Lst:
@@ -93,28 +89,120 @@ class Slot:
     """The pair (object, key) holding a stack (§1.1).
 
     ``path`` is the key's full path from the document root. ``synth`` is True
-    for a slot created while resolving (§3.5): a view never maps it and a
-    look-back never starts from it.
+    for a slot created while resolving (§3.5, a merged leaf): a view maps it by
+    its path and its entries (:meth:`content`), not by identity. ``origin`` is
+    the document slot this slot stands for: itself, or the slot whose
+    view-mapped stack it carries through a restricted lookup (§3.4); a view
+    maps a document slot through its origin.
     """
 
-    __slots__ = ("key", "path", "stack", "synth")
+    __slots__ = ("_content", "key", "origin", "path", "stack", "synth")
 
-    def __init__(self, key: str, stack: Stack, path: Path, synth: bool = False) -> None:
+    def __init__(
+        self,
+        key: str,
+        stack: Stack,
+        path: Path,
+        synth: bool = False,
+        origin: Slot | None = None,
+    ) -> None:
         self.key = key
         self.stack = stack
         self.path = path
         self.synth = synth
+        self.origin: Slot = origin if origin is not None else self
+        self._content: tuple[int, ...] | None = None
+
+    def content(self) -> tuple[int, ...]:
+        """A merged leaf's identity besides its path (§3.5): the entry
+        instances it is built from. Only asked for while resolving, when
+        stacks no longer change."""
+        if self._content is None:
+            self._content = tuple(id(x) for x in self.stack)
+        return self._content
 
 
 class Obj:
     """An object: an insertion-ordered map from key to :class:`Slot`. ``flag``
-    is ignoresFallbacks (§1.2), set only by the F6 rule of §2.1."""
+    is ignoresFallbacks (§1.2), set only by the F6 rule of §2.1.
 
-    __slots__ = ("fields", "flag")
+    ``frozen`` objects never change again, so "resolved" and "carries ignored
+    fallbacks" are computed once (§10.2). The structure builder makes its
+    objects unfrozen and freezes the tree when it is done (:func:`freeze`);
+    everything made while resolving is frozen from the start.
+    """
 
-    def __init__(self, fields: dict[str, Slot] | None = None, flag: bool = False) -> None:
-        self.fields: dict[str, Slot] = fields if fields is not None else {}
-        self.flag = flag
+    __slots__ = ("_car", "_fields", "_flag", "_res", "frozen")
+
+    def __init__(
+        self, fields: dict[str, Slot] | None = None, flag: bool = False, frozen: bool = True
+    ) -> None:
+        self._fields: dict[str, Slot] | None = fields if fields is not None else {}
+        self._flag = flag
+        self.frozen = frozen
+        self._res: bool | None = None
+        self._car: bool | None = None
+
+    @property
+    def flag(self) -> bool:
+        return self._flag
+
+    @property
+    def fields(self) -> dict[str, Slot]:
+        """The full field map. A lazy object builds it on first use."""
+        assert self._fields is not None
+        return self._fields
+
+    def get_field(self, k: str) -> Slot | None:
+        return self.fields.get(k)
+
+    def field_keys(self) -> list[str]:
+        return list(self.fields)
+
+    def is_resolved(self) -> bool:
+        """§1.2: every field holds one resolved entry."""
+        if self._res is None or not self.frozen:
+            self._res = all(
+                len(s.stack) == 1 and is_resolved(s.stack[0]) for s in self.fields.values()
+            )
+        return self._res
+
+    def carries(self) -> bool:
+        """§5.5: flagged, or a child stack carries ignored fallbacks."""
+        if self._car is None or not self.frozen:
+            self._car = self.flag or any(carries_stack(s.stack) for s in self.fields.values())
+        return self._car
+
+
+class Patch(Obj):
+    """§3.4 restricted object: ``base`` with one key replaced (``field``) or
+    removed (``field`` is None), without copying the other keys (§10.2)."""
+
+    __slots__ = ("base", "field", "key")
+
+    def __init__(self, base: Obj, key: str, field: Slot | None) -> None:
+        super().__init__(None, base.flag)
+        self._fields = None  # built on first iteration
+        self.base = base
+        self.key = key
+        self.field = field
+
+    @property
+    def fields(self) -> dict[str, Slot]:
+        if self._fields is None:
+            out = dict(self.base.fields)
+            if self.field is None:
+                out.pop(self.key, None)
+            else:
+                out[self.key] = self.field
+            self._fields = out
+        return self._fields
+
+    def get_field(self, k: str) -> Slot | None:
+        return self.field if k == self.key else self.base.get_field(k)
+
+    def field_keys(self) -> list[str]:
+        return list(self.fields)
 
 
 class Subst:
@@ -151,7 +239,7 @@ class Concat:
     the concatenation is written in; the concatenation memo keys on the view's
     mappings strictly below it (§5.2)."""
 
-    __slots__ = ("fpath", "line", "col", "pieces")
+    __slots__ = ("col", "fpath", "line", "pieces")
 
     def __init__(self, pieces: list[Val], fpath: Path, line: int = 0, col: int = 0) -> None:
         self.pieces = pieces
@@ -206,7 +294,7 @@ def is_resolved(v: Val) -> bool:
     if isinstance(v, Lst):
         return all(is_resolved(i) for i in v.items)
     if isinstance(v, Obj):
-        return all(len(s.stack) == 1 and is_resolved(s.stack[0]) for s in v.fields.values())
+        return v.is_resolved()
     return False
 
 
@@ -225,3 +313,42 @@ def ignores_fallbacks(v: Val) -> bool:
 def stack_ignores_fallbacks(st: Stack) -> bool:
     """§1.2: a stack ignores fallbacks exactly when its *last* entry does."""
     return ignores_fallbacks(st[-1])
+
+
+def carries_stack(st: Stack) -> bool:
+    """§5.5 "carries ignored fallbacks" for a stack: one entry carries it, or a
+    multi-entry stack ignores fallbacks or has an entry that carries it.
+    Scalars, lists, substitutions and concatenations never carry it."""
+    if len(st) == 1:
+        e = st[0]
+        return isinstance(e, Obj) and e.carries()
+    return stack_ignores_fallbacks(st) or any(isinstance(e, Obj) and e.carries() for e in st)
+
+
+def has_path(v: Val, path: Path) -> bool:
+    """§5.3 presence: whether a resolved value has the whole ``path``."""
+    for k in path:
+        s = v.get_field(k) if isinstance(v, Obj) else None
+        if s is None or len(s.stack) != 1:
+            return False
+        v = s.stack[0]
+    return True
+
+
+def freeze(v: Val) -> None:
+    """Mark every object of a finished tree frozen (§10.2). A frozen object's
+    subtree is frozen already, so the walk stops there."""
+    todo: list[Val] = [v]
+    while todo:
+        x = todo.pop()
+        if isinstance(x, Obj):
+            if x.frozen:
+                continue
+            x.frozen = True
+            x._res = x._car = None  # anything computed while it could still change
+            for s in x.fields.values():
+                todo.extend(s.stack)
+        elif isinstance(x, Lst):
+            todo.extend(x.items)
+        elif isinstance(x, Concat):
+            todo.extend(x.pieces)

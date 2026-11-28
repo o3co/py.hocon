@@ -182,7 +182,7 @@ class IncludeLoader:
 
         # No extension: merge all found extensions (.properties, .json, .conf;
         # each on top of the ones before, as an include of each would be).
-        merged = Obj()
+        merged = Obj(frozen=False)
         found_any = False
         for ext in (".properties", ".json", ".conf"):
             obj = self._load_single(f"{abs_path}{ext}")
