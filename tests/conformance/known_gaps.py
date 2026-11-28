@@ -44,6 +44,18 @@ _XX139 = (
     "reference model's result yet — fixed by the resolution layer (o3co/xx.hocon#67 "
     "window); py: o3co/py.hocon#67"
 )
+_XX142_SELF_CONCAT = (
+    "o3co/xx.hocon#142 resolution-model fixture (merged-leaf alias): py.hocon gives "
+    'app.opts.name = "base-a-c" instead of "base-a-b-c" — the self-concatenation '
+    "name = ${app.opts.name}-b in the second app object is skipped; removed by "
+    "o3co/py.hocon#67 (resolution window)"
+)
+_XX142_SUBST_BASE = (
+    "o3co/xx.hocon#142 resolution-model fixture (merged-leaf alias): py.hocon gives "
+    "app.opts.flags = [a, b, c, d] instead of [z, a, b, c, d] — the += appends "
+    "drop the [z] from the substituted base ${base}; removed by o3co/py.hocon#67 "
+    "(resolution window)"
+)
 SUCCESS_KNOWN_GAPS: dict[str, str] = {
     **{
         f"include-optional-prior/{name}": _XX115
@@ -111,6 +123,8 @@ SUCCESS_KNOWN_GAPS: dict[str, str] = {
             "rv131-view-reentry-through-resolve-time-merge",
         )
     },
+    "resolution-model/rv135-merged-leaf-alias-self-concat": _XX142_SELF_CONCAT,
+    "resolution-model/rv137-merged-leaf-alias-substituted-base": _XX142_SUBST_BASE,
 }
 
 PENDING_STEP_B: dict[str, str] = {
