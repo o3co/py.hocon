@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.14.3] - 2026-11-28
+
+**Patch.** A substitution cycle written twice (`a = ${?b}` / `b = ${?a}`,
+twice) no longer fails with a recursion-limit `ParseError`; it resolves as
+Lightbend does (`{}` for the optional form, a `ResolveError` for the
+required one), and resolution after a cut cycle is bounded in work and
+value size (the counterpart of go.hocon#218 / rs.hocon#199). Every config
+that loaded before reads the same.
+
 ### Fixed
 
 - **A substitution cycle written twice raised a `ParseError`** instead of
