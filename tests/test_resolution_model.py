@@ -242,6 +242,10 @@ def test_resolved_question_builds_no_field_map() -> None:
     overlay = Overlay([pending, base])
     assert not overlay.is_resolved()
     assert overlay._fields is None  # answered from the unresolved keys only
-    patch = Patch(base, "k0", Slot("k0", [Scalar("x", "string", True)], ("k0",)))
+    assert list(overlay._cache) == ["u"]  # no resolved key was even merged
+    # A patch whose base is unresolved only in the key it replaces.
+    rest = {f"k{i}": Scalar(str(i), "number", False) for i in range(1, 100)}
+    unresolved_base = obj(k0=Subst(("nope",), True), **rest)
+    patch = Patch(unresolved_base, "k0", Slot("k0", [Scalar("x", "string", True)], ("k0",)))
     assert patch.is_resolved()
     assert patch._fields is None
