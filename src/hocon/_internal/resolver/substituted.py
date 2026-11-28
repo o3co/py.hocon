@@ -14,6 +14,8 @@ only when asked for, so a lookup through the result touches only its path
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from .values import Obj, Path, Slot, Subst, carries_stack
 
 __all__ = ["Substituted"]
@@ -91,6 +93,9 @@ class Substituted(Obj):
         if self._res is None:
             self._res = self.base.is_resolved()
         return self._res
+
+    def unresolved_keys(self) -> Iterator[str]:
+        return self.base.unresolved_keys()  # the rewrite keeps each child resolved or not
 
     def carries(self) -> bool:
         return False

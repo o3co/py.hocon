@@ -259,11 +259,12 @@ class SubstitutionResolver:
             return o
         if not rest:
             # The leaf stays raw. If the view maps it, it carries the mapped
-            # stack but is still the same document slot (its origin), so a
-            # merge sees the look-back and a further look-back advances it.
+            # stack but is still the same slot (its origin; a merged leaf stays
+            # a merged leaf, §10.1), so a merge sees the look-back and a
+            # further look-back advances it.
             if st is child.stack:
                 return o
-            return Patch(o, k, Slot(k, st, child.path, False, child.origin))
+            return Patch(o, k, Slot(k, st, child.path, child.synth, child.origin))
         r = self._value_of(child, view, rest)
         if isinstance(r, Missing):
             return Patch(o, k, None)

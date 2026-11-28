@@ -28,6 +28,7 @@ defines ``__eq__``.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Final
 
 from ...value import ScalarValueType
@@ -49,6 +50,7 @@ __all__ = [
     "Unresolved",
     "Val",
     "carries_stack",
+    "field_resolved",
     "freeze",
     "has_path",
     "ignores_fallbacks",
@@ -92,7 +94,9 @@ class Slot:
     for a slot created while resolving (§3.5, a merged leaf): a view maps it by
     its path and its entries (:meth:`content`), not by identity. ``origin`` is
     the document slot this slot stands for: itself, or the slot whose
-    view-mapped stack it carries through a restricted lookup (§3.4); a view
+    view-mapped stack it carries through a restricted lookup (§3.4), or that
+    a §5.5 rewrite derives from. A derived slot keeps ``synth``: an alias of a
+    merged leaf is that merged leaf, never a document slot (§10.1). A view
     maps a document slot through its origin.
     """
 
@@ -115,8 +119,12 @@ class Slot:
 
     def content(self) -> tuple[int, ...]:
         """A merged leaf's identity besides its path (§3.5): the entry
-        instances it is built from. Only asked for while resolving, when
-        stacks no longer change."""
+        instances it is built from. A slot derived from another (an alias of
+        §3.4, a §5.5 rewrite) answers with its origin's, so it has the same
+        identity. Only asked for while resolving, when stacks no longer
+        change."""
+        if self.origin is not self:
+            return self.origin.content()
         if self._content is None:
             self._content = tuple(id(x) for x in self.stack)
         return self._content
@@ -132,7 +140,7 @@ class Obj:
     everything made while resolving is frozen from the start.
     """
 
-    __slots__ = ("_car", "_fields", "_flag", "_res", "frozen")
+    __slots__ = ("_car", "_fields", "_flag", "_res", "_unres", "frozen")
 
     def __init__(
         self, fields: dict[str, Slot] | None = None, flag: bool = False, frozen: bool = True
@@ -142,6 +150,7 @@ class Obj:
         self.frozen = frozen
         self._res: bool | None = None
         self._car: bool | None = None
+        self._unres: list[str] | None = None
 
     @property
     def flag(self) -> bool:
@@ -164,6 +173,14 @@ class Obj:
         if self._res is None or not self.frozen:
             self._res = _resolved_tree(self)
         return self._res
+
+    def unresolved_keys(self) -> Iterator[str]:
+        """The keys whose field is not a single resolved value (§10.2 item 5).
+        A plain object lists them once; an object built while resolving
+        yields them lazily, without building its field map."""
+        if self._unres is None or not self.frozen:
+            self._unres = [k for k, s in self.fields.items() if not field_resolved(s)]
+        return iter(self._unres)
 
     def carries(self) -> bool:
         """§5.5: flagged, or a child stack carries ignored fallbacks."""
@@ -199,15 +216,18 @@ class Patch(Obj):
     def get_field(self, k: str) -> Slot | None:
         return self.field if k == self.key else self.base.get_field(k)
 
+    def unresolved_keys(self) -> Iterator[str]:
+        # §10.2 item 5: only the replaced key can differ from the base, so no
+        # field map is built.
+        for k in self.base.unresolved_keys():
+            if k != self.key:
+                yield k
+        if self.field is not None and not field_resolved(self.field):
+            yield self.key
+
     def is_resolved(self) -> bool:
-        # Only the replaced key can differ from a resolved base, so the field
-        # map is not copied for this (§10.2: a patch, never a copy).
         if self._res is None:
-            if self.base.is_resolved():
-                f = self.field
-                self._res = f is None or (len(f.stack) == 1 and is_resolved(f.stack[0]))
-            else:
-                self._res = Obj.is_resolved(self)
+            self._res = next(self.unresolved_keys(), None) is None
         return self._res
 
     def field_keys(self) -> list[str]:
@@ -294,6 +314,11 @@ Val = Scalar | Lst | Obj | Subst | Concat | Partial | Unresolved
 Stack = list[Val]
 # What resolving a value can give: a value or MISSING.
 Result = Val | Missing
+
+
+def field_resolved(s: Slot) -> bool:
+    """A field holds a single resolved value."""
+    return len(s.stack) == 1 and is_resolved(s.stack[0])
 
 
 def is_resolved(v: Val) -> bool:
@@ -396,6 +421,7 @@ def freeze(v: Val) -> None:
                 continue
             x.frozen = True
             x._res = x._car = None  # anything computed while it could still change
+            x._unres = None
             for s in x.fields.values():
                 todo.extend(s.stack)
         elif isinstance(x, Lst):

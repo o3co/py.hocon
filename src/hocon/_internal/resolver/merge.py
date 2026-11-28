@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterator
 
 from ...errors import ResolveError
 from .values import (
@@ -30,6 +31,7 @@ from .values import (
     Subst,
     Val,
     carries_stack,
+    field_resolved,
     is_resolved,
     stack_ignores_fallbacks,
 )
@@ -239,9 +241,31 @@ class Overlay(Obj):
             self._fields = fields
         return self._fields
 
+    def unresolved_keys(self) -> Iterator[str]:
+        """§10.2 item 5: a key resolved in every layer that has it is
+        resolved in the merge (F2 / F5 / F6 keep it so), so only the keys
+        some layer has unresolved are merged and looked at. A resolved layer
+        has nothing to give, and a layer met twice (an object merged with
+        itself) is looked at once, so a nested overlay is never walked twice."""
+        seen: set[str] = set()
+        met: set[int] = set()
+        for layer in self.layers:
+            if id(layer) in met or layer.is_resolved():
+                continue
+            met.add(id(layer))
+            for k in layer.unresolved_keys():
+                if k in seen:
+                    continue
+                seen.add(k)
+                s = self.get_field(k)
+                if s is not None and not field_resolved(s):
+                    yield k
+
     def is_resolved(self) -> bool:
         if self._res is None:
-            self._res = all(layer.is_resolved() for layer in self.layers) or Obj.is_resolved(self)
+            self._res = all(layer.is_resolved() for layer in self.layers) or (
+                next(self.unresolved_keys(), None) is None
+            )
         return self._res
 
     def carries(self) -> bool:
