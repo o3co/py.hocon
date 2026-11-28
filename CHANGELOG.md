@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through string concatenation, for example) now return a value that still
   differs from Lightbend's. Getting those right is the resolver redesign in
   o3co/xx.hocon#67 / #125, which replaces this interim guard.
+
 ## [1.14.2] - 2026-10-17
 
 **Patch.** An opt-in `require_unit` option on the `Duration` / `Bytes` markers,

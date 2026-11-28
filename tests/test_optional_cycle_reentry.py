@@ -308,3 +308,82 @@ def test_post_cut_work_is_bounded(build: object) -> None:
     assert callable(build)
     with pytest.raises(ResolveError, match="too complex to resolve|resolved value too large"):
         hocon.parse_string(build(), env={})
+
+
+# Each state component of the prior re-entry guard is load-bearing: removing
+# it alone changes the result below (verified by building the resolver with
+# that component replaced by a constant). Review of the py guard.
+
+# The S13a.12 prefix-prior guard set. Loads in base as shown. Without the
+# prefix-prior set the guard cuts the second pass and it becomes
+# `circular substitution: a`.
+_STATE_PREFIX_PRIOR_SRC = "x = ${a}\nx = ${a}\na = ${?x.y}\na = ${?a}ok\n"
+_STATE_PREFIX_PRIOR_WANT = '{"a":"ok","x":"ok"}'
+
+# The concatenations mid-iteration. A recursion-limit ParseError in base.
+# Without the concat set one nested `{"a":5}` becomes `{}`.
+_STATE_CONCAT_SRC = "a = 5\na.a += { a = ${?a} }\na.a += ${?b.a}\n"
+_STATE_CONCAT_WANT = '{"a":{"a":[{"a":{"a":[{"a":{"a":[{"a":{"a":[{"a":5}]}},{"a":5}]}}]}}]}}'
+
+# The scope (which picks the prior). Loads in base as shown. Without the
+# scope one `[[[[2]]]]` becomes `[[[]]]`.
+_STATE_SCOPE_SRC = (
+    "b += { b += { a = { a = ${?c}, a = { a = 1 } ${?c} }, a += { a = ${?a}"
+    "x } }, b = { b = { b = { a = 1 } ${?a}, a = ${?c} }, a += [{ a = 1 } $"
+    "{a}] }, b += { b = { b += { a = 1 } ${?a}, b = 2, a += { a = 1 } ${?a."
+    "a} } } }\na.a.a = { b += 2, b = [[${?c}]] }\nc = [${?b}]\nc = ${?b}\na.a.a"
+    " = ${?c}\nb += { b += { a = { a = ${?c}, a = { a = 1 } ${?c} }, a += { "
+    "a = ${?a}x } }, b = { b = { b = { a = 1 } ${?a}, a = ${?c} }, a += [{ "
+    "a = 1 } ${a}] }, b += { b = { b += { a = 1 } ${?a}, b = 2, a += { a = "
+    "1 } ${?a.a} } } }\na.a.a = { b += 2, b = [[${?c}]] }\nc = [${?b}]\nc = ${"
+    "?b}\na.a.a = ${?c}\nb.a = [${?b}]\n"
+)
+_STATE_SCOPE_WANT = (
+    '{"a":{"a":{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b"'
+    ':[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}},"b":{"a":[[{"b":[{"b"'
+    ':{"a":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b":[{'
+    '"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]},{"b":[{"b":{"a'
+    '":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b":[{"b":'
+    '{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]}]]},"c":{"a":[[{"b"'
+    ':[{"b":{"a":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{'
+    '"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]},{"b":[{"'
+    'b":{"a":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b":'
+    '[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]}]]}}'
+)
+
+# The truncated field path. A recursion-limit ParseError in base; no input in the 157,254-input
+# differential that loads in base depends on the field path. Without it
+# `"o":{"b":{"b":{"b":{}}}}` loses one level.
+_STATE_FIELD_PATH_SRC = (
+    "o = { b = ${?o}${?o.b} }\na.a = { a = { a += { a = 1 } ${?o}, a = { a ="
+    " 1 } ${?a.a} } }\no = { b = ${?o}${?o.b} }\na.a = { a = { a += { a = 1 }"
+    " ${?o}, a = { a = 1 } ${?a.a} } }\n"
+)
+_STATE_FIELD_PATH_WANT = '{"a":{"a":{"a":{"a":{"a":{"a":{"a":1}}}}}},"o":{"b":{"b":{"b":{}}}}}'
+
+
+@pytest.mark.parametrize(
+    ("src", "want"),
+    [
+        (_STATE_PREFIX_PRIOR_SRC, _STATE_PREFIX_PRIOR_WANT),
+        (_STATE_CONCAT_SRC, _STATE_CONCAT_WANT),
+        (_STATE_SCOPE_SRC, _STATE_SCOPE_WANT),
+        (_STATE_FIELD_PATH_SRC, _STATE_FIELD_PATH_WANT),
+    ],
+    ids=["prefix-prior", "concat", "scope", "field-path"],
+)
+def test_each_guard_state_component_is_load_bearing(src: str, want: str) -> None:
+    assert _json(src) == json.loads(want)
+
+
+def test_snapshot_cost_stays_small_with_long_keys() -> None:
+    # pd_120_2000: a 121-step chain over 2,000-byte keys leading into the dense
+    # 6-key cycle. The snapshot is built from frozensets of keys and identities,
+    # so long keys do not make each guard entry expensive (rs had to bound its
+    # snapshot cost); it ends in the post-cut work limit.
+    q = "q" * 2000
+    chain = "".join(f"{q}{i} = ${{{q}{i + 1}}}\n" for i in range(120)) + f"{q}120 = ${{k1}}\n"
+    refs = "".join(f"${{?k{j}}}" for j in range(1, 7))
+    dense = "".join(f"k{i} = {refs}\n" for i in range(1, 7)) * 2
+    with pytest.raises(ResolveError, match="too complex to resolve|resolved value too large"):
+        hocon.parse_string(chain + dense, env={})
