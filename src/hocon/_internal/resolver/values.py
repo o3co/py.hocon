@@ -162,9 +162,7 @@ class Obj:
     def is_resolved(self) -> bool:
         """§1.2: every field holds one resolved entry."""
         if self._res is None or not self.frozen:
-            self._res = all(
-                len(s.stack) == 1 and is_resolved(s.stack[0]) for s in self.fields.values()
-            )
+            self._res = _resolved_tree(self)
         return self._res
 
     def carries(self) -> bool:
@@ -307,6 +305,47 @@ def is_resolved(v: Val) -> bool:
     if isinstance(v, Obj):
         return v.is_resolved()
     return False
+
+
+def _resolved_tree(root: Obj) -> bool:
+    """``root`` is resolved: walked without recursion through plain objects
+    and lists, so a deeply nested document does not hit the interpreter's
+    recursion limit. A lazy object (overlay, patch, substituted) answers for
+    itself. When the answer is yes, every frozen plain object on the way is
+    resolved too and remembers it."""
+    seen: list[Obj] = []
+    todo: list[Val] = []
+    for s in root.fields.values():
+        if len(s.stack) != 1:
+            return False
+        todo.append(s.stack[0])
+    while todo:
+        v = todo.pop()
+        if isinstance(v, Scalar):
+            continue
+        if isinstance(v, Lst):
+            todo.extend(v.items)
+            continue
+        if type(v) is Obj:
+            if v.frozen and v._res is not None:
+                if not v._res:
+                    return False
+                continue
+            seen.append(v)
+            for s in v.fields.values():
+                if len(s.stack) != 1:
+                    return False
+                todo.append(s.stack[0])
+            continue
+        if isinstance(v, Obj):
+            if not v.is_resolved():
+                return False
+            continue
+        return False  # a substitution, a concatenation, a partial stack
+    for o in seen:
+        if o.frozen:
+            o._res = True
+    return True
 
 
 def ignores_fallbacks(v: Val) -> bool:

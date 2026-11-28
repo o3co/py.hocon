@@ -168,6 +168,14 @@ class Overlay(Obj):
         self._fields = None
         self._res = self._car = None
 
+    def push_top(self, layer: Obj) -> None:
+        """Add a top layer. Only while the concatenation that made this
+        overlay still owns it (``consolidate``)."""
+        self.layers.insert(0, layer)
+        self._cache = {}
+        self._fields = None
+        self._res = self._car = None
+
     def get_field(self, k: str) -> Slot | None:
         if self._fields is not None:
             return self._fields.get(k)
@@ -378,10 +386,23 @@ def consolidate(
     """§1.3 / §1.4: join ``pieces`` left to right (nested concatenations are
     flattened first). One value remains unless a piece is still unresolved."""
     out: list[Val] = []
+    own: Overlay | None = None  # an overlay this call made (resolve time)
     for p in pieces:
         for q in p.pieces if isinstance(p, Concat) else [p]:
             if not out:
                 out.append(q)
+            elif own is not None and out[-1] is own and isinstance(q, Obj) and not q.flag:
+                # Rule 1 again on an overlay this call built: put the right
+                # piece on top of the same overlay instead of nesting one
+                # overlay per piece (§10.2), so a long `${a} ${b} ${c} …`
+                # does not nest the interpreter's stack.
+                own.push_top(q)
             else:
+                left = out[-1]
                 join(out, q, at_parse=at_parse, line=line, col=col)
+                made = out[-1]
+                if made is not left:  # unchanged (whitespace dropped): still ours
+                    # Only an overlay join just built (not an operand) is ours.
+                    fresh = made is not q
+                    own = made if not at_parse and isinstance(made, Overlay) and fresh else None
     return out

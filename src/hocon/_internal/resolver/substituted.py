@@ -32,7 +32,7 @@ class Substituted(Obj):
     substitutions differs in another entry anyway (§3.5 identity). Checked on
     34,000 generated documents against a copy that wraps again."""
 
-    __slots__ = ("_cache", "base", "defer", "path", "subst")
+    __slots__ = ("_cache", "base", "path", "subst")
 
     def __init__(self, base: Obj, subst: Subst, path: Path) -> None:
         super().__init__(None, False)
@@ -40,9 +40,12 @@ class Substituted(Obj):
         self.base = base
         self.subst = subst
         self.path = path
-        # Only an unresolved object has children to defer as references.
-        self.defer = not base.is_resolved()
-        self._res = not self.defer
+        # §5.5 distinguishes a resolved base (flags cleared) from an
+        # unresolved one (carrying children deferred). The rule below applies
+        # the second form to both: for a resolved base it gives the same
+        # children (every child object is resolved, so it is rewritten, and no
+        # other child carries anything), without asking whether the whole
+        # base is resolved, which would materialize it (§10.2).
         self._cache: dict[str, Slot | None] = {}
 
     def get_field(self, k: str) -> Slot | None:
@@ -58,10 +61,10 @@ class Substituted(Obj):
                 # deferred below it), unless it is unresolved and clean.
                 if isinstance(top, Substituted):
                     pass  # already rewritten: nothing left to clear or defer
-                elif not self.defer or top.is_resolved() or carries_stack(f.stack):
+                elif top.is_resolved() or carries_stack(f.stack):
                     inner = Substituted(top, self.subst, (*self.path, k))
                     f = Slot(k, [inner], f.path, f.synth, f.origin)
-            elif self.defer and carries_stack(f.stack):
+            elif carries_stack(f.stack):
                 # Any other child that carries ignored fallbacks is replaced by
                 # a reference to the same path, resolved later like any other.
                 s = self.subst

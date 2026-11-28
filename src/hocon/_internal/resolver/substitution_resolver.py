@@ -295,6 +295,19 @@ class SubstitutionResolver:
             return unresolved
         result: Result = MISSING  # every piece omitted
         if resolved:
+            # After a cycle break, check the joined size before joining: a
+            # string or a list is at most as large as its pieces together.
+            if (
+                self.post_cut_lookups is not None
+                and sum(_weight(r) for r in resolved) > self.value_budget
+            ):
+                raise ResolveError(
+                    f"resolved value too large: {path_to_key(c.fpath)} keeps growing "
+                    "(a cycle through optional substitutions?)",
+                    path_to_key(c.fpath),
+                    c.line,
+                    c.col,
+                )
             joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)
             if len(joined) != 1:
                 if self.allow_unresolved:
@@ -303,14 +316,6 @@ class SubstitutionResolver:
                     return Unresolved(c)
                 raise ResolveError("internal: concatenation did not join", "", c.line, c.col)
             result = joined[0]
-            if self.post_cut_lookups is not None and _weight(result) > self.value_budget:
-                raise ResolveError(
-                    f"resolved value too large: {path_to_key(c.fpath)} keeps growing "
-                    "(a cycle through optional substitutions?)",
-                    path_to_key(c.fpath),
-                    c.line,
-                    c.col,
-                )
         hit = self.memo.concat(key)  # first completed result wins
         if hit is not None:
             return hit

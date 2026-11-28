@@ -189,3 +189,24 @@ def test_j2_presence_on_the_whole_raw_path_ignores_the_environment(src: str) -> 
     # raw-present, so it is found, resolves to nothing, and §7.2 never reaches
     # the environment, in both line orders.
     assert _resolve(src, {"a.x.y": "ENV"}) == {"a": {"x": {}}}
+
+
+# --- §10.2: shapes that must not nest the interpreter's stack ---
+
+
+def test_long_object_concatenation_is_one_overlay() -> None:
+    # 1,200 `${base}` pieces: each object join goes on top of one overlay
+    # instead of nesting one overlay per piece.
+    src = "base = {x: 1}\na = " + " ".join(["${base}"] * 1200) + "\n"
+    assert _resolve(src)["a"] == {"x": 1}
+
+
+def test_deep_object_substitution_resolves() -> None:
+    # A 350-level object read through a substitution: "resolved" is computed
+    # without recursion, and §5.5 asks for it only per child.
+    path = ".".join(f"k{i}" for i in range(350))
+    got = _resolve(f"a.{path} = 1\nb = ${{a}}\n")
+    leaf = got["b"]
+    for i in range(350):
+        leaf = leaf[f"k{i}"]
+    assert leaf == 1
