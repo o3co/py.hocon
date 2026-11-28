@@ -33,11 +33,6 @@ _XX115 = (
     "o3co/xx.hocon#115: an included root-level value does not keep the "
     "including file's prior (undefined optional drops the key / no delayed merge)"
 )
-_XX128 = (
-    "o3co/xx.hocon#128: an optional cycle written twice is a ParseError in "
-    "py.hocon instead of resolving to nonexistent"
-)
-
 SUCCESS_KNOWN_GAPS: dict[str, str] = {
     **{
         f"include-optional-prior/{name}": _XX115
@@ -55,8 +50,6 @@ SUCCESS_KNOWN_GAPS: dict[str, str] = {
             "io20-self-ref-folded-under-included-concat",
         )
     },
-    "optional-cycle-repeat/oc01-optional-cycle-twice": _XX128,
-    "optional-cycle-repeat/oc03-optional-cycle-twice-in-concat": _XX128,
     "subst-removed-target/rq27-optional-ref-into-cycle-ok": _XX123,
     "subst-removed-target/rq30-two-overrides-then-reference-pending-125": _XX125,
     "subst-removed-target/rq31-two-optionals-then-reference-pending-125": _XX125,
