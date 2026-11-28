@@ -488,6 +488,7 @@ from hocon import (
     ParseError,          # lexing/parsing failure: .line, .col, .file
     ResolveError,        # substitution/include failure: .path, .line, .col, .file
     PackageLookupError,  # include package(...) not found (subclass of ResolveError)
+    ResolutionLimitError,  # runaway work after a cycle break (subclass of ResolveError)
     ConfigError,         # wrong type or missing path: .path
     NotResolvedError,    # getter on an unresolved path (subclass of ConfigError)
 )
@@ -498,6 +499,7 @@ from hocon import (
 | `ParseError` | Syntax errors during lexing/parsing (includes line and column) |
 | `ResolveError` | Substitution failures, cyclic references, missing required includes |
 | `PackageLookupError` | `include package(...)` could not be located |
+| `ResolutionLimitError` | After an optional cycle broke, the resolve passed 100,000 lookups or 10,000 weight units per document value (xx.hocon resolution-model §10.3) |
 | `ConfigError` | Missing keys or type mismatches during value access; also raised by `parse`/`parse_file` for an array-root document (S3.5) |
 | `NotResolvedError` | Getter called on a path still holding an unresolved substitution |
 
