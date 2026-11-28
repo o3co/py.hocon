@@ -95,19 +95,22 @@ _PLUS_RESERVED = (
 
 # Digits are ASCII only ([0-9], never \d): Lightbend's number characters are
 # ASCII, so a Unicode digit is text and a '+' after it is reserved.
-# A number mantissa followed by its exponent marker (`1e`, `-1.5E`, `1.e`,
-# `-.5e`): the only place an unquoted run may carry a `+`, as the exponent's
-# sign. A '.'-leading run (`.5e`) is text, not a number.
-_EXPONENT_PREFIX_RE = re.compile(r"(?:-?[0-9]+(?:\.[0-9]*)?|-\.[0-9]+)[eE]")
+# A number mantissa followed by its exponent marker (`1e`, `-1.5E`, `1.e`):
+# the only place an unquoted run may carry a `+`, as the exponent's sign. A
+# '.'-leading run (`.5e`) is text, not a number, and since Lightbend 1.4.10
+# (lightbend/config#861) so is a '-.'-leading run (`-.5e`, xx.hocon#140).
+_EXPONENT_PREFIX_RE = re.compile(r"-?[0-9]+(?:\.[0-9]*)?[eE]")
 
 
 # E8 step 4 (Lightbend Tokenizer.pullNumber): a run that starts like a number
 # consumes the longest prefix of these characters, and that prefix must parse as
 # a Java long / double. If it does not and it holds a `+`, the `+` is reserved.
 _NUMBER_LEX_CHARS = frozenset("0123456789.eE+-")
-# Same grammar as coerce.DECIMAL_NUMBER_RE (kept local: the lexer must not
-# depend on coerce). Quantifiers do not overlap, so long runs stay linear.
-_JAVA_NUMBER_RE = re.compile(r"-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
+# The runs that convert to a number: coerce.DECIMAL_NUMBER_RE (kept local: the
+# lexer must not depend on coerce) less a run that starts with "-.", which
+# Lightbend 1.4.10 (lightbend/config#861) no longer converts (xx.hocon#140).
+# Quantifiers do not overlap, so long runs stay linear.
+_JAVA_NUMBER_RE = re.compile(r"(?:-?[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?")
 
 
 def _starts_number(run: str) -> bool:

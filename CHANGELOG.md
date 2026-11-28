@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **BREAKING (extra-spec E8, xx.hocon#140): an unquoted run that starts with
+  `-.` is text, not a number**, as in Lightbend 1.4.10 (lightbend/config#861)
+  — the same as a run that starts with `.`. Lightbend 1.4.9 and earlier, and
+  py releases before this one, read `-.5` as `-0.5`. This applies wherever a
+  run starts with `-.`: values, keys, concatenations, arrays and unit values.
+  `a = -.5` is now the string `"-.5"` (was the number -0.5); so are `-.5e3`
+  (was -500.0) and `-.5e999` (was an overflow error). `a = -.5e+3` is now a
+  parse error (was -500.0): the run is not a number and contains `+` (E8 step
+  4). So are `a = x -.5e+3` (was the string `"x -.5e+3"`), `a = -.5e+3ms` and
+  the key `-.5e+3 = 1`. `get_float` still reads the string `"-.5"` as -0.5.
+  Every other number reads as before (`-0.5`, `-5.`, `-1.5e+3`). Workaround:
+  write the leading zero, `a = -0.5`.
 - **A substitution cycle written twice raised a `ParseError`** instead of
   resolving (py counterpart of go.hocon#218 / rs.hocon#199, where it crashed
   the process). For `a = ${?b}` / `b = ${?a}` written twice, the resolver

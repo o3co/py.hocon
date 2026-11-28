@@ -590,8 +590,10 @@ class _Parser:
         if raw == "null":
             return "null"
         # Number detection: first char must be 0-9 or '-' (Lightbend-aligned).
+        # A run that starts with "-." stays text, like one that starts with
+        # ".", as in Lightbend 1.4.10 (lightbend/config#861, xx.hocon#140).
         if len(raw) > 0 and (("0" <= raw[0] <= "9") or raw[0] == "-"):
-            if DECIMAL_NUMBER_RE.fullmatch(raw):
+            if DECIMAL_NUMBER_RE.fullmatch(raw) and not raw.startswith("-."):
                 # E19: a numeric literal whose magnitude overflows the double
                 # range (`1e999`) is a parse error. Lightbend admits Infinity
                 # but cannot render or re-parse it as a number; erroring at
