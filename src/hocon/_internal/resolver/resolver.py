@@ -1,97 +1,136 @@
-"""Resolution driver. Mirrors ts.hocon ``src/internal/resolver/resolver.ts``.
+"""The resolver's interface to the rest of the library.
 
-Two-phase: :func:`build_tree` (phase 1 — placeholders left in place, includes
-expanded) then :func:`resolve_tree` (phase 2 — placeholders replaced). Sync path
-only (py.hocon has no async parse variant).
+Phase 1, :func:`build_tree`, turns an AST into a model tree that keeps every
+assignment (includes expanded). Phase 2, :func:`resolve_tree`, resolves it and
+returns public values. Between the two, a tree is opaque to callers: ``Config``
+combines trees with :func:`with_fallback_tree` and looks into one only through
+:func:`pending_view`, where every value that is not resolved yet is a
+:class:`Placeholder`.
+
+The algorithm is xx.hocon ``docs/resolution-model.md``; see the module
+docstrings for which section lives where.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from typing import cast
 
-from ...value import HoconArray, HoconObject, HoconValue
+from ...value import HoconObject, HoconScalar, HoconValue
 from ..parser.ast import AstNode
+from .convert import (
+    Placeholder,
+    pending_view,
+    same_marks,
+    to_hocon,
+    tree_from_hocon,
+    val_contains_placeholders,
+)
+from .include_loader import IncludeLoader
+from .merge import fallback
 from .structure_builder import StructureBuilder
 from .substitution_resolver import SubstitutionResolver
-from .types import (
-    ResObj,
-    ResolveOptions,
-    ResolverValue,
-    is_concat,
-    is_res_obj,
-    is_subst,
-    make_res_obj,
-)
+from .types import ResolveOptions
+from .values import Obj, freeze, is_resolved
 
 __all__ = [
-    "build_partial_hocon_from_res_obj",
+    "Placeholder",
+    "Tree",
     "build_tree",
     "contains_placeholders",
-    "hocon_value_to_res_obj",
+    "partial_root",
+    "pending_view",
     "resolve",
     "resolve_tree",
+    "same_marks",
+    "strip_placeholders",
+    "tree_from_value",
+    "tree_key_shape",
     "val_contains_placeholders",
+    "with_fallback_tree",
 ]
 
-
-def build_tree(ast: AstNode, opts: ResolveOptions) -> ResObj:
-    """Phase 1: builds a ResObj tree with substitution/concat placeholders
-    unresolved. Includes are fully expanded."""
-    return StructureBuilder(opts).build(ast)
+# An unresolved document, opaque outside this package.
+Tree = Obj
 
 
-def resolve_tree(tree: ResObj, opts: ResolveOptions) -> HoconValue:
-    """Phase 2: replaces placeholders in a ResObj tree → fully-resolved value."""
-    return SubstitutionResolver(tree, opts).resolve()
+def build_tree(ast: AstNode, opts: ResolveOptions) -> Tree:
+    """Phase 1: the document's tree, substitutions unresolved, includes
+    expanded (each included file is built with its own options)."""
+    loader = IncludeLoader(opts)
+    loader.on_build = build_tree
+    tree = StructureBuilder(loader).build(ast)
+    freeze(tree)  # the tree never changes again (§10.2)
+    return tree
 
 
-def contains_placeholders(tree: ResObj) -> bool:
-    return any(val_contains_placeholders(val) for val in tree.fields.values())
-
-
-def val_contains_placeholders(v: ResolverValue) -> bool:
-    if is_subst(v) or is_concat(v):
-        return True
-    if is_res_obj(v):
-        return contains_placeholders(v)
-    if isinstance(v, HoconObject):  # value form, e.g. an object inside an array
-        return any(val_contains_placeholders(item) for item in v.fields.values())
-    if isinstance(v, HoconArray):
-        return any(val_contains_placeholders(item) for item in v.items)
-    return False
-
-
-def build_partial_hocon_from_res_obj(tree: ResObj) -> HoconObject:
-    """Extract resolved (non-placeholder) fields from a ResObj into a plain
-    HoconValue object. Placeholder-valued fields are omitted so ``Config``
-    accessors return absent → NotResolvedError."""
-    fields: dict[str, HoconValue] = {}
-    for k, v in tree.fields.items():
-        if not is_subst(v) and not is_concat(v):
-            if is_res_obj(v):
-                fields[k] = build_partial_hocon_from_res_obj(v)
-            elif not val_contains_placeholders(v):
-                # Not a placeholder and placeholder-free → a plain HoconValue.
-                fields[k] = cast("HoconValue", v)
-    return HoconObject(fields)
-
-
-def hocon_value_to_res_obj(value: HoconObject) -> ResObj:
-    """Convert a fully-resolved HoconValue object into a ResObj (for withFallback)."""
-    obj = make_res_obj()
-    for k, v in value.fields.items():
-        if isinstance(v, HoconObject):
-            obj.fields[k] = hocon_value_to_res_obj(v)
-        else:
-            obj.fields[k] = v
-    return obj
+def resolve_tree(tree: Tree, opts: ResolveOptions) -> HoconValue:
+    """Phase 2: the resolved document. Under ``allow_unresolved`` the result
+    may hold :class:`Placeholder` values."""
+    return to_hocon(SubstitutionResolver(tree, opts).resolve())
 
 
 def resolve(ast: AstNode, opts: ResolveOptions) -> HoconValue:
-    """Fused phase 1 + phase 2 (default parse behaviour)."""
+    """Both phases, as the default ``parse`` does."""
     tree = build_tree(ast, opts)
     return resolve_tree(
-        tree,
-        dataclasses.replace(opts, use_system_environment=True, allow_unresolved=False),
+        tree, dataclasses.replace(opts, use_system_environment=True, allow_unresolved=False)
     )
+
+
+def contains_placeholders(tree: Tree) -> bool:
+    """Whether the tree still needs resolving."""
+    return not is_resolved(tree)
+
+
+def with_fallback_tree(receiver: Tree, fallback_tree: Tree) -> Tree:
+    """§8.3 ``withFallback``: the receiver's root on top of the fallback's, by
+    the §2.1 rules, with the receiver's keys first at every merged level."""
+    merged = fallback([receiver], [fallback_tree], synth=False, receiver_first=True)
+    top = merged[0]
+    assert len(merged) == 1 and isinstance(top, Obj)
+    freeze(top)
+    return top
+
+
+def tree_from_value(value: HoconObject) -> Tree:
+    """A resolved object as a tree (for ``with_fallback`` / ``resolve_with``)."""
+    return tree_from_hocon(value)
+
+
+def partial_root(tree: Tree) -> HoconObject:
+    """The resolved part of an unresolved tree: :func:`pending_view` without
+    its placeholders (an object keeps its resolved fields)."""
+    return strip_placeholders(pending_view(tree))[0]
+
+
+def tree_key_shape(tree: Tree) -> HoconObject:
+    """The keys a tree defines, for ``resolve_with`` (E12 decision 9). A key
+    whose top assignment is an object is walked into (adjacent object
+    assignments are already one merged object); any other key is a null,
+    which keeps its whole resolved value. This is the shape py.hocon used
+    before the window: a field whose top is an object keeps only the keys
+    written in it, and a field whose top is a substitution keeps everything
+    the substitution brings in."""
+    fields: dict[str, HoconValue] = {}
+    for k, s in tree.fields.items():
+        top = s.stack[0]
+        fields[k] = tree_key_shape(top) if isinstance(top, Obj) else HoconScalar("", "null")
+    return HoconObject(fields)
+
+
+def strip_placeholders(v: HoconObject) -> tuple[HoconObject, bool]:
+    """``v`` without its unresolved values, and whether it had any. An object
+    keeps its resolved fields; any other value holding a placeholder anywhere
+    is dropped whole."""
+    fields: dict[str, HoconValue] = {}
+    had = False
+    for k, val in v.fields.items():
+        if isinstance(val, HoconObject):
+            inner, inner_had = strip_placeholders(val)
+            had = had or inner_had
+            fields[k] = inner
+        elif val_contains_placeholders(val):
+            had = True
+        else:
+            fields[k] = val
+    return same_marks(v, HoconObject(fields)), had

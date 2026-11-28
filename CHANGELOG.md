@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: a new resolution layer — keep every assignment, and resolve
+  `${}` only when a value is taken out** (the #67 window:
+  [xx.hocon#67](https://github.com/o3co/xx.hocon/issues/67) /
+  [#115](https://github.com/o3co/xx.hocon/issues/115) /
+  [#123](https://github.com/o3co/xx.hocon/issues/123) /
+  [#125](https://github.com/o3co/xx.hocon/issues/125)–[#128](https://github.com/o3co/xx.hocon/issues/128);
+  contract: xx.hocon `docs/resolution-model.md`). Each key now keeps an
+  ordered stack of all its assignments (built at parse time with Lightbend's
+  fallback rules), and a substitution looks back at the part of its own
+  field's stack below it, instead of the single saved "prior" value the
+  resolver kept before. Ships in the window's lockstep minor.
+
+  **Inputs that now error** (as in Lightbend 1.4.10, the oracle since
+  xx.hocon#141), with workarounds:
+  - A required `${a}` whose target was removed by an undefined optional
+    (`a = 1`, `a = ${?unset}`, `b = ${a}`), including through an include and
+    through a path (`${x.y}`), and an included object over
+    `a = ${missing}` in the including file (#123, #115). Before, the
+    reference was dropped silently. **Workaround**: `${?a}`, or give the
+    optional a default.
+  - A required self-reference with nothing below it inside a concatenation
+    entry (`foo : "x "${foo.a}`, then `foo : { a : 1 }`), and a list entry
+    that reads its own field (`foo : [${foo.a}]` over a later
+    `foo : { b : 2 }`): a list entry gets no look-back, so it reads the
+    final value (#127). **Workaround**: `${?foo.a}`.
+  - A cycle that only an optional substitution closes, where the
+    substitution that re-enters it is required (`d = yes${?c}`,
+    `c = ${d}`; `e += ${?c}`, `c = ${e}`; zig-hocon rows 024, 025, 039,
+    045, 046, 065, 066): `${d} is part of a cycle` (#128). This is the
+    interim rule; window step (b) (E23 rule 1) turns these into values.
+    **Workaround**: make the re-entering substitution optional too.
+  - `+=` inside a list value (also inside an object that is a list element,
+    and inside the value of another `+=`), and an `include` of a file with
+    substitutions inside a list or a `+=` value: a `ParseError`
+    (Lightbend's parser limitation). **Workaround**: write the list out, or
+    move the `+=` / include out of the list.
+  - An undefined optional followed by whitespace and a list or an object
+    (`a = ${?absent} ${x}` with `x = [1]`): the whitespace is a string, so
+    this is a concatenation type error. **Workaround**: drop the space
+    (`${?absent}${x}`).
+  - Any text after a list or an object in a concatenation, other than
+    whitespace, is a type error, also when a substitution brings it in or
+    the list comes from one (`b = ${a}x` with `a = [1]`; `c = [1] ${x}` with
+    `x = s`) — E5, now as in Lightbend 1.4.10. Written literally, as in
+    `a = { b: 1 } x`, it was already an error; it is now raised when the
+    document is parsed, also with `resolve_substitutions=False`.
+    **Workaround**: quote the text into its own field, or drop it.
+  - An object substituted over a field's earlier assignments no longer hides
+    them (below), so they are evaluated: `r = null`, `r = { y = 1 }`,
+    `a = { x = ${missing} }`, `a = ${r}` is an error (zig-hocon
+    duplicate-keys-and-object-merging/015). **Workaround**: fix or remove
+    the earlier assignment.
+
+  **Wrong values corrected** (now Lightbend's):
+  - A stack of three or more assignments no longer loses its bottom layer,
+    and an included file keeps the including file's earlier values
+    (#125, #115).
+  - A value hidden by a later one that ignores fallbacks is never evaluated,
+    so an error in it no longer surfaces (#126).
+  - Look-back and aliases: an alias read inside a look-back sees the field's
+    lower layers; an object below a substitution looks forward; a path into
+    a self-referential field looks back (#127).
+  - A substituted object does not carry "ignore fallbacks" from its own
+    field's history (Lightbend 1.4.10): with `r = null`, `r = ${v}`,
+    `a = { helper = 0 }`, `a = ${r}` keeps `helper` next to `r`'s keys, and
+    `b = {k = {d = 2}}`, `b = ${r}` with `r = {k = "", k = {c = 1}}` gives
+    `b.k = {c: 1, d: 2}`.
+  - A look-back through a merged field sees the lower layers:
+    `d { x = [] }`, `c = ${d}`, `c { x += 1, x += 2 }` gives `c.x = [1, 2]`
+    (before, `[2]`).
+  - A path that exists in the document is found, whatever was resolved
+    first: `a.x.y = ${?unset}`, `b = ${?a.x.y}` omits `b` in both line
+    orders, and never reads an environment variable `a.x.y`.
+  - An undefined optional that a cycle runs through resolves to nothing
+    exactly once (`oc01`, `oc03`; #128).
+  - `with_fallback` keeps the receiver's keys first at every merged level
+    (E12, `dr31` / `dr32`).
+  - A resolved Config merged again (`with_fallback`, `resolve_with`) behaves
+    as one resolve of the same text: an object that replaced a non-object in
+    its field's history (`a = null`, `a = { x = 1 }`) still ignores a
+    fallback's `a`, also through `get_config` (`cfg.get_config("a")
+    .with_fallback(defaults)` keeps only `x`, as in Lightbend), and a value
+    that resolved to unquoted whitespace is still dropped after a list.
+
+  Under `allow_unresolved`, a field whose stack walk reaches an undefined
+  required substitution is unresolved as a whole (`a = ${nope}`,
+  `a = { x = 1 }`: `a` is unresolved; before, `a = { x: 1 }`), and so is a
+  concatenation of a list with an object that is not resolved yet (before, a
+  type error). A type mismatch that is already certain still raises.
+
 ### Fixed
 
 - **BREAKING (extra-spec E8, xx.hocon#140): an unquoted run that starts with
@@ -25,25 +117,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolving (py counterpart of go.hocon#218 / rs.hocon#199, where it crashed
   the process). For `a = ${?b}` / `b = ${?a}` written twice, the resolver
   re-entered a key's saved prior forever until the recursion limit turned it
-  into "input is nested too deeply … or contains a cycle". A re-entry in an
-  unchanged resolver state is now treated as a cycle that cannot be broken:
-  an optional substitution is nonexistent and a required one is a
-  `ResolveError`, as in Lightbend (`{}` and `UnresolvedSubstitution` for the
-  input above). The state is the in-progress keys, the S13a.12 prefix-prior
-  guard, the relevant part of the field path, the concatenations being
-  resolved and the scope.
-- **Two new errors bound what such a cycle may still cost** once the guard
-  has cut it, where a cycle through nested objects can otherwise nest its
-  value exponentially or keep branching: `resolved value too large: <path>
-  keeps growing (a cycle through nested objects?)` and `substitution cycle
-  too complex to resolve: ${<path>}`. Neither applies before a cut, so an
-  acyclic config, however large or deeply nested, is never limited.
-- No config that loaded before was found to read differently, over ~160,000
-  generated and corpus inputs compared against the previous release; this is
-  measured, not proven. Some inputs that hit the recursion limit (a cycle
-  through string concatenation, for example) now return a value that still
-  differs from Lightbend's. Getting those right is the resolver redesign in
-  o3co/xx.hocon#67 / #125, which replaces this interim guard.
+  into "input is nested too deeply … or contains a cycle". It now gives
+  Lightbend's `{}` (an optional that closes a cycle is nonexistent, a
+  required one a `ResolveError`). py.hocon#68 fixed this with an interim
+  guard; the resolution layer above replaces it.
+- **Two errors bound what a broken cycle may still cost**, where a dense web
+  of optional cycles keeps branching or a ring of them doubles its value on
+  every lap (the reference model and Lightbend run for minutes or out of
+  memory): `substitution cycle too complex to resolve: ${<path>}` and
+  `resolved value too large: <path> keeps growing`. Neither applies unless a
+  cycle was broken, so a config without one, however large or deeply nested,
+  is never limited. A broken cycle anywhere arms both for the rest of the
+  resolve, even a harmless `x = ${?x}`: a very large config that also holds
+  one can then hit them (100,000 lookups after the break; a written-out
+  result of 10,000 units per document value, at most 2,000,000, where a node
+  is one unit plus one per 16 characters of text). Pending a decision in
+  xx.hocon docs/resolution-model.md §10 for all four implementations.
 - **BREAKING (spec fix, S1.2.4): a raw control character inside a quoted
   string is a parse error ([xx.hocon#130](https://github.com/o3co/xx.hocon/issues/130)).**
   A raw C0 control character (U+0000–U+001F) inside a double-quoted string is

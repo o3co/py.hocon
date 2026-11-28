@@ -485,6 +485,7 @@ Citation shorthand used on `tests:` lines:
 - **S13a.10** Substitution memoized by instance, not by path — §Self-Referential (L885)
   tests: —
   status: ➖ — decision (this wave): py adopts the ts/go posture. The resolver is the ts.hocon architecture port, and memoization-by-instance is not externally observable through the black-box public API (rs pins an observable equal-values constraint its own architecture exposes; py has no equivalent surface).
+  Since the #67 window the resolver memoizes by substitution instance (xx.hocon `docs/resolution-model.md` §5.1, E23 rule 2), and the memo is observable: `self-referential-examples/063` gives `{d: []}`, pinned in `tests/test_resolution_model.py`. The status is left as recorded until the matrix is re-audited for the window.
 - **S13a.11** Object can refer to its own descendant (`bar : { foo : 42, baz : ${bar.foo} }`) — §Self-Referential (L806)
   tests: corpus: test09 (`c = ${x}` then `c = { d: 600, e: ${a}, f: ${b} }` delayed-merge), test10
   status: ✅
@@ -495,7 +496,10 @@ Citation shorthand used on `tests:` lines:
   L791 example yielded `{a:2}` (c lost) in all four siblings — the prefix direction
   (`foo` ⊏ `foo.a`) was missing from self-reference detection everywhere. Fixed in
   lockstep with ts.hocon (fold-side prefix folding with layer merge; resolve-side prior
-  navigation with undefined semantics on a miss).
+  navigation with undefined semantics on a miss). Since the #67 window the look-back is
+  the resolution model's view of the field's stack (xx.hocon `docs/resolution-model.md`
+  §3.2 W3, §4); two tests that pinned a value where Lightbend errors were re-pinned
+  (xx.hocon#127, decision D3).
 - **S13a.13** `a = ${?a}foo` resolves to `"foo"` (look-back undefined) — §Self-Referential (L841)
   tests: corpus: self-ref-lookback/sr01–sr04, sr06–sr16 (15 consumed fixtures; the required-form error fixture sr05 is consumed by the error harness — see S13a.3)
   status: ✅

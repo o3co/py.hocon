@@ -11,23 +11,22 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, TypeVar, cast, overload
+from typing import Any, TypeVar, overload
 
 from ._internal.resolver.resolver import (
-    build_partial_hocon_from_res_obj,
+    Tree,
     contains_placeholders,
-    hocon_value_to_res_obj,
+    partial_root,
+    pending_view,
     resolve_tree,
+    same_marks,
+    strip_placeholders,
+    tree_from_value,
+    tree_key_shape,
     val_contains_placeholders,
+    with_fallback_tree,
 )
-from ._internal.resolver.types import (
-    ResObj,
-    ResolveOptions,
-    is_concat,
-    is_res_obj,
-    is_subst,
-    merge_unresolved,
-)
+from ._internal.resolver.types import ResolveOptions
 from .coerce import (
     UNIT_BYTE_SIZE,
     UNIT_DURATION,
@@ -89,9 +88,9 @@ class Config(Mapping[str, Any]):
         resolved: bool = True,
         parse_base_dir: str | None = None,
         origin_description: str | None = None,
-        res_obj_root: ResObj | None = None,
+        res_obj_root: Tree | None = None,
         resolve_opts: ResolveOptions | None = None,
-        pending: ResObj | HoconObject | None = None,
+        pending: HoconObject | None = None,
     ) -> None:
         self._root = root
         self._resolved = resolved
@@ -101,10 +100,17 @@ class Config(Mapping[str, Any]):
         # can start over from it.
         self._res_obj_root = res_obj_root
         self._resolve_opts = resolve_opts
-        # The tree as it stands now, placeholders included: where the
-        # NotResolvedError checks look. After resolve(allow_unresolved=True)
-        # it differs from _res_obj_root, whose resolved paths are stale.
-        self._pending = pending if pending is not None else res_obj_root
+        # The values as they stand now, each unresolved one a placeholder:
+        # where the NotResolvedError checks look. After
+        # resolve(allow_unresolved=True) it differs from _res_obj_root, whose
+        # resolved paths are stale.
+        self._pending: HoconObject | None = (
+            pending
+            if pending is not None
+            else pending_view(res_obj_root)
+            if res_obj_root is not None
+            else None
+        )
 
     # ─── construction ─────────────────────────────────────────────────────────
 
@@ -121,16 +127,15 @@ class Config(Mapping[str, Any]):
 
     @staticmethod
     def _from_unresolved_res_obj(
-        tree: ResObj,
+        tree: Tree,
         *,
         parse_base_dir: str | None,
         origin_description: str | None,
         resolved: bool,
         resolve_opts: ResolveOptions,
     ) -> Config:
-        partial_root = build_partial_hocon_from_res_obj(tree)
         return Config(
-            partial_root,
+            partial_root(tree),
             resolved=resolved,
             parse_base_dir=parse_base_dir,
             origin_description=origin_description,
@@ -339,7 +344,7 @@ class Config(Mapping[str, Any]):
             return True
         cur: Any = tree
         for seg in _split_config_path(path):
-            if not isinstance(cur, (ResObj, HoconObject)) or seg not in cur.fields:
+            if not isinstance(cur, HoconObject) or seg not in cur.fields:
                 return False
             cur = cur.fields[seg]
         return True
@@ -351,13 +356,12 @@ class Config(Mapping[str, Any]):
         # result starts over from the source, so a path that had resolved reads
         # as unresolved again until the next resolve(), which gives the same
         # final values. (Lightbend keeps the partial progress.)
-        self_tree = self._res_obj_root or hocon_value_to_res_obj(self._root)
-        fb_tree = fallback._res_obj_root or hocon_value_to_res_obj(fallback._root)
-        merged = merge_unresolved(self_tree, fb_tree)
+        self_tree = self._res_obj_root or tree_from_value(self._root)
+        fb_tree = fallback._res_obj_root or tree_from_value(fallback._root)
+        merged = with_fallback_tree(self_tree, fb_tree)
         has_placeholders = contains_placeholders(merged)
-        partial_root = build_partial_hocon_from_res_obj(merged)
         return Config(
-            partial_root,
+            partial_root(merged),
             resolved=not has_placeholders,
             parse_base_dir=self._parse_base_dir,
             origin_description=self._origin_description,
@@ -387,7 +391,7 @@ class Config(Mapping[str, Any]):
             raise RuntimeError("resolve: expected object root")
 
         if allow_unresolved:
-            stripped, had_placeholders = _strip_placeholder_fields(resolved)
+            stripped, had_placeholders = strip_placeholders(resolved)
             return Config(
                 stripped,
                 resolved=not had_placeholders,
@@ -424,20 +428,20 @@ class Config(Mapping[str, Any]):
                 origin_description=self._origin_description,
             )
 
-        receiver_tree = self._res_obj_root or hocon_value_to_res_obj(self._root)
-        src_tree = hocon_value_to_res_obj(source._root)
-        merged = merge_unresolved(receiver_tree, src_tree)
+        receiver_tree = self._res_obj_root or tree_from_value(self._root)
+        src_tree = tree_from_value(source._root)
+        merged = with_fallback_tree(receiver_tree, src_tree)
 
         resolve_opts = self._effective_resolve_opts(allow_unresolved, use_system_environment)
         resolved = resolve_tree(merged, resolve_opts)
         if not isinstance(resolved, HoconObject):
             raise RuntimeError("resolve_with: expected object root")
 
-        receiver_shape = _res_obj_to_key_shape(receiver_tree)
+        receiver_shape = tree_key_shape(receiver_tree)
         filtered = _filter_by_receiver_shape(resolved, receiver_shape)
 
         if allow_unresolved:
-            stripped, had_placeholders = _strip_placeholder_fields(filtered)
+            stripped, had_placeholders = strip_placeholders(filtered)
             return Config(
                 stripped,
                 resolved=not had_placeholders,
@@ -606,7 +610,7 @@ class Config(Mapping[str, Any]):
             return val_contains_placeholders(tree.fields[path])
         cur: Any = tree
         for seg in _split_config_path(path):
-            if not isinstance(cur, (ResObj, HoconObject)):
+            if not isinstance(cur, HoconObject):
                 # A placeholder (or an array holding one) where an object
                 # should be: the path below it is unresolved, not absent.
                 return val_contains_placeholders(cur)
@@ -698,38 +702,6 @@ def _hocon_to_py(v: HoconValue) -> Any:
     return {k: _hocon_to_py(val) for k, val in v.fields.items()}
 
 
-def _res_obj_to_key_shape(tree: ResObj) -> HoconObject:
-    fields: dict[str, HoconValue] = {}
-    for k, v in tree.fields.items():
-        if is_subst(v) or is_concat(v):
-            fields[k] = HoconScalar("", "null")
-        elif is_res_obj(v):
-            fields[k] = _res_obj_to_key_shape(v)
-        else:
-            # Neither placeholder nor ResObj → a plain HoconValue.
-            fields[k] = cast("HoconValue", v)
-    return HoconObject(fields)
-
-
-def _strip_placeholder_fields(v: HoconObject) -> tuple[HoconObject, bool]:
-    """``v`` without its unresolved values, and whether it had any. An object
-    keeps its resolved fields; any other value that holds a placeholder
-    anywhere (an array element, an object inside an array) is dropped whole."""
-    fields: dict[str, HoconValue] = {}
-    had_placeholders = False
-    for k, val in v.fields.items():
-        if isinstance(val, HoconObject):
-            inner, inner_had = _strip_placeholder_fields(val)
-            if inner_had:
-                had_placeholders = True
-            fields[k] = inner
-        elif val_contains_placeholders(val):
-            had_placeholders = True
-        else:
-            fields[k] = val
-    return HoconObject(fields), had_placeholders
-
-
 def _filter_by_receiver_shape(resolved: HoconObject, receiver_shape: HoconObject) -> HoconObject:
     fields: dict[str, HoconValue] = {}
     for k, rv in resolved.fields.items():
@@ -740,7 +712,7 @@ def _filter_by_receiver_shape(resolved: HoconObject, receiver_shape: HoconObject
             fields[k] = _filter_by_receiver_shape(rv, receiver_val)
         else:
             fields[k] = rv
-    return HoconObject(fields)
+    return same_marks(resolved, HoconObject(fields))
 
 
 # RFC 8259 JSON number grammar — gates the numeric render fast-path.

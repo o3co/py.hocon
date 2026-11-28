@@ -1,708 +1,568 @@
-"""Pass 2: replaces substitution and concat placeholders with resolved values.
+"""Phase 2: resolve the model tree, top down and lazily.
 
-Mirrors ts.hocon ``src/internal/resolver/substitution-resolver.ts``. The
-self-reference detection (owner gate + path walk), delayed object merge, S14c.2
-original-path fallback, and S13c env-var-list expansion are ported line-for-line;
-see the inline S-references for the governing spec items.
+xx.hocon ``docs/resolution-model.md`` §3 (walking stacks, lookup, restricted
+resolution), §6 (cycles, with the interim rule of §6.3) and §7.2 (lookup order
+and the environment). Views are in :mod:`.views`, the memo in :mod:`.memo`,
+and the merge rules in :mod:`.merge`; this module only decides *where* each of
+them is consulted and *what* is done with the answer.
+
+A ``${}`` is resolved only when a value is taken out: the root object is
+resolved field by field (§3.1), and a substitution resolves only the ancestors
+on its path, each restricted to the next key (§3.3, §3.4).
 """
 
 from __future__ import annotations
 
-import weakref
-from collections.abc import Iterator
-from typing import cast
+from typing import Literal
 
 from ...errors import ResolveError
-from ...numeric_array import numeric_object_to_array
-from ...value import HoconArray, HoconObject, HoconScalar, HoconValue
-from .fold_self_ref import contains_subst_by_path, string_segments_to_key
-from .types import (
-    ConcatPlaceholder,
-    ResObj,
-    ResolveOptions,
-    ResolverValue,
-    SubstPlaceholder,
-    is_concat,
-    is_res_obj,
-    is_subst,
-    separator_values,
+from .memo import Memo
+from .merge import Overlay, consolidate, fallback, fold_entries
+from .substituted import Substituted
+from .types import ResolveOptions
+from .utils import path_to_key
+from .values import (
+    MISSING,
+    Concat,
+    Lst,
+    Missing,
+    Obj,
+    Partial,
+    Patch,
+    Path,
+    Result,
+    Scalar,
+    Slot,
+    Stack,
+    Subst,
+    Unresolved,
+    Val,
+    has_path,
+    is_resolved,
+    stack_ignores_fallbacks,
 )
-from .utils import (
-    deep_merge_hocon_values,
-    lookup_path,
-    lookup_res_obj,
-    segments_to_key,
-)
+from .views import ROOT_VIEW, Empty, Substitute, Substitutes, View, ViewKey
 
 __all__ = ["SubstitutionResolver"]
 
-# (in-progress set, S13a.12 prefix-prior guard set, truncated field path,
-# concatenations mid-iteration by identity, scope by identity); see the prior
-# re-entry guard in SubstitutionResolver._resolve_subst.
-_PriorState = tuple[frozenset[str], frozenset[str], tuple[str, ...], frozenset[int], int]
-
-# Substitutions the resolver may still resolve once the prior re-entry guard
-# has cut a cycle. A cut stops one lap of a cycle, but a cycle that branches
-# can be cut over and over while its laps multiply: inputs that failed in
-# milliseconds before the guard (the recursion limit) ran for minutes after
-# it. Only inputs that have been cut are counted, so an acyclic config, however
-# large, is never limited. Interim, like the guard (o3co/xx.hocon#67 / #125).
-_SUBST_CALLS_AFTER_CUT = 100_000
-
-
-# Value nodes the resolver may cache per node of the document, once the prior
-# re-entry guard has cut a cycle (rs.hocon#199 counterpart). The guard stops
-# every cycle, but a cycle through nested objects can still nest its value
-# exponentially before it does, and every resolved field is cached with each
-# of its object descendants: a 7-line input spent 16 s in that walk and built a
-# 1.8 MB value. The budget applies only after a cut, so an acyclic config
-# (`a2 = {x = ${a1}, y = ${a1}}`, …, or a deeply nested one) is never charged.
-# A cut can also happen on a config that loads (a re-entry the guard refuses
-# whose result is then not used), so the budget is sized far above anything
-# such a config was measured to reach. The charge matches rs (each cache entry
-# costs the nodes of its value). Interim, like the guard (o3co/xx.hocon#67 /
-# #125).
-_VALUE_NODES_PER_SOURCE_NODE = 10_000
-# Upper bound on that budget, whatever the document's size: a 10,000-element
-# array or many saved priors inflated the node count until a 20 KB input could
-# spend 1–3 GB before failing. Matches rs and go.
-_VALUE_BUDGET_CAP = 2_000_000
+# Safety valve, not part of the resolution model: once a cycle has been broken
+# (§6.3), a resolve may run at most this many further lookups. A dense web of
+# optional cycles (k keys each reading all k, written twice) makes the number
+# of look-back views, and so of lookups, grow faster than exponentially in k;
+# the reference model and Lightbend take minutes or more at k = 6. A document
+# without a cycle break is never limited. This replaces the post-cut work
+# budget of py.hocon#68, pending a §10 decision in xx.hocon
+# docs/resolution-model.md (the other implementations need the same bound).
+POST_CUT_LOOKUP_LIMIT = 100_000
+# The same for size. After a cycle break, the result may weigh at most this
+# many units per value of the document, and never more than the cap: a node
+# weighs 1, plus 1 per 16 characters of scalar or key text. A ring of optional
+# references whose value doubles on every lap (`a_i = ${?a_j}${?a_j}x`, or an
+# object holding two references to the next key, written twice) otherwise
+# grows until memory runs out (Lightbend: OutOfMemoryError). The numbers are
+# py.hocon#68's, which match rs and go.
+POST_CUT_VALUE_PER_SOURCE_NODE = 10_000
+POST_CUT_VALUE_CAP = 2_000_000
 
 
-def _node_weight(v: HoconValue) -> int:
-    """Weight of one resolved node for the value budget: 1, plus one per 16
-    bytes of scalar text or of object key text (a string or key that doubles on
-    every lap grows without adding nodes). Matches rs."""
-    if isinstance(v, HoconScalar):
-        return 1 + len(v.raw) // 16
-    if isinstance(v, HoconObject):
-        return 1 + sum(len(k) for k in v.fields) // 16
-    return 1
+class _ReEntry(Exception):
+    """§6.2: a re-entry, caught by the innermost active substitution frame
+    (§6.3). ``kind`` is ``"marker"`` for an active ``(Subst, View)`` needed
+    again (case a) and ``"empty"`` for a lookup that reached EMPTY (case b)."""
 
-
-def _source_nodes(root: ResObj) -> int:
-    """Nodes in the unresolved document, saved priors included.
-
-    Iterative, and each container is visited once (see _walk_once)."""
-    return sum(1 for _ in _walk_once(root))
-
-
-def _walk_once(root: ResObj) -> Iterator[object]:
-    """Every node under *root*, saved priors included, each container once.
-
-    Current values and saved priors share children: overriding nested
-    prefixes from the deepest to the shallowest and then replacing the outer
-    object gives a document whose tree, unshared, is exponential in its depth.
-    Tracking visited containers by identity keeps a walk linear in the
-    document."""
-    seen: set[int] = set()
-    stack: list[object] = [root]
-    while stack:
-        v = stack.pop()
-        if isinstance(v, ResObj | ConcatPlaceholder | HoconArray | HoconObject):
-            if id(v) in seen:
-                continue
-            seen.add(id(v))
-        yield v
-        if isinstance(v, ResObj):
-            stack.extend(v.fields.values())
-            stack.extend(v.prior_values.values())
-        elif isinstance(v, ConcatPlaceholder):
-            stack.extend(v.nodes)
-        elif isinstance(v, HoconArray):
-            stack.extend(v.items)
-        elif isinstance(v, HoconObject):
-            stack.extend(v.fields.values())
-
-
-def _max_subst_len(root: ResObj) -> int:
-    """Longest substitution path (in segments) anywhere under *root*, priors
-    included. Iterative, and each container is visited once (see _walk_once)."""
-    return max(
-        (len(v.segments) for v in _walk_once(root) if isinstance(v, SubstPlaceholder)),
-        default=0,
-    )
+    def __init__(self, kind: Literal["marker", "empty"]) -> None:
+        super().__init__(kind)
+        self.kind = kind
 
 
 class SubstitutionResolver:
-    def __init__(self, root: ResObj, opts: ResolveOptions) -> None:
+    def __init__(self, root: Obj, opts: ResolveOptions) -> None:
         self.root = root
         self.opts = opts
-        self.resolving: set[str] = set()
-        self.cache: dict[str, HoconValue] = {}
-        # ConcatPlaceholder nodes currently mid-iteration (identity membership).
-        self.resolving_concats: weakref.WeakSet[ConcatPlaceholder] = weakref.WeakSet()
-        # Full dotted path of the field currently being assigned (owner gate).
-        self.resolving_field_path: list[str] = []
-        # S13a.12 recursion guard: field keys whose prior is currently being
-        # resolved through the prefix-self-ref branch. Saved priors are
-        # prefix-self-ref-free by the fold invariant; re-entry only happens on
-        # a shape the fold could not see through — report it as unresolvable
-        # instead of recursing forever.
-        self.resolving_prefix_priors: set[str] = set()
-        # Resolver states seen when a key's saved prior started resolving in
-        # the in-progress branch of _resolve_subst, one per enclosing
-        # resolution of that prior. See the guard there.
-        self.prior_reentry: dict[str, list[_PriorState]] = {}
-        # Longest substitution path (segments) in the document, priors
-        # included. Only that many leading elements of resolving_field_path can
-        # steer a resolution (the S13a.12 prefix branch needs len(rfp) <
-        # len(segments); the owner check compares the first len(segments)
-        # elements), so the guard records only those.
-        self.max_subst_len = _max_subst_len(root)
-        # Value nodes resolution may still cache before it fails; see
-        # _VALUE_NODES_PER_SOURCE_NODE.
-        self.value_budget = min(
-            _source_nodes(root) * _VALUE_NODES_PER_SOURCE_NODE, _VALUE_BUDGET_CAP
-        )
-        # Times the prior re-entry guard refused a re-entry. The value budget
-        # applies only once this is non-zero.
-        self.cuts = 0
-        # Substitutions left to resolve after the first cut; see
-        # _SUBST_CALLS_AFTER_CUT.
-        self.subst_calls_left = _SUBST_CALLS_AFTER_CUT
+        self.memo = Memo()
+        self.substitutes = Substitutes(fold_entries)
+        # §3.5: a merged leaf rebuilt by another lookup is the same stack,
+        # interned by its entry instances (this also keeps them alive).
+        self.interned: dict[tuple[int, ...], Stack] = {}
+        # §5.5: one Substituted per (value, substitution), holding both.
+        self.substituted: dict[tuple[int, int], tuple[Substituted, Obj]] = {}
+        # §6.1: the active (Subst, View) pairs.
+        self.active: set[tuple[int, ViewKey]] = set()
+        # Lookups run since the first cycle break (POST_CUT_LOOKUP_LIMIT), and
+        # the weight the result may reach once there was one.
+        self.post_cut_lookups: int | None = None
+        self.value_budget = 0
+        self.use_env = opts.use_system_environment is not False
+        self.allow_unresolved = bool(opts.allow_unresolved)
 
-    def _origin_prefix(self) -> str:
-        return f"{self.opts.origin_description}: " if self.opts.origin_description else ""
+    def resolve(self) -> Val:
+        """§3.1: the root object, resolved in the root view."""
+        result = self._resolve_obj(self.root, ROOT_VIEW, None)
+        if self.post_cut_lookups is not None:
+            self._check_size(result)
+        return result
 
-    def resolve(self) -> HoconValue:
-        return self._resolve_res_obj(self.root)
-
-    def _resolve_res_obj(self, obj: ResObj) -> HoconValue:
-        result: dict[str, HoconValue] = {}
-        for key, val in obj.fields.items():
-            # The push/pop span covers BOTH the value resolution and the
-            # prior-chain resolution: a prior belongs to this field's value
-            # stack, so a substitution inside it must see the full field path.
-            # With the field popped, a prior's reference into a sibling of
-            # this field would satisfy the S13a.12 prefix-self-ref test
-            # against the truncated path and mis-route to the parent's prior
-            # instead of the final tree.
-            self.resolving_field_path.append(key)
-            full_cache_key = string_segments_to_key(self.resolving_field_path)
-            self.cache.pop(full_cache_key, None)
-            try:
-                resolved = self._resolve_val(val, obj)
-                if resolved is not None:
-                    # Delayed merge: if both current and prior resolve to objects, deep merge.
-                    if isinstance(resolved, HoconObject):
-                        prior = obj.prior_values.get(key)
-                        if prior is not None:
-                            prior_resolved = self._resolve_val(prior, obj)
-                            if isinstance(prior_resolved, HoconObject):
-                                final_value = deep_merge_hocon_values(prior_resolved, resolved)
-                                result[key] = final_value
-                                self._cache_value(full_cache_key, final_value)
-                                continue
-                    result[key] = resolved
-                    self._cache_value(full_cache_key, resolved)
-                else:
-                    # Unresolved optional substitution: fall back to prior value.
-                    prior = obj.prior_values.get(key)
-                    if prior is not None:
-                        prior_resolved = self._resolve_val(prior, obj)
-                        if prior_resolved is not None:
-                            result[key] = prior_resolved
-                            self._cache_value(full_cache_key, prior_resolved)
-            finally:
-                # `continue` routes through here too — every exit pops.
-                self.resolving_field_path.pop()
-        return HoconObject(result)
-
-    def _navigate_resolved(self, v: HoconValue, remainder: list[str]) -> HoconValue | None:
-        """S13a.12: walk resolved-object fields by segment text. A missing
-        segment or a walk into a scalar/array is path-absent → None."""
-        cur: HoconValue = v
-        for seg in remainder:
-            if not isinstance(cur, HoconObject):
-                return None
-            nxt = cur.fields.get(seg)
-            if nxt is None:
-                return None
-            cur = nxt
-        return cur
-
-    def _cache_value(self, key: str, value: HoconValue) -> None:
-        """Cache a resolved field value under *key*, and every object descendant
-        under its dotted path, charging the value budget (see
-        ``_VALUE_NODES_PER_SOURCE_NODE``).
-
-        The charge is the one rs makes: each cache entry costs the nodes of the
-        value it holds. Summed, that is each node times the entries on its path,
-        so one walk charges it; the walk never visits more nodes than it charges.
-        This is where a value that a cycle through nested objects keeps nesting
-        costs its time (building ever longer dotted keys). Iterative, so a deep
-        value cannot exhaust the stack.
-        """
-        # (cache key, or None inside an array; value; entries on the path above;
-        # the nearest cache key, named by the budget error)
-        stack: list[tuple[str | None, HoconValue, int, str]] = [(key, value, 0, key)]
-        # Charging starts only after the guard has cut a cycle (see
-        # _VALUE_NODES_PER_SOURCE_NODE); until then this only fills the cache.
-        charge = self.cuts > 0
-        while stack:
-            k, v, entries, at = stack.pop()
-            if k is not None:
-                entries += 1
-                at = k
-                self.cache[k] = v
-            if charge:
-                # The node, once per entry on its path, plus the cache-key
-                # string this entry builds.
-                self._spend(at, entries * _node_weight(v) + (len(k) // 16 if k else 0))
-            if isinstance(v, HoconObject):
-                for child_key, child in v.fields.items():
-                    ck = f"{k}.{string_segments_to_key([child_key])}" if k is not None else None
-                    stack.append((ck, child, entries, at))
-            elif charge and isinstance(v, HoconArray):
-                # Array elements are not cached, only charged.
-                stack.extend((None, item, entries, at) for item in v.items)
-
-    def _spend(self, key: str, n: int) -> None:
-        """Deduct *n* from the value budget, failing once it is exhausted."""
-        if n > self.value_budget:
-            raise ResolveError(
-                self._origin_prefix() + f"resolved value too large: {key} keeps growing "
-                "(a cycle through nested objects?)",
-                key,
-                0,
-                0,
-            )
-        self.value_budget -= n
-
-    def _charge_produced(self, key: str, value: HoconValue) -> None:
-        """After a cut, charge a substitution result as it is produced, so an
-        array or string that doubles on every lap of a cycle is stopped while
-        it is being built, not after its field is complete (a 16-key ring of
-        doubling strings took 4 GB). Iterative, and stops counting once the
-        budget is exceeded."""
-        n = 0
-        stack: list[HoconValue] = [value]
-        while stack:
-            v = stack.pop()
-            n += _node_weight(v)
-            if n > self.value_budget:
-                break
-            if isinstance(v, HoconObject):
-                stack.extend(v.fields.values())
-            elif isinstance(v, HoconArray):
-                stack.extend(v.items)
-        self._spend(key, n)
-
-    def _resolve_val(self, v: ResolverValue, scope: ResObj) -> HoconValue | None:
-        if is_subst(v):
-            resolved = self._resolve_subst(v, scope)
-            if resolved is not None and self.cuts > 0:
-                self._charge_produced(segments_to_key(v.segments), resolved)
-            return resolved
-        if is_concat(v):
-            # Mark mid-iteration so _resolve_subst can detect a true self-ref.
-            self.resolving_concats.add(v)
-            try:
-                return self._resolve_concat(v.nodes, scope, v.line, v.col)
-            finally:
-                self.resolving_concats.discard(v)
-        if is_res_obj(v):
-            return self._resolve_res_obj(v)
-        if isinstance(v, HoconArray):
-            # S13.12 (HOCON.md L635): an element that resolves to nothing (an
-            # undefined optional substitution) is NOT added — Lightbend yields
-            # [1, 3] for `[1, ${?missing}, 3]`, never [1, null, 3]. A literal
-            # `null` element resolves to a null scalar (not None) and is kept.
-            items: list[HoconValue] = []
-            for item in v.items:
-                resolved = self._resolve_val(item, scope)
-                if resolved is None:
-                    continue
-                items.append(resolved)
-            return HoconArray(items)
-        # Exhausted every placeholder/container variant above; v is a resolved
-        # HoconValue (scalar or object). TypeGuards don't narrow the negative
-        # branch in mypy, so cast to the resolved contract.
-        return cast("HoconValue", v)
-
-    def _resolve_subst(self, s: SubstPlaceholder, scope: ResObj) -> HoconValue | None:
-        if self.cuts > 0:
-            self.subst_calls_left -= 1
-            if self.subst_calls_left < 0:
-                k = segments_to_key(s.segments)
-                raise ResolveError(
-                    self._origin_prefix() + f"substitution cycle too complex to resolve: ${{{k}}}",
-                    k,
-                    s.line,
-                    s.col,
-                )
-        if s.known_absent:
-            # A required substitution folded to known_absent (S13a.12 prefix
-            # fold with no below value at the navigated path) is the spec's
-            # "undefined" classification — an error, not a silent
-            # disappearance. The `+=` chain-bottom sentinel is always `${?…}`
-            # and keeps the silent path. allow_unresolved leaves the
-            # placeholder in place; the key keeps the `[]` suffix so `${X[]}`
-            # reports its own path.
-            if not s.optional:
-                if self.opts.allow_unresolved:
-                    return cast(HoconValue, s)
-                k = segments_to_key(s.segments)
-                if s.list_suffix:
-                    k = f"{k}[]"
-                raise ResolveError(
-                    self._origin_prefix() + f"could not resolve substitution: ${{{k}}}",
-                    k,
-                    s.line,
-                    s.col,
-                )
-            return None
-
-        # S13a.12 (HOCON.md L791): a substitution whose target lies INSIDE the
-        # field currently being resolved (the field path is a proper prefix of
-        # the target path, e.g. `foo : ${foo.a}` while resolving `foo`) is
-        # self-referential and resolves against the field's "below" value —
-        # its saved prior — never the final tree.
-        rfp = self.resolving_field_path
-        s_texts = [seg.text for seg in s.segments]
-        if (
-            0 < len(rfp) < len(s_texts)
-            and string_segments_to_key(s_texts[: len(rfp)]) == string_segments_to_key(rfp)
-        ):
-            guard_key = string_segments_to_key(rfp)
-            prior = scope.prior_values.get(rfp[-1])
-            if prior is not None and guard_key not in self.resolving_prefix_priors:
-                self.resolving_prefix_priors.add(guard_key)
-                try:
-                    prior_resolved = self._resolve_val(prior, scope)
-                    if prior_resolved is not None:
-                        navigated = self._navigate_resolved(
-                            prior_resolved, s_texts[len(rfp):]
-                        )
-                        if navigated is not None:
-                            return navigated
-                finally:
-                    self.resolving_prefix_priors.discard(guard_key)
-            if s.optional:
-                return None
-            if self.opts.allow_unresolved:
-                return cast(HoconValue, s)
-            k = segments_to_key(s.segments)
-            if s.list_suffix:
-                k = f"{k}[]"
-            raise ResolveError(
-                self._origin_prefix() + f"could not resolve substitution: ${{{k}}}",
-                k,
-                s.line,
-                s.col,
-            )
-
-        # Cache key includes listSuffix so ${X} and ${X[]} never collide.
-        key = f"{segments_to_key(s.segments)}[]" if s.list_suffix else segments_to_key(s.segments)
-
-        if key in self.cache:
-            return self.cache[key]
-
-        if key in self.resolving:
-            # Cycle detected: try prior value for self-referential substitutions.
-            prior = self._lookup_prior(s, scope)
-            # A prior can reach another in-progress key and resolve that key's
-            # prior, which can come back here. Re-entering is legal and usually
-            # terminates, because something that steers the branches has changed
-            # the second time. But `a = ${?b}` / `b = ${?a}` written twice
-            # re-entered in the same state forever, until the recursion limit
-            # turned it into a ParseError. A re-entry whose state equals an
-            # enclosing one is treated as a cycle that cannot be broken: the
-            # optional form is nonexistent and the required form an error, as in
-            # Lightbend. py counterpart of go.hocon#218 / rs.hocon#199; interim
-            # guard, the full fix is the resolver redesign in o3co/xx.hocon#67 /
-            # #125.
-            #
-            # The state is what was found to steer the branches a substitution
-            # takes here: the in-progress set, the S13a.12 prefix-prior guard set,
-            # the field path up to the longest substitution path (the prefix
-            # branch and the owner check never compare deeper elements), the
-            # concatenations mid-iteration (the self-ref check), and the scope
-            # (which picks the prior). Each was added because leaving it out
-            # changed a config that loads. Other state is left out: the cache,
-            # which a cycle through nested objects grows by a deeper key every
-            # lap (a state including it would never repeat). So an equal state is
-            # not a proof of an equal computation; that no config that loads
-            # changes rests on differential runs, not on a proof. There are
-            # finitely many such states, so the nesting is finite.
-            if prior is not None:
-                outer = self.prior_reentry.setdefault(key, [])
-                state: _PriorState = (
-                    frozenset(self.resolving),
-                    frozenset(self.resolving_prefix_priors),
-                    tuple(self.resolving_field_path[: self.max_subst_len]),
-                    frozenset(id(c) for c in self.resolving_concats),
-                    id(scope),
-                )
-                if state in outer:
-                    self.cuts += 1
-                else:
-                    outer.append(state)
-                    saved = self.resolving
-                    self.resolving = set(saved)
-                    try:
-                        return self._resolve_val(prior, scope)
-                    finally:
-                        self.resolving = saved
-                        outer.pop()
-            if s.optional:
-                return None
-            raise ResolveError(
-                self._origin_prefix() + f"circular substitution: {key}", key, s.line, s.col
-            )
-
-        self.resolving.add(key)
-        try:
-            found = lookup_path(self.root, s.segments)
-            if found is not None:
-                # S13a.13 / spec L841: self-ref detection (owner gate + path walk).
-                rfp = self.resolving_field_path
-                is_owner = len(rfp) >= len(s.segments) and all(
-                    rfp[i] == s.segments[i].text for i in range(len(s.segments))
-                )
-                is_self_ref = (
-                    is_concat(found) and found in self.resolving_concats
-                ) or (is_owner and contains_subst_by_path(found, s.segments))
-                if is_self_ref:
-                    prior = self._lookup_prior(s, scope)
-                    if prior is not None:
-                        result = self._resolve_val(prior, scope)
-                        if result is not None:
-                            self.cache[key] = result
-                        return result
-                    if s.optional:
-                        return None
+    def _check_size(self, result: Obj) -> None:
+        """After a cycle break, the result written out may not weigh more than
+        the value budget. Resolved values are shared, so a ring of optional
+        references can make a small result expand exponentially when it is
+        written out. The count stops as soon as the budget is spent."""
+        budget = self.value_budget
+        for sl in result.fields.values():
+            todo: list[Val] = list(sl.stack)
+            while todo:
+                v = todo.pop()
+                budget -= _weight(v)
+                if isinstance(v, Lst):
+                    todo.extend(v.items)
+                elif isinstance(v, Obj):
+                    for child in v.fields.values():
+                        todo.extend(child.stack)
+                if budget < 0:
                     raise ResolveError(
-                        f"{self._origin_prefix()}could not resolve substitution: ${{{key}}}",
-                        key,
-                        s.line,
-                        s.col,
+                        f"resolved value too large: {path_to_key(sl.path)} keeps growing "
+                        "(a cycle through optional substitutions?)",
+                        path_to_key(sl.path),
+                        0,
+                        0,
                     )
-                result = self._resolve_val(found, scope)
-                # Delayed merge in substitution context.
-                effective_len = len(s.segments) - s.prefix_len
-                if effective_len == 1 and isinstance(result, HoconObject):
-                    leaf_seg = s.segments[-1].text if s.segments else ""
-                    if s.prefix_len > 0:
-                        parent_scope = lookup_res_obj(self.root, s.segments[:-1])
-                        prior = parent_scope.prior_values.get(leaf_seg) if parent_scope else None
-                    else:
-                        prior = scope.prior_values.get(leaf_seg) or self.root.prior_values.get(
-                            leaf_seg
-                        )
-                    if prior is not None:
-                        prior_resolved = self._resolve_val(prior, scope)
-                        if isinstance(prior_resolved, HoconObject):
-                            result = deep_merge_hocon_values(prior_resolved, result)
-                if result is not None:
-                    self.cache[key] = result
-                return result
 
-            # S14c.2 (xx.hocon#22 C4): original-path config fallback for
-            # relativized substitutions. Tried after the relativized lookup
-            # misses, before env-var fallback.
-            if s.prefix_len > 0 and len(s.segments) > s.prefix_len:
-                original_segments = s.segments[s.prefix_len :]
-                fallback_found = lookup_path(self.root, original_segments)
-                if fallback_found is not None:
-                    result = self._resolve_val(fallback_found, scope)
-                    if len(original_segments) == 1 and isinstance(result, HoconObject):
-                        root_seg = original_segments[0].text if original_segments else ""
-                        prior = self.root.prior_values.get(root_seg)
-                        if prior is not None:
-                            prior_resolved = self._resolve_val(prior, scope)
-                            if isinstance(prior_resolved, HoconObject):
-                                result = deep_merge_hocon_values(prior_resolved, result)
-                    if result is not None:
-                        self.cache[key] = result
-                    return result
+    # ---------------------------------------------------------- §3.2 stacks
 
-            # S13c: env-var list expansion — gated on useSystemEnvironment.
-            if s.list_suffix and self.opts.use_system_environment is not False:
-                env_result = self._resolve_env_list(s)
-                if env_result is not None:
-                    self.cache[key] = env_result
-                    return env_result
-                if s.optional:
-                    return None
-                env_base = ".".join(seg.text for seg in s.segments)
-                raise ResolveError(
-                    f"{self._origin_prefix()}could not resolve substitution: ${{{key}}} "
-                    f"(no environment variables {env_base}_0, {env_base}_1, … set)",
-                    key,
-                    s.line,
-                    s.col,
-                )
-            elif s.list_suffix:
-                if s.optional:
-                    return None
-                if self.opts.allow_unresolved:
-                    return cast(HoconValue, s)
-                raise ResolveError(
-                    f"{self._origin_prefix()}could not resolve substitution: ${{{key}}}",
-                    key,
-                    s.line,
-                    s.col,
-                )
+    def _stack_of(self, slot: Slot, view: View) -> Substitute:
+        """§4.1: a slot's stack is its substitute when the view maps it."""
+        sub = view.get(slot)
+        return slot.stack if sub is None else sub
 
-            # Env var fallback — raw dot-join (no quoting), Lightbend-aligned.
-            if self.opts.use_system_environment is not False:
-                env_key = ".".join(seg.text for seg in s.segments)
-                env_val = self.opts.env.get(env_key)
-                if env_val is None and s.prefix_len > 0:
-                    env_val = self.opts.env.get(
-                        ".".join(seg.text for seg in s.segments[s.prefix_len :])
-                    )
-                if env_val is not None:
-                    result_scalar = HoconScalar(env_val, "string")
-                    self.cache[key] = result_scalar
-                    return result_scalar
+    # The functions below call each other once per nesting level and per
+    # substitution link, so the hot path is kept to few Python frames: the walk
+    # is part of _value_of, entries are dispatched directly, and the lookup is
+    # part of _resolve_subst. That keeps the depth a document can reach close
+    # to what the parser itself allows.
 
-            if s.optional:
-                return None
-            if self.opts.allow_unresolved:
-                return cast(HoconValue, s)
-            raise ResolveError(
-                f"{self._origin_prefix()}could not resolve substitution: ${{{key}}}",
-                key,
-                s.line,
-                s.col,
-            )
-        finally:
-            self.resolving.discard(key)
-
-    def _lookup_prior(self, s: SubstPlaceholder, scope: ResObj) -> ResolverValue | None:
-        """Prior lookup shared by the cycle-guard and self-ref short-circuit
-        branches (dotted-path-at-root uses ``len(segments) > 1``)."""
-        if len(s.segments) > 1:
-            leaf_seg = s.segments[-1].text
-            parent_scope = lookup_res_obj(self.root, s.segments[:-1])
-            return parent_scope.prior_values.get(leaf_seg) if parent_scope else None
-        root_seg = s.segments[0].text if s.segments else ""
-        return scope.prior_values.get(root_seg) or self.root.prior_values.get(root_seg)
-
-    def _resolve_env_list(self, s: SubstPlaceholder) -> HoconValue | None:
-        """S13c: scan environment for NAME_0, NAME_1, … → Array<Scalar(String)>.
-        First candidate base whose _0 is present wins entirely."""
-        for base in self._candidate_bases(s):
-            key0 = base + "_0"
-            if key0 not in self.opts.env:
+    def _value_of(self, slot: Slot, view: View, restrict: Path | None) -> Result:
+        """§3.2 ``valueOf(slot, view, restrict)``, with the stack memo of §5.3.
+        The caller has checked that the slot is not EMPTY in the view."""
+        st = self._stack_of(slot, view)
+        assert not isinstance(st, Empty)
+        below = view.below(slot.path)
+        full = self.memo.stack((slot, id(st), below, None))
+        if full is not None:
+            if restrict is None:
+                return full
+            # A full result answers a restricted request, except for presence:
+            # a path the full result lacks (at any depth) is decided by the
+            # restricted walk, on the raw value (J2).
+            if has_path(full, restrict):
+                return full
+        key = (slot, id(st), below, restrict)
+        if restrict is not None:
+            hit = self.memo.stack(key)
+            if hit is not None:
+                return hit
+        # The walk (W1–W5): the entries top first, each folded under the
+        # result so far, until the result ignores fallbacks.
+        if slot.synth and len(st) > 1:
+            st = self.interned.setdefault(tuple(id(x) for x in st), st)
+        merged: Stack | None = None
+        own: Overlay | None = None  # the walk's own merge overlay (§10.2)
+        r: Result
+        for i, e in enumerate(st):
+            if merged is not None and stack_ignores_fallbacks(merged):  # W1 cut
+                break
+            if isinstance(e, (Subst, Concat)):
+                # W3 look-back: below this entry, the slot shows the rest of its
+                # stack (a merged leaf by its path and entries, §3.5). A single
+                # entry makes no view.
+                inner = view
+                if len(st) > 1:
+                    inner = view.with_(slot, self.substitutes.get(st, i + 1))
+                if isinstance(e, Subst):
+                    r = self._resolve_subst(e, inner, restrict)
+                else:
+                    r = self._resolve_concat(e, inner)
+            elif merged is not None and _shadowed(merged, e):  # W2 shadow skip
                 continue
-            items: list[HoconValue] = []
-            i = 0
-            while True:
-                k = f"{base}_{i}"
-                if k not in self.opts.env:
+            elif isinstance(e, Obj):  # W4 forward
+                r = self._resolve_obj(e, view, restrict)
+            else:
+                r = self._resolve(e, view, restrict)
+            if isinstance(r, Missing):  # W5: a missing entry contributes nothing
+                continue
+            if isinstance(r, Unresolved):  # allow_unresolved: the field stays unresolved
+                return r
+            rs: Stack = r.stack if isinstance(r, Partial) else [r]
+            if merged is None:
+                merged = rs
+            elif (
+                len(merged) == 1
+                and len(rs) == 1
+                and isinstance(merged[0], Obj)
+                and isinstance(rs[0], Obj)
+                and not merged[0].flag
+            ):
+                # F5 object over object: one overlay per walk, extended in place.
+                if merged[0] is not own:
+                    own = Overlay([merged[0]])
+                    merged = [own]
+                own.append(rs[0])
+            else:
+                merged = fallback(merged, rs, synth=True)
+        if merged is None:
+            return MISSING
+        result = merged[0] if len(merged) == 1 else Partial(merged)
+        self.memo.put_stack(key, st, result)
+        return result
+
+    # ---------------------------------------------------------- §3.4 / §3.6 values
+
+    def _resolve(self, v: Val, view: View, restrict: Path | None) -> Result:
+        if isinstance(v, Scalar):
+            return v
+        if isinstance(v, Lst):
+            if restrict is not None:  # §3.4: a list is returned unchanged
+                return v
+            items: list[Val] = []
+            for item in v.items:
+                r = self._resolve(item, view, None)
+                if not isinstance(r, Missing):  # §7.3: a missing item is dropped
+                    items.append(r)
+            return Lst(items)
+        if isinstance(v, Obj):
+            return self._resolve_obj(v, view, restrict)
+        if isinstance(v, Subst):
+            return self._resolve_subst(v, view, restrict)
+        if isinstance(v, Concat):
+            return self._resolve_concat(v, view)
+        if isinstance(v, Unresolved):
+            # allow_unresolved: a memoized object can hold one as a leaf;
+            # reading it again leaves it unresolved.
+            return v
+        raise ResolveError(f"internal: cannot resolve {type(v).__name__}", "", 0, 0)
+
+    def _resolve_obj(self, o: Obj, view: View, restrict: Path | None) -> Obj:
+        if restrict is None:
+            # §3.6: every key in order; an EMPTY slot is absent (§4.3), a
+            # missing value is omitted.
+            out: dict[str, Slot] = {}
+            for k, s in o.fields.items():
+                if isinstance(self._stack_of(s, view), Empty):
+                    continue
+                r = self._value_of(s, view, None)
+                if not isinstance(r, Missing):
+                    out[k] = Slot(k, [r], s.path)
+            return Obj(out, o.flag)
+        # §3.4: only key k changes, as a patch of the original (§10.2). An
+        # EMPTY slot stays, so that find reaches it.
+        k, rest = restrict[0], restrict[1:]
+        child = o.get_field(k)
+        if child is None:
+            return o
+        st = self._stack_of(child, view)
+        if isinstance(st, Empty):
+            return o
+        if not rest:
+            # The leaf stays raw. If the view maps it, it carries the mapped
+            # stack but is still the same slot (its origin; a merged leaf stays
+            # a merged leaf, §10.1), so a merge sees the look-back and a
+            # further look-back advances it.
+            if st is child.stack:
+                return o
+            return Patch(o, k, Slot(k, st, child.path, child.synth, child.origin))
+        r = self._value_of(child, view, rest)
+        if isinstance(r, Missing):
+            return Patch(o, k, None)
+        return Patch(o, k, Slot(k, r.stack if isinstance(r, Partial) else [r], child.path, True))
+
+    def _resolve_concat(self, c: Concat, view: View) -> Result:
+        """§1.3 with the concatenation memo of §5.2. Pieces resolve
+        unrestricted, even under a restriction (§3.4)."""
+        key = (id(c), view.below(c.fpath, strict=True))
+        hit = self.memo.concat(key)
+        if hit is not None:
+            return hit
+        resolved: list[Val] = []
+        unresolved: Unresolved | None = None
+        for p in c.pieces:
+            if isinstance(p, Subst):
+                r = self._resolve_subst(p, view, None)
+            else:
+                r = self._resolve(p, view, None)
+            if isinstance(r, Missing):  # §1.3: an omitted optional piece
+                continue
+            if isinstance(r, Unresolved):
+                # allow_unresolved: the concatenation stays unresolved, but the
+                # other pieces are still resolved, so a cycle in them aborts,
+                # and they are still joined below, so a type error between two
+                # known pieces raises (Lightbend leaves the reference as an
+                # unjoinable piece and joins the rest).
+                unresolved = unresolved or r
+            resolved.append(r)
+        result: Result = MISSING  # every piece omitted
+        if resolved:
+            # After a cycle break, check the joined size before joining: a
+            # string or a list is at most as large as its pieces together.
+            if (
+                self.post_cut_lookups is not None
+                and sum(_weight(r) for r in resolved) > self.value_budget
+            ):
+                raise ResolveError(
+                    f"resolved value too large: {path_to_key(c.fpath)} keeps growing "
+                    "(a cycle through optional substitutions?)",
+                    path_to_key(c.fpath),
+                    c.line,
+                    c.col,
+                )
+            joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)
+            if unresolved is not None:
+                return Unresolved(c, joined)
+            if len(joined) != 1:
+                if self.allow_unresolved:
+                    # An unresolved object next to a list cannot be joined
+                    # yet. A type mismatch already known still raised above.
+                    return Unresolved(c, joined)
+                raise ResolveError("internal: concatenation did not join", "", c.line, c.col)
+            result = joined[0]
+        hit = self.memo.concat(key)  # first completed result wins
+        if hit is not None:
+            return hit
+        if not isinstance(result, Missing):  # MISSING is not stored
+            self.memo.put_concat(key, c, result)
+        return result
+
+    @staticmethod
+    def _child(v: Val, key: str, path: Path) -> Slot | None:
+        """§3.4 ``child(v, key)``: descend one key of an object, or of the
+        object layers on top of a partial stack (§11 J1)."""
+        if isinstance(v, Obj):
+            return v.get_field(key)
+        if isinstance(v, Partial):
+            parts: list[Stack] = []
+            for layer in v.stack:
+                if not isinstance(layer, Obj):
                     break
-                items.append(HoconScalar(self.opts.env[k], "string"))
-                i += 1
-            return HoconArray(items)
+                s = layer.get_field(key)
+                if s is not None:
+                    parts.append(s.stack)
+            if not parts:
+                return None
+            st = parts[0]
+            for p in parts[1:]:
+                st = fallback(st, p, synth=True)
+            return Slot(key, st, path, True)
         return None
 
-    def _candidate_bases(self, s: SubstPlaceholder) -> list[str]:
-        full = ".".join(seg.text for seg in s.segments)
-        if s.prefix_len == 0:
-            return [full]
-        bare = ".".join(seg.text for seg in s.segments[s.prefix_len :])
-        return [full, bare]
+    # ---------------------------------------------------------- §3.3 lookup
 
-    def _resolve_concat(
-        self, nodes: list[ResolverValue], scope: ResObj, line: int = 0, col: int = 0
-    ) -> HoconValue | None:
-        raw_resolved = [self._resolve_val(n, scope) for n in nodes]
+    def _find(self, path: Path, view: View, s: Subst) -> tuple[Slot | None, bool]:
+        """``find(path, view)``: the leaf slot, or None. The flag is True when
+        the walk reached an EMPTY slot that counts as a re-entry (§4.4)."""
+        first = self.root.get_field(path[0])
+        if first is None:
+            return None, False
+        slot = first
+        for j in range(len(path)):
+            st = self._stack_of(slot, view)
+            if isinstance(st, Empty):
+                # §4.4 own-path exception: the slot's own reference, written in
+                # the bottom entry, is simply not found.
+                if s.path == slot.path and id(s) in st.owned:
+                    return None, False
+                return None, True
+            if j == len(path) - 1:
+                return slot, False
+            # Only the ancestors are resolved, each restricted to the rest.
+            v = self._value_of(slot, view, path[j + 1 :])
+            if isinstance(v, Missing):
+                return None, False
+            nxt = self._child(v, path[j + 1], (*slot.path, path[j + 1]))
+            if nxt is None:
+                return None, False
+            slot = nxt
+        return slot, False
 
-        if self.opts.allow_unresolved:
-            for v in raw_resolved:
-                if v is not None and is_subst(cast(ResolverValue, v)):
-                    return v
+    # ---------------------------------------------------------- §6 substitutions
 
-        resolved = [v for v in raw_resolved if v is not None]
+    def _resolve_subst(self, s: Subst, view: View, restrict: Path | None) -> Result:
+        """§6.1 (with the substitution memo of §5.1) around the lookup of §7.2."""
+        hit = self.memo.subst(s)
+        if hit is not None:
+            result, computed_in = hit
+            if not (restrict and isinstance(result, Obj) and not has_path(result, restrict)):
+                return result
+            # §5.3 presence: decided by a restricted resolution in the view
+            # that produced the memoized result.
+            view = computed_in
+        # §6.1: only document-slot mappings make a marker fresh (§3.5).
+        marker = (id(s), view.slot_key)
+        if marker in self.active:
+            raise _ReEntry("marker")  # §6.2 (a)
+        if self.post_cut_lookups is not None:
+            self.post_cut_lookups += 1
+            if self.post_cut_lookups > POST_CUT_LOOKUP_LIMIT:
+                raise self._error(s, "substitution cycle too complex to resolve")
+        self.active.add(marker)
+        mark = self.memo.mark()
+        cycle_break = False
+        r: Result
+        try:
+            # §7.2 steps 1–2: the full path, then (only if not found) the
+            # path as written in an included file.
+            slot, reached_empty = self._find(s.path, view, s)
+            if slot is None and s.prefix_len > 0:
+                slot, reached_empty2 = self._find(s.path[s.prefix_len :], view, s)
+                reached_empty = reached_empty or reached_empty2
+            # §5.4: what find memoized is kept if the leaf's resolution re-enters.
+            mark = self.memo.mark()
+            if slot is None:
+                env = self._from_env(s)  # step 3
+                if env is not None:
+                    r = env
+                elif reached_empty:
+                    raise _ReEntry("empty")  # §6.2 (b)
+                else:
+                    r = self._undefined(s)  # step 4
+            else:
+                # The leaf resolves under the caller's restriction (§3.3). Found
+                # means present: a found leaf that is MISSING never falls back
+                # to the original path or the environment (#123).
+                r = self._value_of(slot, view, restrict)
+                if isinstance(r, Obj):
+                    r = self._substituted(r, s)
+                if isinstance(r, Missing) and not s.optional:
+                    if not self.allow_unresolved:
+                        raise self._error(s, "could not resolve substitution")
+                    r = Unresolved(s)
+        except _ReEntry as e:
+            # §6.3 [interim]: the innermost active frame catches. Work done
+            # since the frame's mark is abandoned (§5.4).
+            self.memo.rollback(mark)
+            if self.post_cut_lookups is None:
+                self.post_cut_lookups = 0
+                self.value_budget = min(
+                    _source_nodes(self.root) * POST_CUT_VALUE_PER_SOURCE_NODE, POST_CUT_VALUE_CAP
+                )
+            if not s.optional:
+                raise self._error(s, "circular substitution", "is part of a cycle") from None
+            r = MISSING
+            cycle_break = e.kind == "marker"
+        finally:
+            self.active.discard(marker)
+        if restrict is None or isinstance(r, Missing) or is_resolved(r):
+            if self.memo.has_subst(s):  # first completed result wins
+                if restrict is None:
+                    stored = self.memo.subst(s)
+                    assert stored is not None
+                    return stored[0]
+                return r
+            # MISSING is remembered only when it broke a cycle (§5.1).
+            if not isinstance(r, Missing) or cycle_break:
+                self.memo.put_subst(s, r, view)
+        return r
 
-        if len(resolved) == 0:
+    def _substituted(self, r: Obj, s: Subst) -> Substituted:
+        """§5.5, once per (value, substitution): a rebuilt merged leaf then
+        has the same entries (§3.5)."""
+        if isinstance(r, Substituted):
+            return r  # already rewritten (see Substituted)
+        key = (id(r), id(s))
+        held = self.substituted.get(key)
+        if held is None:
+            held = (Substituted(r, s, s.path), r)
+            self.substituted[key] = held
+        return held[0]
+
+    def _from_env(self, s: Subst) -> Val | None:
+        """§7.2 step 3 (E17): the full dotted path first, then the original."""
+        if not self.use_env:
             return None
-        if len(resolved) == 1:
-            return resolved[0]
+        names = [".".join(s.path)]
+        if s.prefix_len > 0:
+            names.append(".".join(s.path[s.prefix_len :]))
+        env = self.opts.env
+        if s.list_suffix:
+            # S13c: NAME_0, NAME_1, … as a list; the first name whose _0 is
+            # set wins entirely.
+            for base in names:
+                if f"{base}_0" not in env:
+                    continue
+                items: list[Val] = []
+                i = 0
+                while f"{base}_{i}" in env:
+                    items.append(Scalar(env[f"{base}_{i}"], "string", True))
+                    i += 1
+                return Lst(items)
+            return None
+        for name in names:
+            value = env.get(name)
+            if value is not None:
+                return Scalar(value, "string", True)
+        return None
 
-        # Filter parser-inserted separator whitespace (tracked via WeakSet), NOT
-        # user-authored '' / ' ' which should prevent object merging.
-        non_sep = [
-            v
-            for v in resolved
-            if not (isinstance(v, HoconScalar) and v in separator_values)
-        ]
-
-        if len(non_sep) == 0:
-            s = "".join(
-                v.raw if isinstance(v, HoconScalar) else _json_dumps(v) for v in resolved
+    def _undefined(self, s: Subst) -> Result:
+        """§7.2 step 4: nothing found anywhere."""
+        if s.optional:
+            return MISSING
+        if s.list_suffix and self.use_env:
+            base = ".".join(s.path)
+            raise self._error(
+                s,
+                "could not resolve substitution",
+                f"(no environment variables {base}_0, {base}_1, … set)",
             )
-            return HoconScalar(s, "string")
+        if self.allow_unresolved:
+            return Unresolved(s)
+        raise self._error(s, "could not resolve substitution")
 
-        # True left-to-right pairwise fold (S10.4 / S10.13 / S10.19).
-        def join_pair(left: HoconValue, right: HoconValue) -> HoconValue:
-            if isinstance(left, HoconObject) and isinstance(right, HoconObject):
-                return deep_merge_hocon_values(left, right)
-            if isinstance(left, HoconArray) and isinstance(right, HoconObject):
-                converted = numeric_object_to_array(right)
-                if converted is not None:
-                    return HoconArray([*left.items, *converted])
-                raise ResolveError(
-                    "cannot concatenate array with object: value concatenation requires "
-                    "same-kind operands (S10.4)",
-                    "",
-                    line,
-                    col,
-                )
-            if isinstance(left, HoconObject) and isinstance(right, HoconArray):
-                converted = numeric_object_to_array(left)
-                if converted is not None:
-                    return HoconArray([*converted, *right.items])
-                raise ResolveError(
-                    "cannot concatenate object with array: value concatenation requires "
-                    "same-kind operands (S10.4)",
-                    "",
-                    line,
-                    col,
-                )
-            if isinstance(left, HoconArray) and isinstance(right, HoconArray):
-                return HoconArray([*left.items, *right.items])
-            if isinstance(left, HoconArray) or isinstance(right, HoconArray):
-                raise ResolveError(
-                    f"cannot concatenate {left.kind} with {right.kind}: arrays and objects "
-                    f"may not appear in string value concatenation (S10.13)",
-                    "",
-                    line,
-                    col,
-                )
-            if isinstance(left, HoconObject) or isinstance(right, HoconObject):
-                raise ResolveError(
-                    f"cannot concatenate {left.kind} with {right.kind}: arrays and objects "
-                    f"may not appear in string value concatenation (S10.13)",
-                    "",
-                    line,
-                    col,
-                )
-            # Scalar + Scalar — string concat (S10).
-            return HoconScalar(left.raw + right.raw, "string")
-
-        folded = non_sep[0]
-        for nxt in non_sep[1:]:
-            folded = join_pair(folded, nxt)
-
-        # If scalar and there were separator tokens, re-run as plain string concat
-        # over ALL resolved values so whitespace is preserved.
-        if isinstance(folded, HoconScalar):
-            s = "".join(
-                v.raw if isinstance(v, HoconScalar) else _json_dumps(v) for v in resolved
-            )
-            return HoconScalar(s, "string")
-
-        return folded
+    def _error(self, s: Subst, what: str, detail: str = "") -> ResolveError:
+        key = path_to_key(s.path) + ("[]" if s.list_suffix else "")
+        origin = f"{self.opts.origin_description}: " if self.opts.origin_description else ""
+        message = f"{origin}{what}: ${{{key}}}" + (f" {detail}" if detail else "")
+        return ResolveError(message, key, s.line, s.col)
 
 
-def _json_dumps(v: HoconValue) -> str:
-    """Defensive-only stringification for a non-scalar value inside string
-    concat. Both call sites already special-case scalars, and ``join_pair``
-    rejects arrays/objects in string concatenation before this fold path is
-    taken (S10.13), so this is unreachable for valid input."""
-    return ""
+def _weight(v: Val) -> int:
+    """A value's own weight for the post-cut value budget: 1, plus 1 per 16
+    characters of scalar text or of its keys, plus its list items."""
+    if isinstance(v, Scalar):
+        return 1 + len(v.raw) // 16
+    if isinstance(v, Lst):
+        return 1 + len(v.items)
+    if isinstance(v, Obj):
+        return 1 + sum(len(k) for k in v.field_keys()) // 16
+    return 1
+
+
+def _source_nodes(root: Obj) -> int:
+    """The number of values in the document."""
+    n = 0
+    todo: list[Val] = [root]
+    while todo:
+        v = todo.pop()
+        n += 1
+        if isinstance(v, Obj):
+            for sl in v.fields.values():
+                todo.extend(sl.stack)
+        elif isinstance(v, Lst):
+            todo.extend(v.items)
+        elif isinstance(v, Concat):
+            todo.extend(v.pieces)
+    return n
+
+
+def _shadowed(merged: Stack, e: Val) -> bool:
+    """§3.2 W2: ``e`` is a non-empty object every key of which is already in
+    the single object ``merged`` with a stack that ignores fallbacks."""
+    if len(merged) != 1 or not isinstance(merged[0], Obj):
+        return False
+    if not isinstance(e, Obj):
+        return False
+    fields = e.fields  # e is a document entry: a plain object, never copied
+    if not fields:
+        return False
+    top = merged[0]
+    for k in fields:
+        s = top.get_field(k)
+        if s is None or not stack_ignores_fallbacks(s.stack):
+            return False
+    return True

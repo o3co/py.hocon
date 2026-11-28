@@ -1,13 +1,22 @@
 r"""A substitution cycle written twice (py counterpart of go.hocon#218 /
 rs.hocon#199).
 
-``a = ${?b}`` / ``b = ${?a}`` written twice made the in-progress branch of the
-resolver re-enter a key's saved prior forever. go and rs overflowed the stack;
-py hit its recursion limit and raised a ``ParseError`` ("nested too deeply …
-or contains a cycle"), where Lightbend gives ``{}``. The interim guard treats
-a re-entry in an unchanged in-progress state as an unbreakable cycle; the full
-fix is the resolver redesign in o3co/xx.hocon#67 / #125. Expected values are
-Lightbend 1.4.9.
+``a = ${?b}`` / ``b = ${?a}`` written twice made the former resolver re-enter
+a key's saved prior forever. go and rs overflowed the stack; py hit its
+recursion limit and raised a ``ParseError`` ("nested too deeply … or contains
+a cycle"), where Lightbend gives ``{}``. py.hocon#68 added an interim guard.
+The #67 window's resolution layer (xx.hocon ``docs/resolution-model.md``)
+replaced it, and these inputs now follow the resolution model. Where a value
+differs from what #68 pinned, it is the reference model's value, and
+Lightbend 1.4.10 agrees once the keys are named so that its hash order is the
+document order (§11: the result must not depend on key names).
+
+The model's work on a dense web of optional cycles grows faster than
+exponentially, and a ring of optional references can double its value on
+every lap, so the resolver keeps #68's two post-cut bounds as a safety valve
+(``POST_CUT_LOOKUP_LIMIT`` and the value budget in
+``substitution_resolver.py``): only a resolve in which a cycle was broken is
+ever limited.
 
 Pinning fixtures (auto-discovered by the conformance harnesses once
 ``make testdata`` syncs them): ``optional-cycle-repeat/oc01–oc06``
@@ -48,32 +57,24 @@ def test_unbreakable_cycle_through_priors(src: str, want: object) -> None:
 @pytest.mark.parametrize(
     ("src", "want"),
     [
-        # The second pass through o.y's prior sees `a` in progress and stops
-        # on its own: the guard must let this re-entry through.
-        (
-            "o = { y = ${?a} }\na = ${o.y}\no.x = 5\no.y += [3]\n",
-            {"a": [[3]], "o": {"x": 5, "y": [[3]]}},
-        ),
-        # The second pass through k's prior terminates because `o` has
-        # meanwhile entered the S13a.12 prefix-prior guard set: the guard's
-        # state must include that set, not only the in-progress keys.
-        (
-            "o = ${?k}z\no.y = ${?o.y}\nk = ${?o.x}\nk = ${k}z\n",
-            {"k": "z", "o": {}},
-        ),
-        (
-            "o = ${?k}z\no.y.z = ${?o.y.z}\nk = ${?o.x}\nk = ${k}z\n",
-            {"k": "z", "o": {"y": {}}},
-        ),
+        # `a` reads o.y, whose `+=` looks back at `${?a}`: a re-entry caught by
+        # the required ${o.y}. Lightbend 1.4.10 gives a value only because `a`
+        # hashes before `o`; with the keys renamed to document order it errors.
+        ("o = { y = ${?a} }\na = ${o.y}\no.x = 5\no.y += [3]\n", "ERR"),
+        # `${k}` in `k = ${k}z` looks back at `${?o.x}`: found (raw-present
+        # under o's own `${?k}z`) and missing, so the required ${k} is an
+        # error (#123); Lightbend 1.4.10 agrees.
+        ("o = ${?k}z\no.y = ${?o.y}\nk = ${?o.x}\nk = ${k}z\n", "ERR"),
+        ("o = ${?k}z\no.y.z = ${?o.y.z}\nk = ${?o.x}\nk = ${k}z\n", "ERR"),
         (
             "o = { y = ${?k} }\nk = [${?o.y}]\nk = ${?m}\nm = ${?k}\no = ${?k}\n",
-            {"k": [[]], "m": [[]], "o": [[]]},
+            {"k": [], "m": [], "o": []},
         ),
         ("a = 1\na = ${a}x\na = ${a}y\nb = ${a}\n", {"a": "1xy", "b": "1xy"}),
         ("a = ${?b}\nb = ${?a}\na = ${?b}\n", {}),
     ],
     ids=[
-        "legal-reentry",
+        "o-y-append",
         "prefix-prior-two-element-path",
         "prefix-prior-deep",
         "field-path",
@@ -81,8 +82,14 @@ def test_unbreakable_cycle_through_priors(src: str, want: object) -> None:
         "cycle-once",
     ],
 )
-def test_legal_reentry_unchanged(src: str, want: object) -> None:
-    assert _json(src) == want
+def test_reentry_inputs(src: str, want: object) -> None:
+    # The first four were re-pinned in the #67 window (#68 pinned the values
+    # its guard gave); the last two are unchanged.
+    if want == "ERR":
+        with pytest.raises(ResolveError):
+            _json(src)
+    else:
+        assert _json(src) == want
 
 
 @pytest.mark.parametrize(
@@ -106,9 +113,8 @@ def test_cycle_through_include(tmp_path: Path) -> None:
 
 
 def test_concat_cycle_terminates() -> None:
-    # Was a ParseError (recursion limit). The value still differs from
-    # Lightbend's ({"a":"yxyx","b":"yxy"}); that is the resolver redesign
-    # (o3co/xx.hocon#67 / #125), so only termination is asserted.
+    # Was a ParseError (recursion limit). Only termination is asserted: the
+    # value follows the interim cycle rule (resolution-model §6.3).
     _json("a = ${?b}x\nb = ${?a}y\na = ${?b}x\nb = ${?a}y\n")
 
 
@@ -123,21 +129,36 @@ _R3 = (
 
 
 @pytest.mark.parametrize(
-    "src",
+    ("src", "want"),
     [
-        # r3c from review: the prior guard stops the cycle, but only after the
-        # value has nested deeply enough to build megabytes and burn minutes.
-        _R3 + "o.y = { q = ${?o.y.z} }\n",
+        # r3c from review: #68's guard stopped it only after the value had
+        # nested deeply, then its value budget raised. The resolution model
+        # resolves it (Lightbend 1.4.10 agrees with the keys renamed so that
+        # hash order is document order).
+        (
+            _R3 + "o.y = { q = ${?o.y.z} }\n",
+            {
+                "o": {
+                    "x": {"x": 2, "y": {"q": {"x": 2, "y": {}}, "z": {"x": 2, "y": {}}}},
+                    "y": {"q": {"x": 2, "y": {}}, "z": {"x": 2, "y": {}}},
+                }
+            },
+        ),
         # r3b with `o.y.q = ${?o.x}` written twice.
-        _R3 + "o.y = ${?o.y.z}\no.y.q = ${?o.x}\no.y.q = ${?o.x}\n",
+        (
+            _R3 + "o.y = ${?o.y.z}\no.y.q = ${?o.x}\no.y.q = ${?o.x}\n",
+            {
+                "o": {
+                    "x": {"x": 2, "y": {"q": 2, "x": 2, "y": {}, "z": {"x": 2, "y": {}}}},
+                    "y": {"q": 2, "x": 2, "y": {}, "z": {"x": 2, "y": {}}},
+                }
+            },
+        ),
     ],
     ids=["r3c", "r3b-plus-q"],
 )
-def test_value_budget_stops_a_growing_cycle(src: str) -> None:
-    # The value budget (rs.hocon#199 counterpart) turns it into an error.
-    # Both raised the recursion-limit ParseError before the guard.
-    with pytest.raises(ResolveError, match="resolved value too large"):
-        hocon.parse_string(src, env={})
+def test_formerly_growing_cycle_resolves(src: str, want: object) -> None:
+    assert _json(src) == want
 
 
 def test_value_budget_spares_acyclic_configs() -> None:
@@ -164,65 +185,36 @@ def test_value_budget_spares_acyclic_configs() -> None:
     assert path == {"a": 1}
 
 
-@pytest.mark.parametrize(
-    ("name", "element"),
-    [("array", "[${?a%}, ${?a%}]"), ("string", "${?a%}${?a%}x")],
-)
-def test_doubling_ring_fails_without_exhausting_memory(name: str, element: str) -> None:
-    # A 16-key ring written twice whose value doubles on every lap (review of
-    # go.hocon#223 / rs.hocon#203: the string ring took 4 GB in py, a model of
-    # the array ring reaches 17 billion nodes). Before the guard it was a
-    # recursion-limit ParseError. After a cut every substitution result is
-    # charged as it is produced and the substitutions resolved are counted, so
-    # the ring is stopped while it is being built.
+def test_doubling_array_ring_resolves() -> None:
+    # A 16-key ring of `[${?next}, ${?next}]` written twice. Resolved values
+    # are shared, so it resolves, as in Lightbend and the reference model
+    # (#68's value budget raised here).
     n = 16
-    ring = "".join(f"a{i} = {element.replace('%', str((i + 1) % n))}\n" for i in range(n))
-    with pytest.raises(
-        (ResolveError, hocon.ParseError),
-        match="resolved value too large|too complex to resolve|nested too deeply",
-    ):
+    ring = "".join(f"a{i} = [${{?a{(i + 1) % n}}}, ${{?a{(i + 1) % n}}}]\n" for i in range(n))
+    got = _json(ring + ring)
+    assert isinstance(got, dict) and len(got) == n
+
+
+def test_doubling_string_ring_fails_without_exhausting_memory() -> None:
+    # A 16-key ring of `${?next}${?next}x` written twice: the string doubles
+    # on every lap (Lightbend 1.4.10: OutOfMemoryError; the reference model
+    # does not finish). The post-cut value budget stops it while it is built.
+    n = 16
+    ring = "".join(f"a{i} = ${{?a{(i + 1) % n}}}${{?a{(i + 1) % n}}}x\n" for i in range(n))
+    with pytest.raises(ResolveError, match="resolved value too large"):
         hocon.parse_string(ring + ring, env={})
 
 
-def test_document_walks_visit_shared_children_once() -> None:
-    # Current values and saved priors share children. Overriding nested
-    # prefixes from the deepest to the shallowest gives a document whose
-    # tree, unshared, is exponential in its depth: here 2**60 paths. The walks
-    # that size the guard state and the value budget must stay linear.
-    from hocon._internal.resolver import substitution_resolver as sr
-    from hocon._internal.resolver.types import ResObj
-    from hocon.value import HoconScalar
-
-    node = ResObj()
-    node.fields["v"] = HoconScalar("1", "number")
-    for _ in range(60):
-        parent = ResObj()
-        parent.fields["k"] = node
-        parent.prior_values["k"] = node
-        node = parent
-    assert sr._max_subst_len(node) == 0
-    assert sr._source_nodes(node) == 62
-
-
-# Counterexamples from review of the py guard: each loads today, and each is
-# cut by the guard. They pin the py-specific parts of the guard state: the
-# concatenations mid-iteration and the scope (a state without them changed
-# both results).
+# Counterexamples from review of #68's guard, re-pinned to the reference model
+# (Lightbend 1.4.10 agrees): cx1 resolves, and cx2 writes `+=` inside a list,
+# a parse error (resolution-model §2.3).
 _CX1 = (
     "a.a = ${?b}\nc.b { b { a += x, b += ${?a}, a += [${?c}] } }\nc.b { b { a"
     " += [] } }\na = ${c}\na = ${?a}\n"
 )
 _CX1_WANT = (
-    '{"a":{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}'
-    '],[]],"b":[["x"],["x",[{"b":{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}]]]'
-    '}}},"c":{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",'
-    '[]],"b":[["x"],{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",[]],"b":[["x"]'
-    ',["x"]]}}}],[]],"b":[["x"],["x",[{"b":{"b":{"a":["x",[]],"b":[["x"],["'
-    'x"]]}}}]]]}}}]}}}],[]],"b":[["x"],{"b":{"b":{"a":["x",[{"b":{"b":{"a":'
-    '["x",[]],"b":[["x"],["x"]]}}}],[]],"b":[["x"],["x",[{"b":{"b":{"a":["x'
-    '",[]],"b":[["x"],["x"]]}}}]]]}}}]}}}],[]],"b":[{"b":{"b":{"a":["x",[{"'
-    'b":{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}],[]],"b":[["x"],["x",[{"b":'
-    '{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}]]]}}}]}}}}'
+    '{"a":{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x"],"b":[{}]}}}],[]],"b":[{}]}}},'
+    '"c":{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x"],"b":[{}]}}}],[]],"b":[{}]}}}}'
 )
 _CX2 = (
     "b += { b { a { a = ${?c} }, a += [{ a = 1 }] }, b += { b { b { a = 1 }"
@@ -230,22 +222,16 @@ _CX2 = (
     "?b}\na.a.a = ${?c}\nb += { b { a { a { a = 1 } }, a += [{ a = 1 }] }, b "
     "+= { b { b { a = 1 } { a = 1 } } } }\n"
 )
-_CX2_WANT = (
-    '{"a":{"a":{"a":[{"b":[[[{"b":[[[[2]]]]}]]]},{"b":[{"b":{"b":{"a":1}}}]'
-    '}]}},"b":[{"b":[[[{"b":[[[[2]]]]}]]]},{"b":[{"b":{"b":{"a":1}}}]}],"c"'
-    ':[{"b":[[[{"b":[[[[2]]]]}]]]},{"b":[{"b":{"b":{"a":1}}}]}]}'
-)
 
 
-@pytest.mark.parametrize(
-    ("src", "want"), [(_CX1, _CX1_WANT), (_CX2, _CX2_WANT)], ids=["cx1", "cx2"]
-)
-def test_cut_config_that_loads_reads_the_same(src: str, want: str) -> None:
-    assert _json(src) == json.loads(want)
+def test_review_counterexamples() -> None:
+    assert _json(_CX1) == json.loads(_CX1_WANT)
+    with pytest.raises(hocon.ParseError):
+        _json(_CX2)
 
 
-# Inputs that failed fast before the guard and hung after it, until the state
-# held the concatenations and the scope. They must fail fast, as before.
+# Inputs that failed fast before #68's guard and hung with an early version of
+# it. They must fail fast.
 _S16427 = (
     "o.o = { o = ${?o.a} ${?o.o} }\no.b = ${o.b}x\no.o.a = ${o.o.a} y\no.o.a +"
     "= ${?o}[1]\no.o.a = x${?o.o}\no.a = ${o.o.a}y\no.o.a = ${o.o.a} y\no.o.a +"
@@ -264,7 +250,9 @@ _H04998 = (
 def test_former_fast_errors_still_fail() -> None:
     with pytest.raises(ResolveError, match="circular substitution"):
         hocon.parse_string(_S16427, env={})
-    with pytest.raises(hocon.ParseError, match="nested too deeply"):
+    # Re-pinned (was the recursion-limit ParseError): Lightbend 1.4.10 and the
+    # reference model find ${o.y} undefined.
+    with pytest.raises(ResolveError, match="could not resolve substitution"):
         hocon.parse_string(_H04998, env={})
 
 
@@ -295,38 +283,31 @@ def _padded_object_ring() -> str:
     return pad + ring * 2
 
 
+def test_wide_reference_cycle_resolves() -> None:
+    # Re-pinned (#68's work budget raised here): the model resolves it to {}.
+    assert _json(_wide_reference()) == {}
+
+
 @pytest.mark.parametrize(
     "build",
-    [_wide_reference, _dense_cycle, _padded_object_ring],
-    ids=["wide-reference", "dense-cycle", "padded-object-ring"],
+    [_dense_cycle, _padded_object_ring],
+    ids=["dense-cycle", "padded-object-ring"],
 )
 def test_post_cut_work_is_bounded(build: object) -> None:
-    # Review of the rs memory exhaustion: before the value budget was capped
-    # and counted key text, a 20 KB input could reach 1–3 GB; a cycle that
-    # keeps branching could run for seconds. Each must now fail with one of
-    # the two post-cut limits.
+    # A cycle that keeps branching runs for minutes in the reference model and
+    # in Lightbend, and a ring of objects doubles its written-out size on every
+    # lap (review of the rs memory exhaustion: 1–3 GB from 20 KB). Each must
+    # fail with one of the two post-cut limits.
     assert callable(build)
     with pytest.raises(ResolveError, match="too complex to resolve|resolved value too large"):
         hocon.parse_string(build(), env={})
 
 
-# Each state component of the prior re-entry guard is load-bearing: removing
-# it alone changes the result below (verified by building the resolver with
-# that component replaced by a constant). Review of the py guard.
-
-# The S13a.12 prefix-prior guard set. Loads in base as shown. Without the
-# prefix-prior set the guard cuts the second pass and it becomes
-# `circular substitution: a`.
+# Inputs that pinned the state components of #68's prior re-entry guard. The
+# guard is gone; the inputs stay as regressions, re-pinned to the reference
+# model (Lightbend 1.4.10 agrees on each).
 _STATE_PREFIX_PRIOR_SRC = "x = ${a}\nx = ${a}\na = ${?x.y}\na = ${?a}ok\n"
-_STATE_PREFIX_PRIOR_WANT = '{"a":"ok","x":"ok"}'
-
-# The concatenations mid-iteration. A recursion-limit ParseError in base.
-# Without the concat set one nested `{"a":5}` becomes `{}`.
 _STATE_CONCAT_SRC = "a = 5\na.a += { a = ${?a} }\na.a += ${?b.a}\n"
-_STATE_CONCAT_WANT = '{"a":{"a":[{"a":{"a":[{"a":{"a":[{"a":{"a":[{"a":5}]}},{"a":5}]}}]}}]}}'
-
-# The scope (which picks the prior). Loads in base as shown. Without the
-# scope one `[[[[2]]]]` becomes `[[[]]]`.
 _STATE_SCOPE_SRC = (
     "b += { b += { a = { a = ${?c}, a = { a = 1 } ${?c} }, a += { a = ${?a}"
     "x } }, b = { b = { b = { a = 1 } ${?a}, a = ${?c} }, a += [{ a = 1 } $"
@@ -338,42 +319,21 @@ _STATE_SCOPE_SRC = (
     "1 } ${?a.a} } } }\na.a.a = { b += 2, b = [[${?c}]] }\nc = [${?b}]\nc = ${"
     "?b}\na.a.a = ${?c}\nb.a = [${?b}]\n"
 )
-_STATE_SCOPE_WANT = (
-    '{"a":{"a":{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b"'
-    ':[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}},"b":{"a":[[{"b":[{"b"'
-    ':{"a":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b":[{'
-    '"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]},{"b":[{"b":{"a'
-    '":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b":[{"b":'
-    '{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]}]]},"c":{"a":[[{"b"'
-    ':[{"b":{"a":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{'
-    '"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]},{"b":[{"'
-    'b":{"a":[{"a":[{"b":[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]},{"b":'
-    '[{"b":{"a":[{"a":{"b":[[[[2]]]]}}],"b":2}}]}]}],"b":2}}]}]]}}'
-)
-
-# The truncated field path. A recursion-limit ParseError in base; no input in the 157,254-input
-# differential that loads in base depends on the field path. Without it
-# `"o":{"b":{"b":{"b":{}}}}` loses one level.
 _STATE_FIELD_PATH_SRC = (
     "o = { b = ${?o}${?o.b} }\na.a = { a = { a += { a = 1 } ${?o}, a = { a ="
     " 1 } ${?a.a} } }\no = { b = ${?o}${?o.b} }\na.a = { a = { a += { a = 1 }"
     " ${?o}, a = { a = 1 } ${?a.a} } }\n"
 )
-_STATE_FIELD_PATH_WANT = '{"a":{"a":{"a":{"a":{"a":{"a":{"a":1}}}}}},"o":{"b":{"b":{"b":{}}}}}'
 
 
-@pytest.mark.parametrize(
-    ("src", "want"),
-    [
-        (_STATE_PREFIX_PRIOR_SRC, _STATE_PREFIX_PRIOR_WANT),
-        (_STATE_CONCAT_SRC, _STATE_CONCAT_WANT),
-        (_STATE_SCOPE_SRC, _STATE_SCOPE_WANT),
-        (_STATE_FIELD_PATH_SRC, _STATE_FIELD_PATH_WANT),
-    ],
-    ids=["prefix-prior", "concat", "scope", "field-path"],
-)
-def test_each_guard_state_component_is_load_bearing(src: str, want: str) -> None:
-    assert _json(src) == json.loads(want)
+def test_former_guard_state_inputs() -> None:
+    with pytest.raises(ResolveError, match="circular substitution"):
+        _json(_STATE_PREFIX_PRIOR_SRC)
+    assert _json(_STATE_CONCAT_SRC) == {"a": {"a": []}}
+    with pytest.raises(hocon.ParseError):  # `+=` inside a list (§2.3)
+        _json(_STATE_SCOPE_SRC)
+    with pytest.raises(ResolveError, match="cannot concatenate"):
+        _json(_STATE_FIELD_PATH_SRC)
 
 
 def test_snapshot_cost_stays_small_with_long_keys() -> None:

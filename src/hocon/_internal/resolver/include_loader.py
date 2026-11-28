@@ -15,16 +15,16 @@ import re
 from collections.abc import Callable
 
 from ...errors import PackageLookupError, ParseError, ResolveError
+from ...value import HoconObject
 from ..lexer.lexer import tokenize
 from ..parser.ast import AstArray, AstNode
 from ..parser.parser import parse_tokens
 from ..properties.properties import properties_to_hocon_value
-from .types import PackageResolver, ResObj, ResolveOptions, make_res_obj
-from .utils import (
-    deep_merge_res_obj_into,
-    hocon_value_to_res_obj,
-    is_file_not_found_error,
-)
+from .convert import tree_from_hocon
+from .merge import merge_included
+from .types import PackageResolver, ResolveOptions
+from .utils import is_file_not_found_error
+from .values import Obj
 
 __all__ = ["IncludeLoader"]
 
@@ -138,15 +138,16 @@ def _default_package_resolver(
     )
 
 
-def _unset_build(_ast: AstNode, _opts: ResolveOptions) -> ResObj:  # pragma: no cover
-    raise RuntimeError("IncludeLoader.on_build_res_obj was not set by StructureBuilder")
+def _unset_build(_ast: AstNode, _opts: ResolveOptions) -> Obj:  # pragma: no cover
+    raise RuntimeError("IncludeLoader.on_build was not set")
 
 
 class IncludeLoader:
     def __init__(self, opts: ResolveOptions) -> None:
         self.opts = opts
-        # Set by StructureBuilder to delegate back to build() (avoids a cycle).
-        self.on_build_res_obj: Callable[[AstNode, ResolveOptions], ResObj] = _unset_build
+        # Builds an included document's tree with the include's own options.
+        # Set by the resolver facade, which owns the builder (avoids a cycle).
+        self.on_build: Callable[[AstNode, ResolveOptions], Obj] = _unset_build
 
     def _resolve_include_path(
         self, include_path: str, base_dir: str | None, is_file: bool
@@ -157,7 +158,7 @@ class IncludeLoader:
             return os.path.abspath(os.path.join(base_dir, include_path))
         return os.path.abspath(include_path)
 
-    def load(self, include_path: str, required: bool, is_file: bool = False) -> ResObj:
+    def load(self, include_path: str, required: bool, is_file: bool = False) -> Obj:
         base_dir = self.opts.base_dir
         include_stack = self.opts.include_stack
         abs_path = self._resolve_include_path(include_path, base_dir, is_file)
@@ -177,15 +178,16 @@ class IncludeLoader:
                 raise ResolveError(
                     f"required include file not found: {include_path}", include_path, 0, 0
                 )
-            return make_res_obj()
+            return Obj()
 
-        # No extension: merge all found extensions (.properties, .json, .conf; last wins).
-        merged = make_res_obj()
+        # No extension: merge all found extensions (.properties, .json, .conf;
+        # each on top of the ones before, as an include of each would be).
+        merged = Obj(frozen=False)
         found_any = False
         for ext in (".properties", ".json", ".conf"):
             obj = self._load_single(f"{abs_path}{ext}")
             if obj is not None:
-                deep_merge_res_obj_into(merged, obj, [])
+                merge_included(merged, obj, ())
                 found_any = True
 
         if not found_any and required:
@@ -194,7 +196,7 @@ class IncludeLoader:
             )
         return merged
 
-    def load_package(self, identifier: str, file: str, _required: bool) -> ResObj:
+    def load_package(self, identifier: str, file: str, _required: bool) -> Obj:
         _validate_package_identifier(identifier)
         _validate_package_file(file, identifier)
 
@@ -227,7 +229,7 @@ class IncludeLoader:
         tokens = tokenize(content)
         ast = parse_tokens(tokens)
         _assert_object_rooted_include(ast, resolved_path)
-        return self.on_build_res_obj(
+        return self.on_build(
             ast,
             dataclasses.replace(
                 self.opts,
@@ -236,7 +238,7 @@ class IncludeLoader:
             ),
         )
 
-    def _load_single(self, candidate: str) -> ResObj | None:
+    def _load_single(self, candidate: str) -> Obj | None:
         include_stack = self.opts.include_stack
         if candidate in include_stack:
             raise ResolveError(f"circular include: {candidate}", candidate, 0, 0)
@@ -249,7 +251,8 @@ class IncludeLoader:
             raise
 
         if candidate.endswith(".properties"):
-            return hocon_value_to_res_obj(properties_to_hocon_value(content))
+            props = properties_to_hocon_value(content)
+            return tree_from_hocon(props) if isinstance(props, HoconObject) else Obj()
 
         tokens = tokenize(content)
         # S3.1 (corrected, xx.hocon E10): an empty / whitespace-only /
@@ -257,7 +260,7 @@ class IncludeLoader:
         # former #105 include-path carve-out is now simply the rule.
         ast = parse_tokens(tokens)
         _assert_object_rooted_include(ast, candidate)
-        return self.on_build_res_obj(
+        return self.on_build(
             ast,
             dataclasses.replace(
                 self.opts,
