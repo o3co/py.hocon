@@ -43,6 +43,7 @@ __all__ = [
     "fallback",
     "fold_entries",
     "fold_into",
+    "is_whitespace_string",
     "join",
     "merge_included",
 ]
@@ -303,6 +304,16 @@ def _is_whitespace(c: str) -> bool:
     return c in _JAVA_WS or c == "﻿" or unicodedata.category(c) in ("Zs", "Zl", "Zp")
 
 
+def is_whitespace_string(v: Val) -> bool:
+    """An unquoted string of whitespace only: what §1.3 rule 3 drops after a
+    list or an object."""
+    return (
+        isinstance(v, Scalar)
+        and v.is_unquoted_string()
+        and all(_is_whitespace(c) for c in v.raw)
+    )
+
+
 def _numeric_obj_to_list(o: Obj) -> Lst | None:
     """S15.3–S15.5 numeric-key conversion of a resolved object: the values of
     the canonical non-negative integer keys, in key order. None when no key is
@@ -374,12 +385,7 @@ def join(
     # Rule 3: only unquoted whitespace after a list or an object is dropped,
     # at parse time and when resolving alike (E5; Lightbend 1.4.10). Any other
     # text there falls through to rule 4, a type error.
-    if (
-        isinstance(left, (Lst, Obj))
-        and isinstance(right, Scalar)
-        and right.is_unquoted_string()
-        and all(_is_whitespace(c) for c in right.raw)
-    ):
+    if isinstance(left, (Lst, Obj)) and is_whitespace_string(right):
         return
     # Rule 4: both are rendered to strings and joined.
     if not isinstance(left, Scalar) or not isinstance(right, Scalar):

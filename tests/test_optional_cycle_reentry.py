@@ -13,10 +13,10 @@ document order (§11: the result must not depend on key names).
 
 The model's work on a dense web of optional cycles grows faster than
 exponentially, and a ring of optional references can double its value on
-every lap, so the resolver keeps #68's two post-cut bounds as a safety valve
-(``POST_CUT_LOOKUP_LIMIT`` and the value budget in
-``substitution_resolver.py``): only a resolve in which a cycle was broken is
-ever limited.
+every lap. #68's interim bounds for these are replaced by the limits of
+resolution-model §10.3 (E24): 100,000 lookups and 10,000 weight units per
+document value, counted only in the region of an optional cycle break, past
+which the resolve fails with ``ResolutionLimitError``.
 
 Pinning fixtures (auto-discovered by the conformance harnesses once
 ``make testdata`` syncs them): ``optional-cycle-repeat/oc01–oc06``
@@ -31,7 +31,7 @@ from pathlib import Path
 import pytest
 
 import hocon
-from hocon import ResolveError
+from hocon import ResolutionLimitError, ResolveError
 
 
 def _json(src: str) -> object:
@@ -161,10 +161,10 @@ def test_formerly_growing_cycle_resolves(src: str, want: object) -> None:
     assert _json(src) == want
 
 
-def test_value_budget_spares_acyclic_configs() -> None:
-    # The budget applies only after the guard has cut a cycle, so large
-    # acyclic configs that load today are never charged: an exponential chain
-    # of references (billion laughs, N=12) and deeply nested objects.
+def test_limits_spare_acyclic_configs() -> None:
+    # The §10.3 limits count only in the region of a cycle break, so large
+    # acyclic configs are never charged: an exponential chain of references
+    # (billion laughs, N=12) and deeply nested objects.
     src = "a0 = { v = 1 }\n" + "".join(
         f"a{i} = {{ x = ${{a{i - 1}}}, y = ${{a{i - 1}}} }}\n" for i in range(1, 13)
     )
@@ -198,10 +198,10 @@ def test_doubling_array_ring_resolves() -> None:
 def test_doubling_string_ring_fails_without_exhausting_memory() -> None:
     # A 16-key ring of `${?next}${?next}x` written twice: the string doubles
     # on every lap (Lightbend 1.4.10: OutOfMemoryError; the reference model
-    # does not finish). The post-cut value budget stops it while it is built.
+    # does not finish). The §10.3 weight limit stops it while it is built.
     n = 16
     ring = "".join(f"a{i} = ${{?a{(i + 1) % n}}}${{?a{(i + 1) % n}}}x\n" for i in range(n))
-    with pytest.raises(ResolveError, match="resolved value too large"):
+    with pytest.raises(ResolutionLimitError, match="weight units"):
         hocon.parse_string(ring + ring, env={})
 
 
@@ -270,17 +270,17 @@ def _dense_cycle() -> str:
     return "".join(f"k{i} = {refs}\n" for i in range(1, 7)) * 2
 
 
-def _padded_object_ring() -> str:
-    # objring_64_p10000: a 10,000-element array inflates the document's node
-    # count (and so the uncapped value budget), next to a 16-key ring of
-    # objects with 64-byte keys, written twice.
-    pad = "pad = [" + ",".join(["1"] * 10_000) + "]\n"
+def _object_ring() -> str:
+    # ring_obj16_keys64 (§10.3 probes): a 16-key ring of objects with 64-byte
+    # keys, written twice. Keys carry no weight, so the outcome is that of the
+    # same ring with one-letter keys. (#68 pinned a variant next to a
+    # 10,000-item list; B grows with the document, so that one now loads.)
     x, y = "x" * 64, "y" * 64
     ring = "".join(
         f"a{i} = {{ {x} = ${{?a{(i + 1) % 16}}}, {y} = ${{?a{(i + 1) % 16}}} }}\n"
         for i in range(16)
     )
-    return pad + ring * 2
+    return ring * 2
 
 
 def test_wide_reference_cycle_resolves() -> None:
@@ -290,16 +290,16 @@ def test_wide_reference_cycle_resolves() -> None:
 
 @pytest.mark.parametrize(
     "build",
-    [_dense_cycle, _padded_object_ring],
-    ids=["dense-cycle", "padded-object-ring"],
+    [_dense_cycle, _object_ring],
+    ids=["dense-cycle", "object-ring"],
 )
 def test_post_cut_work_is_bounded(build: object) -> None:
     # A cycle that keeps branching runs for minutes in the reference model and
     # in Lightbend, and a ring of objects doubles its written-out size on every
-    # lap (review of the rs memory exhaustion: 1–3 GB from 20 KB). Each must
-    # fail with one of the two post-cut limits.
+    # lap (review of the rs memory exhaustion: 1–3 GB from 20 KB). Each fails
+    # with the §10.3 limit (lookups and weight respectively).
     assert callable(build)
-    with pytest.raises(ResolveError, match="too complex to resolve|resolved value too large"):
+    with pytest.raises(ResolutionLimitError, match="resolution limit exceeded after a cycle break"):
         hocon.parse_string(build(), env={})
 
 
@@ -340,10 +340,10 @@ def test_snapshot_cost_stays_small_with_long_keys() -> None:
     # pd_120_2000: a 121-step chain over 2,000-byte keys leading into the dense
     # 6-key cycle. The snapshot is built from frozensets of keys and identities,
     # so long keys do not make each guard entry expensive (rs had to bound its
-    # snapshot cost); it ends in the post-cut work limit.
+    # snapshot cost); it ends in the §10.3 lookup limit.
     q = "q" * 2000
     chain = "".join(f"{q}{i} = ${{{q}{i + 1}}}\n" for i in range(120)) + f"{q}120 = ${{k1}}\n"
     refs = "".join(f"${{?k{j}}}" for j in range(1, 7))
     dense = "".join(f"k{i} = {refs}\n" for i in range(1, 7)) * 2
-    with pytest.raises(ResolveError, match="too complex to resolve|resolved value too large"):
+    with pytest.raises(ResolutionLimitError, match="lookups"):
         hocon.parse_string(chain + dense, env={})

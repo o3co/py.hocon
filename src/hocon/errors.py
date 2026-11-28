@@ -13,6 +13,7 @@ __all__ = [
     "NotResolvedError",
     "PackageLookupError",
     "ParseError",
+    "ResolutionLimitError",
     "ResolveError",
 ]
 
@@ -34,6 +35,16 @@ class ResolveError(Exception):
         self.line = line
         self.col = col
         self.file = file
+
+
+class ResolutionLimitError(ResolveError):
+    """Raised when a resolve keeps working after a cycle break past the limits
+    of xx.hocon resolution-model §10.3 (E24): more than 100,000 lookups, or
+    more than 10,000 weight units per document value built, in the region of
+    an optional cycle break. A subclass of ``ResolveError``, so
+    ``except ResolveError`` still catches it; no optional substitution does.
+    The message starts with "resolution limit exceeded after a cycle break".
+    """
 
 
 class PackageLookupError(ResolveError):

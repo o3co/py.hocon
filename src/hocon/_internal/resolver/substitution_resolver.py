@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Literal
 
 from ...errors import ResolveError
+from .limits import Limits
 from .memo import Memo
 from .merge import Overlay, consolidate, fallback, fold_entries
 from .substituted import Substituted
@@ -45,34 +46,19 @@ from .views import ROOT_VIEW, Empty, Substitute, Substitutes, View, ViewKey
 
 __all__ = ["SubstitutionResolver"]
 
-# Safety valve, not part of the resolution model: once a cycle has been broken
-# (§6.3), a resolve may run at most this many further lookups. A dense web of
-# optional cycles (k keys each reading all k, written twice) makes the number
-# of look-back views, and so of lookups, grow faster than exponentially in k;
-# the reference model and Lightbend take minutes or more at k = 6. A document
-# without a cycle break is never limited. This replaces the post-cut work
-# budget of py.hocon#68, pending a §10 decision in xx.hocon
-# docs/resolution-model.md (the other implementations need the same bound).
-POST_CUT_LOOKUP_LIMIT = 100_000
-# The same for size. After a cycle break, the result may weigh at most this
-# many units per value of the document, and never more than the cap: a node
-# weighs 1, plus 1 per 16 characters of scalar or key text. A ring of optional
-# references whose value doubles on every lap (`a_i = ${?a_j}${?a_j}x`, or an
-# object holding two references to the next key, written twice) otherwise
-# grows until memory runs out (Lightbend: OutOfMemoryError). The numbers are
-# py.hocon#68's, which match rs and go.
-POST_CUT_VALUE_PER_SOURCE_NODE = 10_000
-POST_CUT_VALUE_CAP = 2_000_000
-
-
 class _ReEntry(Exception):
     """§6.2: a re-entry, caught by the innermost active substitution frame
     (§6.3). ``kind`` is ``"marker"`` for an active ``(Subst, View)`` needed
-    again (case a) and ``"empty"`` for a lookup that reached EMPTY (case b)."""
+    again (case a) and ``"empty"`` for a lookup that reached EMPTY (case b).
+    ``marker`` is, in case (a), the pair needed again (§10.3: when it is the
+    catching frame's own, the break is a self re-entry)."""
 
-    def __init__(self, kind: Literal["marker", "empty"]) -> None:
+    def __init__(
+        self, kind: Literal["marker", "empty"], marker: tuple[int, ViewKey] | None = None
+    ) -> None:
         super().__init__(kind)
         self.kind = kind
+        self.marker = marker
 
 
 class SubstitutionResolver:
@@ -88,44 +74,14 @@ class SubstitutionResolver:
         self.substituted: dict[tuple[int, int], tuple[Substituted, Obj]] = {}
         # §6.1: the active (Subst, View) pairs.
         self.active: set[tuple[int, ViewKey]] = set()
-        # Lookups run since the first cycle break (POST_CUT_LOOKUP_LIMIT), and
-        # the weight the result may reach once there was one.
-        self.post_cut_lookups: int | None = None
-        self.value_budget = 0
+        # §10.3: the limits after a cycle break.
+        self.limits = Limits(root)
         self.use_env = opts.use_system_environment is not False
         self.allow_unresolved = bool(opts.allow_unresolved)
 
     def resolve(self) -> Val:
         """§3.1: the root object, resolved in the root view."""
-        result = self._resolve_obj(self.root, ROOT_VIEW, None)
-        if self.post_cut_lookups is not None:
-            self._check_size(result)
-        return result
-
-    def _check_size(self, result: Obj) -> None:
-        """After a cycle break, the result written out may not weigh more than
-        the value budget. Resolved values are shared, so a ring of optional
-        references can make a small result expand exponentially when it is
-        written out. The count stops as soon as the budget is spent."""
-        budget = self.value_budget
-        for sl in result.fields.values():
-            todo: list[Val] = list(sl.stack)
-            while todo:
-                v = todo.pop()
-                budget -= _weight(v)
-                if isinstance(v, Lst):
-                    todo.extend(v.items)
-                elif isinstance(v, Obj):
-                    for child in v.fields.values():
-                        todo.extend(child.stack)
-                if budget < 0:
-                    raise ResolveError(
-                        f"resolved value too large: {path_to_key(sl.path)} keeps growing "
-                        "(a cycle through optional substitutions?)",
-                        path_to_key(sl.path),
-                        0,
-                        0,
-                    )
+        return self._resolve_obj(self.root, ROOT_VIEW, None)
 
     # ---------------------------------------------------------- §3.2 stacks
 
@@ -300,19 +256,7 @@ class SubstitutionResolver:
             resolved.append(r)
         result: Result = MISSING  # every piece omitted
         if resolved:
-            # After a cycle break, check the joined size before joining: a
-            # string or a list is at most as large as its pieces together.
-            if (
-                self.post_cut_lookups is not None
-                and sum(_weight(r) for r in resolved) > self.value_budget
-            ):
-                raise ResolveError(
-                    f"resolved value too large: {path_to_key(c.fpath)} keeps growing "
-                    "(a cycle through optional substitutions?)",
-                    path_to_key(c.fpath),
-                    c.line,
-                    c.col,
-                )
+            self.limits.joined(resolved, c)  # §10.3: charged before the join
             joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)
             if unresolved is not None:
                 return Unresolved(c, joined)
@@ -396,11 +340,8 @@ class SubstitutionResolver:
         # §6.1: only document-slot mappings make a marker fresh (§3.5).
         marker = (id(s), view.slot_key)
         if marker in self.active:
-            raise _ReEntry("marker")  # §6.2 (a)
-        if self.post_cut_lookups is not None:
-            self.post_cut_lookups += 1
-            if self.post_cut_lookups > POST_CUT_LOOKUP_LIMIT:
-                raise self._error(s, "substitution cycle too complex to resolve")
+            raise _ReEntry("marker", marker)  # §6.2 (a)
+        self.limits.frame_started(s)  # §10.3: a lookup, counted while armed
         self.active.add(marker)
         mark = self.memo.mark()
         cycle_break = False
@@ -433,21 +374,22 @@ class SubstitutionResolver:
                     if not self.allow_unresolved:
                         raise self._error(s, "could not resolve substitution")
                     r = Unresolved(s)
+            if restrict is None and not isinstance(r, Missing):
+                self.limits.looked_up(r, s)  # §10.3: what an unrestricted lookup built
         except _ReEntry as e:
             # §6.3 [interim]: the innermost active frame catches. Work done
             # since the frame's mark is abandoned (§5.4).
             self.memo.rollback(mark)
-            if self.post_cut_lookups is None:
-                self.post_cut_lookups = 0
-                self.value_budget = min(
-                    _source_nodes(self.root) * POST_CUT_VALUE_PER_SOURCE_NODE, POST_CUT_VALUE_CAP
-                )
             if not s.optional:
                 raise self._error(s, "circular substitution", "is part of a cycle") from None
             r = MISSING
             cycle_break = e.kind == "marker"
+            # §10.3: an optional break arms the limits, unless the substitution
+            # met only itself (`x = ${?x}`).
+            self.limits.cycle_break(self_reentry=e.kind == "marker" and e.marker == marker)
         finally:
             self.active.discard(marker)
+            self.limits.frame_finished()  # the outermost frame closes the region
         if restrict is None or isinstance(r, Missing) or is_resolved(r):
             if self.memo.has_subst(s):  # first completed result wins
                 if restrict is None:
@@ -519,35 +461,6 @@ class SubstitutionResolver:
         origin = f"{self.opts.origin_description}: " if self.opts.origin_description else ""
         message = f"{origin}{what}: ${{{key}}}" + (f" {detail}" if detail else "")
         return ResolveError(message, key, s.line, s.col)
-
-
-def _weight(v: Val) -> int:
-    """A value's own weight for the post-cut value budget: 1, plus 1 per 16
-    characters of scalar text or of its keys, plus its list items."""
-    if isinstance(v, Scalar):
-        return 1 + len(v.raw) // 16
-    if isinstance(v, Lst):
-        return 1 + len(v.items)
-    if isinstance(v, Obj):
-        return 1 + sum(len(k) for k in v.field_keys()) // 16
-    return 1
-
-
-def _source_nodes(root: Obj) -> int:
-    """The number of values in the document."""
-    n = 0
-    todo: list[Val] = [root]
-    while todo:
-        v = todo.pop()
-        n += 1
-        if isinstance(v, Obj):
-            for sl in v.fields.values():
-                todo.extend(sl.stack)
-        elif isinstance(v, Lst):
-            todo.extend(v.items)
-        elif isinstance(v, Concat):
-            todo.extend(v.pieces)
-    return n
 
 
 def _shadowed(merged: Stack, e: Val) -> bool:
