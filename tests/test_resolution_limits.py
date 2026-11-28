@@ -67,7 +67,7 @@ def test_self_reentry_and_env_overrides_do_not_arm() -> None:
     # neither opens a region, so a large acyclic doubling read after them is
     # uncharged and loads, though it builds far more than B for this document.
     s = 'x = ${?x}\nport = 8080\nport = ${?PORT}\ns = "' + "x" * 100 + '"\n'
-    s += "s = ${s}${s}\n" * 14  # 1.6 MB, far above B for this document
+    s += "s = ${s}${s}\n" * 14  # about 410,000 units, above B for this document
     assert hocon.parse(s, env={}).get_int("port") == 8080
 
 
@@ -95,3 +95,42 @@ def test_o3co_limit_fixture_fails_with_the_limit(name: str) -> None:
         pytest.skip("fixture not in the synced corpus yet (xx.hocon#143)")
     with pytest.raises(ResolutionLimitError):
         hocon.parse_file(str(conf), env={})
+
+
+# --- arming and region, in py's own suite (rv143–rv145 inline) ---
+# Each reads a 405,531-unit string chain from a document of about 35 values
+# (B about 350,000): any extra arming, or a region that lasts too long, fails.
+
+_CHAIN = 's = "' + "x" * 99 + '"\n' + "s = ${s}${s}\n" * 14 + "s = {}\n"
+
+
+def test_self_reentry_inside_the_frame_does_not_arm() -> None:
+    # rv143: ${?z} meets only itself; the chain is read inside ${z}'s frame.
+    got = hocon.parse("y = ${z}\nz = [${?z}, ${s}]\n" + _CHAIN, env={}).to_object()
+    assert got == {"s": {}, "y": [{}], "z": [{}]}
+
+
+def test_own_path_exception_does_not_arm() -> None:
+    # rv144: ${?z} in z's bottom entry reaches EMPTY on its own path (§4.4).
+    got = hocon.parse("y = ${z}\nz = ${?z} [${s}]\nz = {}\n" + _CHAIN, env={}).to_object()
+    assert got == {"s": {}, "y": {}, "z": {}}
+
+
+def test_region_ends_with_the_outermost_frame() -> None:
+    # rv145: the r/t break's region ends with ${?t}; u reads the chain after.
+    got = hocon.parse("r = ${?t}\nt = [${?r}]\nu = [${s}]\n" + _CHAIN, env={}).to_object()
+    assert got == {"r": [], "s": {}, "t": [], "u": [{}]}
+
+
+def test_region_charges_the_chain_when_armed() -> None:
+    # The control: the same chain read inside the r/t region (rv142's shape)
+    # is charged and fails.
+    with pytest.raises(ResolutionLimitError, match="weight units"):
+        hocon.parse("r = ${?t}\nt = [${?r}, ${s}]\n" + _CHAIN, env={})
+
+
+def test_escaped_surrogates_are_weighed_without_error() -> None:
+    # A JSON-escaped emoji is kept as a surrogate pair; weighing it inside a
+    # region must not raise UnicodeEncodeError.
+    src = 'r = ${?t}\nt = [${?r}, ${s}]\ns = "\\ud83d\\ude00"\nl = "\\ud800"\nq = [${?r}, ${l}]\n'
+    assert hocon.parse(src, env={}).to_object()["t"] == ["\ud83d\ude00"]

@@ -57,8 +57,20 @@ def _own_weight(v: Val) -> int:
     """1, plus 1 per 16 UTF-8 bytes of a scalar's text (its source text for a
     number, a boolean or null). Objects and lists weigh 1; keys nothing."""
     if isinstance(v, Scalar):
-        return 1 + len(v.raw.encode("utf-8")) // 16
+        return 1 + _utf8_length(v.raw) // 16
     return 1
+
+
+def _utf8_length(text: str) -> int:
+    """UTF-8 bytes of ``text``. The lexer keeps a ``\\uXXXX`` surrogate as its
+    own code unit: a surrogate pair counts as the 4 bytes of the character it
+    encodes, and a lone surrogate as the 3 bytes of U+FFFD, as UTF-16 text
+    encoders (ts, go) count it. Never raises."""
+    try:
+        return len(text.encode("utf-8"))
+    except UnicodeEncodeError:
+        joined = text.encode("utf-16-le", "surrogatepass").decode("utf-16-le", "replace")
+        return len(joined.encode("utf-8"))
 
 
 def _join_weight(pieces: list[Val]) -> int:
@@ -97,7 +109,7 @@ class Limits:
     def budget(self) -> int:
         if self._budget is None:
             # V is a property of the document, which never changes while
-            # resolving, so counting it at the first break gives the value
+            # resolving, so counting it at the first charge gives the value
             # counted before resolving.
             self._budget = WEIGHT_PER_VALUE * document_values(self._root)
         return self._budget

@@ -115,7 +115,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too complex to resolve`, `resolved value too large`), which armed for the
   whole resolve on the first break, even `x = ${?x}`, and capped the value
   budget at 2,000,000: a config with a large shared object after a real
-  cycle no longer fails, and a 2,000-level cyclic optional chain loads.
+  cycle no longer fails, and a cyclic optional chain is no longer stopped by
+  its output size (it is bounded only by the interpreter's recursion limit:
+  about 250 levels at the default, 2,000 and more with a raised one).
   **Workaround** if a tangled optional cycle is rejected: break the cycle
   (most such webs resolve to nothing anyway).
 
