@@ -110,3 +110,55 @@ def test_concat_cycle_terminates() -> None:
     # Lightbend's ({"a":"yxyx","b":"yxy"}); that is the resolver redesign
     # (o3co/xx.hocon#67 / #125), so only termination is asserted.
     _json("a = ${?b}x\nb = ${?a}y\na = ${?b}x\nb = ${?a}y\n")
+
+
+_R3 = (
+    "o.x = 2\n"
+    "o.x = ${?o}\n"
+    "o.y = { z = ${?o.y.z} }\n"
+    "o.y.z = ${?o}\n"
+    "o.x = ${?o.x}\n"
+    "o.y = { x = ${?o.y} }\n"
+)
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        # r3c from review: the prior guard stops the cycle, but only after the
+        # value has nested deeply enough to build megabytes and burn minutes.
+        _R3 + "o.y = { q = ${?o.y.z} }\n",
+        # r3b with `o.y.q = ${?o.x}` written twice.
+        _R3 + "o.y = ${?o.y.z}\no.y.q = ${?o.x}\no.y.q = ${?o.x}\n",
+    ],
+    ids=["r3c", "r3b-plus-q"],
+)
+def test_value_budget_stops_a_growing_cycle(src: str) -> None:
+    # The value budget (rs.hocon#199 counterpart) turns it into an error.
+    # Both raised the recursion-limit ParseError before the guard.
+    with pytest.raises(ResolveError, match="resolved value too large"):
+        hocon.parse_string(src, env={})
+
+
+def test_value_budget_spares_acyclic_configs() -> None:
+    # The budget applies only after the guard has cut a cycle, so large
+    # acyclic configs that load today are never charged: an exponential chain
+    # of references (billion laughs, N=12) and deeply nested objects.
+    src = "a0 = { v = 1 }\n" + "".join(
+        f"a{i} = {{ x = ${{a{i - 1}}}, y = ${{a{i - 1}}} }}\n" for i in range(1, 13)
+    )
+    leaf = _json(src)
+    for _ in range(12):
+        assert isinstance(leaf, dict)
+        leaf = leaf["a12"]["x"] if "a12" in leaf else leaf["x"]
+    assert leaf == {"v": 1}
+    deep = _json("a { " * 250 + "x = 1" + " }" * 250 + "\n")
+    for _ in range(250):
+        assert isinstance(deep, dict)
+        deep = deep["a"]
+    assert deep == {"x": 1}
+    path = _json(".".join(["a"] * 200) + " = 1\n")
+    for _ in range(199):
+        assert isinstance(path, dict)
+        path = path["a"]
+    assert path == {"a": 1}
