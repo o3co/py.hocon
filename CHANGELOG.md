@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the process). For `a = ${?b}` / `b = ${?a}` written twice, the resolver
   re-entered a key's saved prior forever until the recursion limit turned it
   into "input is nested too deeply … or contains a cycle". A re-entry in an
-  unchanged in-progress state is now treated as an unbreakable cycle: an
+  unchanged resolver state (the in-progress keys, the S13a.12 prefix-prior
+  guard and the relevant part of the field path) is now treated as an
+  unbreakable cycle: an
   optional substitution is nonexistent and a required one is a
   `ResolveError`, as in Lightbend (`{}` and `UnresolvedSubstitution` for the
   input above). Every input that loaded before reads the same. Some inputs
