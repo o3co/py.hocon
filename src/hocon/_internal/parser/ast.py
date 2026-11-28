@@ -65,13 +65,21 @@ class AstScalar:
     kind: Literal["scalar"] = "scalar"
 
     def __init__(
-        self, raw: str, value_type: ScalarValueType, pos: Pos, separator: bool = False
+        self,
+        raw: str,
+        value_type: ScalarValueType,
+        pos: Pos,
+        separator: bool = False,
+        quoted: bool = False,
     ) -> None:
         self.raw = raw
         self.value_type = value_type
         self.pos = pos
         # Mirrors ts.hocon `_separator` — a parser-inserted whitespace piece.
         self.separator = separator
+        # Written as a quoted (or triple-quoted) string. A concatenation drops
+        # an unquoted string after a list or an object (resolution-model §1.3).
+        self.quoted = quoted
 
 
 class AstConcat:

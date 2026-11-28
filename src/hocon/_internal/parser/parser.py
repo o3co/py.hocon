@@ -538,7 +538,7 @@ class _Parser:
                 )
             elif t.kind == "string" or t.kind == "triple_string":
                 self._advance()
-                node = AstScalar(t.value, "string", Pos(t.line, t.col))
+                node = AstScalar(t.value, "string", Pos(t.line, t.col), quoted=True)
             elif t.kind == "unquoted":
                 self._advance()
                 node = AstScalar(
