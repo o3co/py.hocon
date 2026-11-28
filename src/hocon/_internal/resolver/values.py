@@ -93,7 +93,7 @@ class Slot:
     ``path`` is the key's full path from the document root. ``synth`` is True
     for a slot created while resolving (§3.5, a merged leaf): a view maps it by
     its path and its entries (:meth:`content`), not by identity. ``origin`` is
-    the document slot this slot stands for: itself, or the slot whose
+    the slot this slot stands for: itself, or the slot whose
     view-mapped stack it carries through a restricted lookup (§3.4), or that
     a §5.5 rewrite derives from. A derived slot keeps ``synth``: an alias of a
     merged leaf is that merged leaf, never a document slot (§10.1). A view

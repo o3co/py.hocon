@@ -210,3 +210,38 @@ def test_deep_object_substitution_resolves() -> None:
     for i in range(350):
         leaf = leaf[f"k{i}"]
     assert leaf == 1
+
+
+# --- §3.4 / §10.1: a merged-leaf alias stays a merged leaf (xx.hocon#142) ---
+
+
+def test_merged_leaf_alias_terminates() -> None:
+    # rv132: the alias of a merged leaf used to be keyed as a fresh document
+    # slot at every rebuild, so the cycle markers had no bound and this
+    # cycle-free config recursed without end. Lightbend 1.4.10: [a, b, c].
+    src = (
+        "app = ${?overrides}\n"
+        "app { opts { flags = [], flags += a } }\n"
+        "app { opts { flags += b, flags += c } }\n"
+    )
+    assert _resolve(src) == {"app": {"opts": {"flags": ["a", "b", "c"]}}}
+
+
+# --- §10.2 item 5: "resolved" without a field map ---
+
+
+def test_resolved_question_builds_no_field_map() -> None:
+    from hocon._internal.resolver.merge import Overlay
+    from hocon._internal.resolver.values import Obj, Patch, Scalar, Slot, Subst
+
+    def obj(**fields: object) -> Obj:
+        return Obj({k: Slot(k, [v], (k,)) for k, v in fields.items()})  # type: ignore[list-item]
+
+    base = obj(**{f"k{i}": Scalar(str(i), "number", False) for i in range(100)})
+    pending = obj(u=Subst(("nope",), True))
+    overlay = Overlay([pending, base])
+    assert not overlay.is_resolved()
+    assert overlay._fields is None  # answered from the unresolved keys only
+    patch = Patch(base, "k0", Slot("k0", [Scalar("x", "string", True)], ("k0",)))
+    assert patch.is_resolved()
+    assert patch._fields is None
