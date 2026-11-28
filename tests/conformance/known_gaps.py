@@ -33,6 +33,11 @@ _XX115 = (
     "o3co/xx.hocon#115: an included root-level value does not keep the "
     "including file's prior (undefined optional drops the key / no delayed merge)"
 )
+_XX139 = (
+    "o3co/xx.hocon#139 resolution-model fixture: py.hocon does not produce the "
+    "reference model's result yet — fixed by the resolution layer (o3co/xx.hocon#67 "
+    "window); py: o3co/py.hocon#67"
+)
 SUCCESS_KNOWN_GAPS: dict[str, str] = {
     **{
         f"include-optional-prior/{name}": _XX115
@@ -59,4 +64,46 @@ SUCCESS_KNOWN_GAPS: dict[str, str] = {
     "subst-removed-target/rq39-sibling-leaf-overrides-keep-defaults-window": (
         _XX123_WINDOW_SIBLINGS
     ),
+    **{
+        f"resolution-model/{name}": _XX139
+        for name in (
+            "rv005-br-db-url",
+            "rv007-br-outer-use",
+            "rv012-e23-p2-bfirst",
+            "rv013-e23-p2",
+            "rv014-e23-start",
+            "rv015-e23-x1-bfirst",
+            "rv016-e23-x1",
+            "rv017-e23-x2",
+            "rv018-e23-x3",
+            "rv020-fo-e23-x3-swap",
+            "rv022-pye-01",
+            "rv024-pye-04",
+            "rv031-pye-11",
+            "rv036-pye-16",
+            "rv049-pyp-p08",
+            "rv050-pyp-p09",
+            "rv053-pyp-p12",
+            "rv054-pyp-p13",
+            "rv057-pyp-p16",
+            "rv058-pyp-p17",
+            "rv064-pyp-p23",
+            "rv072-rv-flag-include",
+            "rv073-rv-flag-top-parse",
+            "rv075-rv-fold-remainder",
+            "rv078-rv-lookback-through-list-anc",
+            "rv098-rv-y10",
+            "rv105-tsc-c07",
+            "rv106-tsc-c08",
+            "rv109-tsk-k2",
+            "rv110-tsk-k3",
+            "rv113-e23-x3-swap",
+            "rv114-fo-e23-p2-bfirst",
+            "rv121-e23-x5-pending-step-b",
+            "rv124-alias-presence-other-view",
+            "rv126-pe013-nonempty-base",
+            "rv129-substituted-object-drops-ignored-fallbacks",
+            "rv131-view-reentry-through-resolve-time-merge",
+        )
+    },
 }

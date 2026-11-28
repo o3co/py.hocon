@@ -491,6 +491,21 @@ def _validate_error(
 
 # ─── test parametrization ──────────────────────────────────────────────────────
 
+# Known gaps: scenarios whose expected tree py.hocon does not produce yet. Each
+# is a strict xfail limited to an assertion failure, so an XPASS (the gap
+# closed) or a crash fails the run; an entry whose scenario is not on disk has
+# no effect.
+_XX139 = (
+    "o3co/xx.hocon#139 (resolution-model §8.3): a cycle of optionals across a "
+    "nested withFallback nests both fields instead of keeping the nested value in "
+    "the receiver's field only — fixed by the resolution layer (o3co/xx.hocon#67 "
+    "window); py: o3co/py.hocon#67"
+)
+_KNOWN_GAPS: dict[str, str] = {
+    "dr31-nested-key-order-receiver-first": _XX139,
+    "dr32-nested-key-order-receiver-first-renamed": _XX139,
+}
+
 
 def _params() -> list[Any]:
     if not _DR_YAML.is_dir():
@@ -498,7 +513,12 @@ def _params() -> list[Any]:
     params: list[Any] = []
     for path in sorted(_DR_YAML.glob("*.yaml")):
         stem = path.stem  # e.g. "dr01-basic-fallback"
-        params.append(pytest.param(stem, _load_scenario(path), id=stem))
+        marks = []
+        if stem in _KNOWN_GAPS:
+            marks.append(
+                pytest.mark.xfail(strict=True, raises=AssertionError, reason=_KNOWN_GAPS[stem])
+            )
+        params.append(pytest.param(stem, _load_scenario(path), id=stem, marks=marks))
     return params
 
 
