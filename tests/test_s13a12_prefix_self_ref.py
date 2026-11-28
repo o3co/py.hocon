@@ -5,8 +5,10 @@ A substitution whose target lies INSIDE the field being defined
 the stack beneath the substitution), never the final tree. Found 2026-08-18 by
 a cross-impl probe: all four siblings resolved the spec example against the
 final tree, yielding {a:2} instead of {a:2, c:1}. Port of ts.hocon's
-s13a12-prefix-self-ref.test.ts; the fix mirrors ts (fold-side prefix folding
-with layer merge + resolve-side prior navigation with undefined semantics).
+s13a12-prefix-self-ref.test.ts. Since the #67 window the look-back is the
+resolution model's view of the field's stack (xx.hocon
+docs/resolution-model.md §3.2 W3, §4); the test names below still say
+"fold" / "prior" from the earlier save-time implementation.
 """
 
 from __future__ import annotations
@@ -117,12 +119,12 @@ def test_interior_sibling_ref_stays_lazy_final_tree() -> None:
     assert v["a"] == {"p": {"v": 1}, "x": 1, "y": 2}
 
 
-# --- prior-fold recursion at a save site whose key has no below value ---
-# First definition of `foo` contains a self-ref and is then overwritten:
-# fold_or_skip_prior runs with old=None, so the optional-absent fold walks
-# the container (concat / array / object literal / merged object). Optional
-# self-refs fold to known-absent placeholders; a required one drops the
-# whole prior (nothing "below" can ever satisfy it).
+# --- a first definition with a self-ref, then overwritten ---
+# The first definition is the bottom entry of foo's stack, so a self-ref in it
+# has nothing below. Under a value that ignores fallbacks it is never
+# evaluated; under an object it is. An optional one is then missing, and a
+# required one an error (resolution-model §4.4); list entries and object
+# interiors get no look-back (§3.2 W4).
 
 
 def test_first_def_concat_optional_selfref_prior_folds() -> None:
@@ -130,9 +132,12 @@ def test_first_def_concat_optional_selfref_prior_folds() -> None:
     assert got == {"a": 1}
 
 
-def test_first_def_concat_required_selfref_prior_skipped() -> None:
-    got = foo('foo : "x "' + D + "{foo.a}\nfoo : { a : 1 }")
-    assert got == {"a": 1}
+def test_first_def_concat_required_selfref_errors() -> None:
+    # Re-pinned to Lightbend (o3co/xx.hocon#127, window decision D3): the
+    # concatenation entry looks back, and there is nothing below it, so the
+    # required ${foo.a} is an error. It used to be skipped, giving {a: 1}.
+    with pytest.raises(ResolveError):
+        foo('foo : "x "' + D + "{foo.a}\nfoo : { a : 1 }")
 
 
 def test_first_def_array_optional_selfref_prior_folds() -> None:
@@ -226,9 +231,11 @@ def test_prior_fold_leaves_foreign_subst_untouched() -> None:
     assert foo(src) == {"b": 2}
 
 
-def test_prior_fold_recurses_object_literal_beside_selfref() -> None:
-    # A value-stack self-ref makes the prior foldable; the object literal
-    # sitting beside it is walked (interior refs keep exact-match-only rule).
+def test_list_entry_looks_forward_and_errors() -> None:
+    # Re-pinned to Lightbend (o3co/xx.hocon#127, window decision D3): a list
+    # entry gets no look-back, so ${foo.a} reads foo as a whole, which is
+    # {b: 2} with no `a`: an undefined required substitution (not a cycle).
+    # It used to be folded away, giving {b: 2}.
     src = (
         "foo : { a : 1 }\nfoo : ["
         + D
@@ -236,4 +243,5 @@ def test_prior_fold_recurses_object_literal_beside_selfref() -> None:
         + D
         + "{foo} }]\nfoo : { b : 2 }"
     )
-    assert foo(src) == {"b": 2}
+    with pytest.raises(ResolveError, match="could not resolve substitution"):
+        foo(src)

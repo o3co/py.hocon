@@ -87,74 +87,10 @@ _IMPL_OVERRIDE_ERRORS = (
 
 # Known gaps: the sidecar demands an error, but py.hocon accepts the input.
 # Each is a strict xfail, so an XPASS (the gap closed) fails the run for
-# triage; an entry whose fixture is not on disk has no effect. (us15 closed by
-# the E8 `+` reservation.)
-_XX123 = (
-    "o3co/xx.hocon#123: a required substitution of a field removed by an "
-    "undefined optional is silently dropped instead of raising (S13.10)"
-)
-_XX115 = (
-    "o3co/xx.hocon#115: the including file's a = ${missing} under an included "
-    "object is not live (E16), so the unresolved required reference is not seen"
-)
-_XX139 = (
-    "o3co/xx.hocon#139 resolution-model fixture: the reference model raises but "
-    "py.hocon accepts the input — fixed by the resolution layer (o3co/xx.hocon#67 "
-    "window); py: o3co/py.hocon#67"
-)
-_KNOWN_GAPS: dict[str, str] = {
-    "include-optional-prior/io19-live-prior-required-missing": _XX115,
-    **{
-        f"subst-removed-target/{name}": _XX123
-        for name in (
-            "rq01-required-to-removed-field",
-            "rq02-forward-ref",
-            "rq03-both-optionals-undefined",
-            "rq04-array-element",
-            "rq05-string-concat",
-            "rq06-object-concat",
-            "rq07-array-concat",
-            "rq08-nested-path",
-            "rq09-optional-cycle",
-            "rq10-optional-self-ref",
-            "rq11-optional-closes-cycle",
-            "rq12-include-fixed-up-path",
-            "rq13-include-both-paths-removed",
-            "rq14-include-original-path-removed",
-            "rq15-merged-not-hidden",
-            "rq16-kept-prior-is-required-ref",
-            "rq29-include-fixed-up-removed-original-set",
-        )
-    },
-    # a.n = ${?a} closes a cycle over a prior object: py invents o from it.
-    "subst-removed-target/rq40-optional-closes-cycle-over-prior-object-window": (
-        "o3co/xx.hocon#123 (moved into the #67 window): an optional cycle over a "
-        "prior object is not removed, so the required ${a.n} resolves to an "
-        "invented value instead of raising"
-    ),
-    **{
-        f"resolution-model/{name}": _XX139
-        for name in (
-            "rv011-br-top-seen",
-            "rv021-fo-rv-restricted-then-full",
-            "rv033-pye-13",
-            "rv034-pye-14",
-            "rv051-pyp-p10",
-            "rv061-pyp-p20",
-            "rv066-pyp-p25",
-            "rv067-pyp-p30",
-            "rv089-rv-self-bottom-noenv",
-            "rv095-rv-xd1",
-            "rv096-rv-xd2",
-            "rv097-rv-y1",
-            "rv099-tsc-c01",
-            "rv115-fo-rq29",
-            "rv120-rv-restricted-then-full",
-            "rv122-alias-presence-j2",
-            "rv123-alias-presence-renamed",
-        )
-    },
-}
+# triage; an entry whose fixture is not on disk has no effect. None are open:
+# the #67 window's resolution layer (xx.hocon docs/resolution-model.md) closed
+# io19 (#115) and rq01–rq16 / rq29 / rq40 (#123).
+_KNOWN_GAPS: dict[str, str] = {}
 
 # On-disk error-fixture census at the time of writing (guard floor):
 #   13 legacy -expected-error.json  (cycle, test13, st-err01–11)
