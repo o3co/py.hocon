@@ -9,6 +9,7 @@ see the inline S-references for the governing spec items.
 from __future__ import annotations
 
 import weakref
+from collections.abc import Iterator
 from typing import cast
 
 from ...errors import ResolveError
@@ -35,6 +36,93 @@ from .utils import (
 
 __all__ = ["SubstitutionResolver"]
 
+# (in-progress set, S13a.12 prefix-prior guard set, truncated field path,
+# concatenations mid-iteration by identity, scope by identity); see the prior
+# re-entry guard in SubstitutionResolver._resolve_subst.
+_PriorState = tuple[frozenset[str], frozenset[str], tuple[str, ...], frozenset[int], int]
+
+# Substitutions the resolver may still resolve once the prior re-entry guard
+# has cut a cycle. A cut stops one lap of a cycle, but a cycle that branches
+# can be cut over and over while its laps multiply: inputs that failed in
+# milliseconds before the guard (the recursion limit) ran for minutes after
+# it. Only inputs that have been cut are counted, so an acyclic config, however
+# large, is never limited. Interim, like the guard (o3co/xx.hocon#67 / #125).
+_SUBST_CALLS_AFTER_CUT = 100_000
+
+
+# Value nodes the resolver may cache per node of the document, once the prior
+# re-entry guard has cut a cycle (rs.hocon#199 counterpart). The guard stops
+# every cycle, but a cycle through nested objects can still nest its value
+# exponentially before it does, and every resolved field is cached with each
+# of its object descendants: a 7-line input spent 16 s in that walk and built a
+# 1.8 MB value. The budget applies only after a cut, so an acyclic config
+# (`a2 = {x = ${a1}, y = ${a1}}`, …, or a deeply nested one) is never charged.
+# A cut can also happen on a config that loads (a re-entry the guard refuses
+# whose result is then not used), so the budget is sized far above anything
+# such a config was measured to reach. The charge matches rs (each cache entry
+# costs the nodes of its value). Interim, like the guard (o3co/xx.hocon#67 /
+# #125).
+_VALUE_NODES_PER_SOURCE_NODE = 10_000
+# Upper bound on that budget, whatever the document's size: a 10,000-element
+# array or many saved priors inflated the node count until a 20 KB input could
+# spend 1–3 GB before failing. Matches rs and go.
+_VALUE_BUDGET_CAP = 2_000_000
+
+
+def _node_weight(v: HoconValue) -> int:
+    """Weight of one resolved node for the value budget: 1, plus one per 16
+    bytes of scalar text or of object key text (a string or key that doubles on
+    every lap grows without adding nodes). Matches rs."""
+    if isinstance(v, HoconScalar):
+        return 1 + len(v.raw) // 16
+    if isinstance(v, HoconObject):
+        return 1 + sum(len(k) for k in v.fields) // 16
+    return 1
+
+
+def _source_nodes(root: ResObj) -> int:
+    """Nodes in the unresolved document, saved priors included.
+
+    Iterative, and each container is visited once (see _walk_once)."""
+    return sum(1 for _ in _walk_once(root))
+
+
+def _walk_once(root: ResObj) -> Iterator[object]:
+    """Every node under *root*, saved priors included, each container once.
+
+    Current values and saved priors share children: overriding nested
+    prefixes from the deepest to the shallowest and then replacing the outer
+    object gives a document whose tree, unshared, is exponential in its depth.
+    Tracking visited containers by identity keeps a walk linear in the
+    document."""
+    seen: set[int] = set()
+    stack: list[object] = [root]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, ResObj | ConcatPlaceholder | HoconArray | HoconObject):
+            if id(v) in seen:
+                continue
+            seen.add(id(v))
+        yield v
+        if isinstance(v, ResObj):
+            stack.extend(v.fields.values())
+            stack.extend(v.prior_values.values())
+        elif isinstance(v, ConcatPlaceholder):
+            stack.extend(v.nodes)
+        elif isinstance(v, HoconArray):
+            stack.extend(v.items)
+        elif isinstance(v, HoconObject):
+            stack.extend(v.fields.values())
+
+
+def _max_subst_len(root: ResObj) -> int:
+    """Longest substitution path (in segments) anywhere under *root*, priors
+    included. Iterative, and each container is visited once (see _walk_once)."""
+    return max(
+        (len(v.segments) for v in _walk_once(root) if isinstance(v, SubstPlaceholder)),
+        default=0,
+    )
+
 
 class SubstitutionResolver:
     def __init__(self, root: ResObj, opts: ResolveOptions) -> None:
@@ -52,6 +140,27 @@ class SubstitutionResolver:
         # a shape the fold could not see through — report it as unresolvable
         # instead of recursing forever.
         self.resolving_prefix_priors: set[str] = set()
+        # Resolver states seen when a key's saved prior started resolving in
+        # the in-progress branch of _resolve_subst, one per enclosing
+        # resolution of that prior. See the guard there.
+        self.prior_reentry: dict[str, list[_PriorState]] = {}
+        # Longest substitution path (segments) in the document, priors
+        # included. Only that many leading elements of resolving_field_path can
+        # steer a resolution (the S13a.12 prefix branch needs len(rfp) <
+        # len(segments); the owner check compares the first len(segments)
+        # elements), so the guard records only those.
+        self.max_subst_len = _max_subst_len(root)
+        # Value nodes resolution may still cache before it fails; see
+        # _VALUE_NODES_PER_SOURCE_NODE.
+        self.value_budget = min(
+            _source_nodes(root) * _VALUE_NODES_PER_SOURCE_NODE, _VALUE_BUDGET_CAP
+        )
+        # Times the prior re-entry guard refused a re-entry. The value budget
+        # applies only once this is non-zero.
+        self.cuts = 0
+        # Substitutions left to resolve after the first cut; see
+        # _SUBST_CALLS_AFTER_CUT.
+        self.subst_calls_left = _SUBST_CALLS_AFTER_CUT
 
     def _origin_prefix(self) -> str:
         return f"{self.opts.origin_description}: " if self.opts.origin_description else ""
@@ -83,12 +192,10 @@ class SubstitutionResolver:
                             if isinstance(prior_resolved, HoconObject):
                                 final_value = deep_merge_hocon_values(prior_resolved, resolved)
                                 result[key] = final_value
-                                self.cache[full_cache_key] = final_value
-                                self._cache_descendants(full_cache_key, final_value)
+                                self._cache_value(full_cache_key, final_value)
                                 continue
                     result[key] = resolved
-                    self.cache[full_cache_key] = resolved
-                    self._cache_descendants(full_cache_key, resolved)
+                    self._cache_value(full_cache_key, resolved)
                 else:
                     # Unresolved optional substitution: fall back to prior value.
                     prior = obj.prior_values.get(key)
@@ -96,8 +203,7 @@ class SubstitutionResolver:
                         prior_resolved = self._resolve_val(prior, obj)
                         if prior_resolved is not None:
                             result[key] = prior_resolved
-                            self.cache[full_cache_key] = prior_resolved
-                            self._cache_descendants(full_cache_key, prior_resolved)
+                            self._cache_value(full_cache_key, prior_resolved)
             finally:
                 # `continue` routes through here too — every exit pops.
                 self.resolving_field_path.pop()
@@ -116,17 +222,79 @@ class SubstitutionResolver:
             cur = nxt
         return cur
 
-    def _cache_descendants(self, prefix: str, value: HoconValue) -> None:
-        if not isinstance(value, HoconObject):
-            return
-        for key, child in value.fields.items():
-            child_key = f"{prefix}.{string_segments_to_key([key])}"
-            self.cache[child_key] = child
-            self._cache_descendants(child_key, child)
+    def _cache_value(self, key: str, value: HoconValue) -> None:
+        """Cache a resolved field value under *key*, and every object descendant
+        under its dotted path, charging the value budget (see
+        ``_VALUE_NODES_PER_SOURCE_NODE``).
+
+        The charge is the one rs makes: each cache entry costs the nodes of the
+        value it holds. Summed, that is each node times the entries on its path,
+        so one walk charges it; the walk never visits more nodes than it charges.
+        This is where a value that a cycle through nested objects keeps nesting
+        costs its time (building ever longer dotted keys). Iterative, so a deep
+        value cannot exhaust the stack.
+        """
+        # (cache key, or None inside an array; value; entries on the path above;
+        # the nearest cache key, named by the budget error)
+        stack: list[tuple[str | None, HoconValue, int, str]] = [(key, value, 0, key)]
+        # Charging starts only after the guard has cut a cycle (see
+        # _VALUE_NODES_PER_SOURCE_NODE); until then this only fills the cache.
+        charge = self.cuts > 0
+        while stack:
+            k, v, entries, at = stack.pop()
+            if k is not None:
+                entries += 1
+                at = k
+                self.cache[k] = v
+            if charge:
+                # The node, once per entry on its path, plus the cache-key
+                # string this entry builds.
+                self._spend(at, entries * _node_weight(v) + (len(k) // 16 if k else 0))
+            if isinstance(v, HoconObject):
+                for child_key, child in v.fields.items():
+                    ck = f"{k}.{string_segments_to_key([child_key])}" if k is not None else None
+                    stack.append((ck, child, entries, at))
+            elif charge and isinstance(v, HoconArray):
+                # Array elements are not cached, only charged.
+                stack.extend((None, item, entries, at) for item in v.items)
+
+    def _spend(self, key: str, n: int) -> None:
+        """Deduct *n* from the value budget, failing once it is exhausted."""
+        if n > self.value_budget:
+            raise ResolveError(
+                self._origin_prefix() + f"resolved value too large: {key} keeps growing "
+                "(a cycle through nested objects?)",
+                key,
+                0,
+                0,
+            )
+        self.value_budget -= n
+
+    def _charge_produced(self, key: str, value: HoconValue) -> None:
+        """After a cut, charge a substitution result as it is produced, so an
+        array or string that doubles on every lap of a cycle is stopped while
+        it is being built, not after its field is complete (a 16-key ring of
+        doubling strings took 4 GB). Iterative, and stops counting once the
+        budget is exceeded."""
+        n = 0
+        stack: list[HoconValue] = [value]
+        while stack:
+            v = stack.pop()
+            n += _node_weight(v)
+            if n > self.value_budget:
+                break
+            if isinstance(v, HoconObject):
+                stack.extend(v.fields.values())
+            elif isinstance(v, HoconArray):
+                stack.extend(v.items)
+        self._spend(key, n)
 
     def _resolve_val(self, v: ResolverValue, scope: ResObj) -> HoconValue | None:
         if is_subst(v):
-            return self._resolve_subst(v, scope)
+            resolved = self._resolve_subst(v, scope)
+            if resolved is not None and self.cuts > 0:
+                self._charge_produced(segments_to_key(v.segments), resolved)
+            return resolved
         if is_concat(v):
             # Mark mid-iteration so _resolve_subst can detect a true self-ref.
             self.resolving_concats.add(v)
@@ -154,6 +322,16 @@ class SubstitutionResolver:
         return cast("HoconValue", v)
 
     def _resolve_subst(self, s: SubstPlaceholder, scope: ResObj) -> HoconValue | None:
+        if self.cuts > 0:
+            self.subst_calls_left -= 1
+            if self.subst_calls_left < 0:
+                k = segments_to_key(s.segments)
+                raise ResolveError(
+                    self._origin_prefix() + f"substitution cycle too complex to resolve: ${{{k}}}",
+                    k,
+                    s.line,
+                    s.col,
+                )
         if s.known_absent:
             # A required substitution folded to known_absent (S13a.12 prefix
             # fold with no below value at the navigated path) is the spec's
@@ -224,13 +402,50 @@ class SubstitutionResolver:
         if key in self.resolving:
             # Cycle detected: try prior value for self-referential substitutions.
             prior = self._lookup_prior(s, scope)
+            # A prior can reach another in-progress key and resolve that key's
+            # prior, which can come back here. Re-entering is legal and usually
+            # terminates, because something that steers the branches has changed
+            # the second time. But `a = ${?b}` / `b = ${?a}` written twice
+            # re-entered in the same state forever, until the recursion limit
+            # turned it into a ParseError. A re-entry whose state equals an
+            # enclosing one is treated as a cycle that cannot be broken: the
+            # optional form is nonexistent and the required form an error, as in
+            # Lightbend. py counterpart of go.hocon#218 / rs.hocon#199; interim
+            # guard, the full fix is the resolver redesign in o3co/xx.hocon#67 /
+            # #125.
+            #
+            # The state is what was found to steer the branches a substitution
+            # takes here: the in-progress set, the S13a.12 prefix-prior guard set,
+            # the field path up to the longest substitution path (the prefix
+            # branch and the owner check never compare deeper elements), the
+            # concatenations mid-iteration (the self-ref check), and the scope
+            # (which picks the prior). Each was added because leaving it out
+            # changed a config that loads. Other state is left out: the cache,
+            # which a cycle through nested objects grows by a deeper key every
+            # lap (a state including it would never repeat). So an equal state is
+            # not a proof of an equal computation; that no config that loads
+            # changes rests on differential runs, not on a proof. There are
+            # finitely many such states, so the nesting is finite.
             if prior is not None:
-                saved = self.resolving
-                self.resolving = set(saved)
-                try:
-                    return self._resolve_val(prior, scope)
-                finally:
-                    self.resolving = saved
+                outer = self.prior_reentry.setdefault(key, [])
+                state: _PriorState = (
+                    frozenset(self.resolving),
+                    frozenset(self.resolving_prefix_priors),
+                    tuple(self.resolving_field_path[: self.max_subst_len]),
+                    frozenset(id(c) for c in self.resolving_concats),
+                    id(scope),
+                )
+                if state in outer:
+                    self.cuts += 1
+                else:
+                    outer.append(state)
+                    saved = self.resolving
+                    self.resolving = set(saved)
+                    try:
+                        return self._resolve_val(prior, scope)
+                    finally:
+                        self.resolving = saved
+                        outer.pop()
             if s.optional:
                 return None
             raise ResolveError(
