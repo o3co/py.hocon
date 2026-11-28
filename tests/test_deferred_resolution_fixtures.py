@@ -508,16 +508,9 @@ def _validate_error(
 # (the gap closed) fails the run, and so does any other failure — a step error,
 # an isResolved mismatch, a getter, a crash. An entry whose scenario is not on
 # disk has no effect.
-_XX139 = (
-    "o3co/xx.hocon#139 (resolution-model §8.3): a cycle of optionals across a "
-    "nested withFallback nests both fields instead of keeping the nested value in "
-    "the receiver's field only — fixed by the resolution layer (o3co/xx.hocon#67 "
-    "window); py: o3co/py.hocon#67"
-)
-_KNOWN_GAPS: dict[str, str] = {
-    "dr31-nested-key-order-receiver-first": _XX139,
-    "dr32-nested-key-order-receiver-first-renamed": _XX139,
-}
+# None are open: the #67 window's resolution layer closed dr31 / dr32
+# (xx.hocon#139, resolution-model §8.3).
+_KNOWN_GAPS: dict[str, str] = {}
 
 
 def _params() -> list[Any]:
