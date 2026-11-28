@@ -543,10 +543,13 @@ def _shadowed(merged: Stack, e: Val) -> bool:
     the single object ``merged`` with a stack that ignores fallbacks."""
     if len(merged) != 1 or not isinstance(merged[0], Obj):
         return False
-    if not isinstance(e, Obj) or not e.field_keys():
+    if not isinstance(e, Obj):
+        return False
+    fields = e.fields  # e is a document entry: a plain object, never copied
+    if not fields:
         return False
     top = merged[0]
-    for k in e.field_keys():
+    for k in fields:
         s = top.get_field(k)
         if s is None or not stack_ignores_fallbacks(s.stack):
             return False

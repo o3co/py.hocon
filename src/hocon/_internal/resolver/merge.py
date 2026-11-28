@@ -205,7 +205,9 @@ class Overlay(Obj):
                 return
             done.add(id(o))
             # An overlay whose fields are built already gives the same keys,
-            # in the same order, as walking its layers again.
+            # in the same order, as walking its layers again (the model walks
+            # them again; only the cost differs: layers skipped as done have
+            # all their keys seen already).
             if isinstance(o, Overlay) and o._fields is None:
                 for layer in reversed(o.layers):
                     walk(layer)

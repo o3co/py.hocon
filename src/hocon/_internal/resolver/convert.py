@@ -49,11 +49,11 @@ def from_hocon(v: HoconValue, path: Path) -> Val:
 
 
 def tree_from_hocon(o: HoconObject, path: Path = ()) -> Obj:
-    out = Obj()
+    fields: dict[str, Slot] = {}
     for k, v in o.fields.items():
         p = (*path, k)
-        out.fields[k] = Slot(k, [from_hocon(v, p)], p)
-    return out
+        fields[k] = Slot(k, [from_hocon(v, p)], p)
+    return Obj(fields)  # complete before it is frozen
 
 
 def to_hocon(v: Val) -> HoconValue:

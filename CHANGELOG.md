@@ -121,7 +121,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory): `substitution cycle too complex to resolve: ${<path>}` and
   `resolved value too large: <path> keeps growing`. Neither applies unless a
   cycle was broken, so a config without one, however large or deeply nested,
-  is never limited.
+  is never limited. A broken cycle anywhere arms both for the rest of the
+  resolve, even a harmless `x = ${?x}`: a very large config that also holds
+  one can then hit them (100,000 lookups after the break; a written-out
+  result of 10,000 units per document value, at most 2,000,000, where a node
+  is one unit plus one per 16 characters of text). Pending a decision in
+  xx.hocon docs/resolution-model.md §10 for all four implementations.
 - **BREAKING (spec fix, S1.2.4): a raw control character inside a quoted
   string is a parse error ([xx.hocon#130](https://github.com/o3co/xx.hocon/issues/130)).**
   A raw C0 control character (U+0000–U+001F) inside a double-quoted string is

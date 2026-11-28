@@ -201,6 +201,17 @@ class Patch(Obj):
     def get_field(self, k: str) -> Slot | None:
         return self.field if k == self.key else self.base.get_field(k)
 
+    def is_resolved(self) -> bool:
+        # Only the replaced key can differ from a resolved base, so the field
+        # map is not copied for this (§10.2: a patch, never a copy).
+        if self._res is None:
+            if self.base.is_resolved():
+                f = self.field
+                self._res = f is None or (len(f.stack) == 1 and is_resolved(f.stack[0]))
+            else:
+                self._res = Obj.is_resolved(self)
+        return self._res
+
     def field_keys(self) -> list[str]:
         return list(self.fields)
 

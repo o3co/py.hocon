@@ -25,7 +25,12 @@ class Substituted(Obj):
     A value that is already a :class:`Substituted` carries no flag and no
     child that carries one, so rewriting it again would change nothing but
     object identity; it is used as it is (this keeps a chain of substituted
-    objects from nesting one wrapper per level)."""
+    objects from nesting one wrapper per level). This departs from the
+    reference model, which wraps again. No result can observe it: the second
+    wrap would create no reference (nothing carries), its path is used only
+    for references, and a merged leaf built through two different
+    substitutions differs in another entry anyway (§3.5 identity). Checked on
+    34,000 generated documents against a copy that wraps again."""
 
     __slots__ = ("_cache", "base", "defer", "path", "subst")
 
@@ -48,8 +53,7 @@ class Substituted(Obj):
         f = self.base.get_field(k)
         if f is not None:
             top = f.stack[0]
-            single_obj = len(f.stack) == 1 and isinstance(top, Obj)
-            if single_obj and isinstance(top, Obj):
+            if len(f.stack) == 1 and isinstance(top, Obj):
                 # A child object goes through the same rule (flags cleared, or
                 # deferred below it), unless it is unresolved and clean.
                 if isinstance(top, Substituted):
