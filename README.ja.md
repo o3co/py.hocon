@@ -476,6 +476,7 @@ from hocon import (
     ParseError,          # 字句/構文エラー: .line, .col, .file
     ResolveError,        # 置換/include エラー: .path, .line, .col, .file
     PackageLookupError,  # include package(...) 未発見 (ResolveError のサブクラス)
+    ResolutionLimitError,  # 循環の打ち切り後の暴走 (ResolveError のサブクラス)
     ConfigError,         # 型不一致・パス不在: .path
     NotResolvedError,    # 未解決パスへの getter (ConfigError のサブクラス)
 )
@@ -486,6 +487,7 @@ from hocon import (
 | `ParseError` | 字句解析・構文解析中の構文エラー (行と列を含む) |
 | `ResolveError` | 置換の失敗、循環参照、required include の不在 |
 | `PackageLookupError` | `include package(...)` が見つからない |
+| `ResolutionLimitError` | optional な循環が打ち切られた後、解決が 100,000 回の lookup か文書の値 1 つあたり 10,000 の重みを超えた (xx.hocon resolution-model §10.3) |
 | `ConfigError` | 値アクセス時のキー不在や型不一致。配列がルートの文書 (S3.5) では `parse` / `parse_file` も送出する |
 | `NotResolvedError` | 未解決の置換を持つパスに getter を呼んだ |
 

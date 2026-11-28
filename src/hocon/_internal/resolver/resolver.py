@@ -41,6 +41,7 @@ __all__ = [
     "pending_view",
     "resolve",
     "resolve_tree",
+    "resolve_with_tree",
     "same_marks",
     "strip_placeholders",
     "tree_from_value",
@@ -67,6 +68,15 @@ def resolve_tree(tree: Tree, opts: ResolveOptions) -> HoconValue:
     """Phase 2: the resolved document. Under ``allow_unresolved`` the result
     may hold :class:`Placeholder` values."""
     return to_hocon(SubstitutionResolver(tree, opts).resolve())
+
+
+def resolve_with_tree(receiver: Tree, source: Tree, opts: ResolveOptions) -> HoconValue:
+    """Phase 2 for ``resolve_with``: the receiver resolved with the source as
+    its fallback for lookups (the caller keeps only the receiver's keys).
+    The §10.3 weight budget counts the receiver's values plus the source's,
+    each as its own root, not the merged lookup tree's."""
+    merged = with_fallback_tree(receiver, source)
+    return to_hocon(SubstitutionResolver(merged, opts, (receiver, source)).resolve())
 
 
 def resolve(ast: AstNode, opts: ResolveOptions) -> HoconValue:

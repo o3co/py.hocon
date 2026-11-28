@@ -16,6 +16,7 @@ from .errors import (
     NotResolvedError,
     PackageLookupError,
     ParseError,
+    ResolutionLimitError,
     ResolveError,
 )
 from .markers import Bytes, Duration, PeriodUnit
@@ -61,6 +62,7 @@ __all__ = [
     "ParseError",
     "Period",
     "PeriodUnit",
+    "ResolutionLimitError",
     "ResolveError",
     "ScalarValueType",
     "__version__",

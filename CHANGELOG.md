@@ -99,6 +99,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   concatenation of a list with an object that is not resolved yet (before, a
   type error). A type mismatch that is already certain still raises.
 
+- **BREAKING: limits after a cycle break, `ResolutionLimitError`**
+  (xx.hocon resolution-model §10.3, E24; with the window above). A cycle
+  break, an optional substitution catching a re-entry other than meeting only
+  itself (`x = ${?x}` does not count), opens a region that lasts until the
+  outermost substitution being resolved finishes. Inside regions a resolve
+  may start at most 100,000 lookups and build at most 10,000 weight units per
+  value of the document (a value weighs 1, plus 1 per 16 UTF-8 bytes of scalar
+  text; keys weigh nothing; under `allow_unresolved` an unresolved value
+  weighs 1 plus the pieces it keeps; for `resolve_with` the receiver's values
+  and the source's count). Past either limit it fails with the new
+  `hocon.ResolutionLimitError` (its message contains "resolution limit
+  exceeded after a cycle break", after the origin description when one is
+  given), a subclass of `ResolveError`; no optional substitution catches
+  it. This stops a dense web of optional cycles or a ring of them that
+  doubles its value on every lap, where Lightbend runs for minutes or out of
+  memory. It replaces the interim bounds of py.hocon#68 (`substitution cycle
+  too complex to resolve`, `resolved value too large`), which armed for the
+  whole resolve on the first break, even `x = ${?x}`, and capped the value
+  budget at 2,000,000: a config with a large shared object after a real
+  cycle no longer fails, and a cyclic optional chain is no longer stopped by
+  its output size (it is bounded only by the interpreter's recursion limit:
+  about 250 levels at the default, 2,000 and more with a raised one).
+  **Workaround** if a tangled optional cycle is rejected: break the cycle
+  (most such webs resolve to nothing anyway).
+
 ### Fixed
 
 - **BREAKING (extra-spec E8, xx.hocon#140): an unquoted run that starts with
@@ -121,18 +146,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Lightbend's `{}` (an optional that closes a cycle is nonexistent, a
   required one a `ResolveError`). py.hocon#68 fixed this with an interim
   guard; the resolution layer above replaces it.
-- **Two errors bound what a broken cycle may still cost**, where a dense web
-  of optional cycles keeps branching or a ring of them doubles its value on
-  every lap (the reference model and Lightbend run for minutes or out of
-  memory): `substitution cycle too complex to resolve: ${<path>}` and
-  `resolved value too large: <path> keeps growing`. Neither applies unless a
-  cycle was broken, so a config without one, however large or deeply nested,
-  is never limited. A broken cycle anywhere arms both for the rest of the
-  resolve, even a harmless `x = ${?x}`: a very large config that also holds
-  one can then hit them (100,000 lookups after the break; a written-out
-  result of 10,000 units per document value, at most 2,000,000, where a node
-  is one unit plus one per 16 characters of text). Pending a decision in
-  xx.hocon docs/resolution-model.md §10 for all four implementations.
 - **BREAKING (spec fix, S1.2.4): a raw control character inside a quoted
   string is a parse error ([xx.hocon#130](https://github.com/o3co/xx.hocon/issues/130)).**
   A raw C0 control character (U+0000–U+001F) inside a double-quoted string is
