@@ -74,7 +74,7 @@ def test_unbreakable_cycle_through_priors(src: str, want: object) -> None:
     ],
     ids=[
         "legal-reentry",
-        "prefix-prior",
+        "prefix-prior-two-element-path",
         "prefix-prior-deep",
         "field-path",
         "self-ref-chain",
@@ -162,3 +162,107 @@ def test_value_budget_spares_acyclic_configs() -> None:
         assert isinstance(path, dict)
         path = path["a"]
     assert path == {"a": 1}
+
+
+@pytest.mark.parametrize(
+    ("name", "element"),
+    [("array", "[${?a%}, ${?a%}]"), ("string", "${?a%}${?a%}x")],
+)
+def test_doubling_ring_fails_without_exhausting_memory(name: str, element: str) -> None:
+    # A 16-key ring written twice whose value doubles on every lap (review of
+    # go.hocon#223 / rs.hocon#203: the string ring took 4 GB in py, a model of
+    # the array ring reaches 17 billion nodes). Before the guard it was a
+    # recursion-limit ParseError. After a cut every substitution result is
+    # charged as it is produced and the substitutions resolved are counted, so
+    # the ring is stopped while it is being built.
+    n = 16
+    ring = "".join(f"a{i} = {element.replace('%', str((i + 1) % n))}\n" for i in range(n))
+    with pytest.raises(
+        (ResolveError, hocon.ParseError),
+        match="resolved value too large|too complex to resolve|nested too deeply",
+    ):
+        hocon.parse_string(ring + ring, env={})
+
+
+def test_document_walks_visit_shared_children_once() -> None:
+    # Current values and saved priors share children. Overriding nested
+    # prefixes from the deepest to the shallowest gives a document whose
+    # tree, unshared, is exponential in its depth: here 2**60 paths. The walks
+    # that size the guard state and the value budget must stay linear.
+    from hocon._internal.resolver import substitution_resolver as sr
+    from hocon._internal.resolver.types import ResObj
+    from hocon.value import HoconScalar
+
+    node = ResObj()
+    node.fields["v"] = HoconScalar("1", "number")
+    for _ in range(60):
+        parent = ResObj()
+        parent.fields["k"] = node
+        parent.prior_values["k"] = node
+        node = parent
+    assert sr._max_subst_len(node) == 0
+    assert sr._source_nodes(node) == 62
+
+
+# Counterexamples from review of the py guard: each loads today, and each is
+# cut by the guard. They pin the py-specific parts of the guard state: the
+# concatenations mid-iteration and the scope (a state without them changed
+# both results).
+_CX1 = (
+    "a.a = ${?b}\nc.b { b { a += x, b += ${?a}, a += [${?c}] } }\nc.b { b { a"
+    " += [] } }\na = ${c}\na = ${?a}\n"
+)
+_CX1_WANT = (
+    '{"a":{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}'
+    '],[]],"b":[["x"],["x",[{"b":{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}]]]'
+    '}}},"c":{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",'
+    '[]],"b":[["x"],{"b":{"b":{"a":["x",[{"b":{"b":{"a":["x",[]],"b":[["x"]'
+    ',["x"]]}}}],[]],"b":[["x"],["x",[{"b":{"b":{"a":["x",[]],"b":[["x"],["'
+    'x"]]}}}]]]}}}]}}}],[]],"b":[["x"],{"b":{"b":{"a":["x",[{"b":{"b":{"a":'
+    '["x",[]],"b":[["x"],["x"]]}}}],[]],"b":[["x"],["x",[{"b":{"b":{"a":["x'
+    '",[]],"b":[["x"],["x"]]}}}]]]}}}]}}}],[]],"b":[{"b":{"b":{"a":["x",[{"'
+    'b":{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}],[]],"b":[["x"],["x",[{"b":'
+    '{"b":{"a":["x",[]],"b":[["x"],["x"]]}}}]]]}}}]}}}}'
+)
+_CX2 = (
+    "b += { b { a { a = ${?c} }, a += [{ a = 1 }] }, b += { b { b { a = 1 }"
+    " ${?a}, a { a = 1 } } } } { b += 2, b = [[${?c}]] }\nc = [${?b}]\nc = ${"
+    "?b}\na.a.a = ${?c}\nb += { b { a { a { a = 1 } }, a += [{ a = 1 }] }, b "
+    "+= { b { b { a = 1 } { a = 1 } } } }\n"
+)
+_CX2_WANT = (
+    '{"a":{"a":{"a":[{"b":[[[{"b":[[[[2]]]]}]]]},{"b":[{"b":{"b":{"a":1}}}]'
+    '}]}},"b":[{"b":[[[{"b":[[[[2]]]]}]]]},{"b":[{"b":{"b":{"a":1}}}]}],"c"'
+    ':[{"b":[[[{"b":[[[[2]]]]}]]]},{"b":[{"b":{"b":{"a":1}}}]}]}'
+)
+
+
+@pytest.mark.parametrize(
+    ("src", "want"), [(_CX1, _CX1_WANT), (_CX2, _CX2_WANT)], ids=["cx1", "cx2"]
+)
+def test_cut_config_that_loads_reads_the_same(src: str, want: str) -> None:
+    assert _json(src) == json.loads(want)
+
+
+# Inputs that failed fast before the guard and hung after it, until the state
+# held the concatenations and the scope. They must fail fast, as before.
+_S16427 = (
+    "o.o = { o = ${?o.a} ${?o.o} }\no.b = ${o.b}x\no.o.a = ${o.o.a} y\no.o.a +"
+    "= ${?o}[1]\no.o.a = x${?o.o}\no.a = ${o.o.a}y\no.o.a = ${o.o.a} y\no.o.a +"
+    "= ${?o}[1]\no.o.a = x${?o.o}\no.a = ${o.o.a}y\no.o.a = x${?o.o}\no.o.a = $"
+    "{o.o.a} y\no.o.a += ${?o}[1]\no.o.a = x${?o.o}\no.a = ${o.o.a}y\n"
+)
+_H04998 = (
+    "o.y = ${o.y} ${o.y}\nb = ${a}${b}\no.y.z = ${?o.y.z}${?o}\no.x = ${o.x} y"
+    "\no.y.z += ${?o.y.z} ${?c}\no.x = ${o.x}\no.y.z = ${?o.y.z}${?o}\no.x = ${"
+    "o.x} y\no.y.z += ${?o.y.z} ${?c}\no.x = ${o.x}\no.y.z = ${?o.y.z}${?o}\no."
+    "x = ${o.x} y\no.y.z += ${?o.y.z} ${?c}\no.x = ${o.x}\no.x = ${o.x}x\no.y.z"
+    " = ${o.y.z} y\n"
+)
+
+
+def test_former_fast_errors_still_fail() -> None:
+    with pytest.raises(ResolveError, match="circular substitution"):
+        hocon.parse_string(_S16427, env={})
+    with pytest.raises(hocon.ParseError, match="nested too deeply"):
+        hocon.parse_string(_H04998, env={})
