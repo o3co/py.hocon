@@ -97,6 +97,11 @@ _XX115 = (
     "o3co/xx.hocon#115: the including file's a = ${missing} under an included "
     "object is not live (E16), so the unresolved required reference is not seen"
 )
+_XX139 = (
+    "o3co/xx.hocon#139 resolution-model fixture: the reference model raises but "
+    "py.hocon accepts the input — fixed by the resolution layer (o3co/xx.hocon#67 "
+    "window); py: o3co/py.hocon#67"
+)
 _KNOWN_GAPS: dict[str, str] = {
     "include-optional-prior/io19-live-prior-required-missing": _XX115,
     **{
@@ -127,6 +132,28 @@ _KNOWN_GAPS: dict[str, str] = {
         "prior object is not removed, so the required ${a.n} resolves to an "
         "invented value instead of raising"
     ),
+    **{
+        f"resolution-model/{name}": _XX139
+        for name in (
+            "rv011-br-top-seen",
+            "rv021-fo-rv-restricted-then-full",
+            "rv033-pye-13",
+            "rv034-pye-14",
+            "rv051-pyp-p10",
+            "rv061-pyp-p20",
+            "rv066-pyp-p25",
+            "rv067-pyp-p30",
+            "rv089-rv-self-bottom-noenv",
+            "rv095-rv-xd1",
+            "rv096-rv-xd2",
+            "rv097-rv-y1",
+            "rv099-tsc-c01",
+            "rv115-fo-rq29",
+            "rv120-rv-restricted-then-full",
+            "rv122-alias-presence-j2",
+            "rv123-alias-presence-renamed",
+        )
+    },
 }
 
 # On-disk error-fixture census at the time of writing (guard floor):

@@ -73,6 +73,11 @@ class _YamlSubsetError(ValueError):
     """Scenario file uses YAML outside the supported subset."""
 
 
+class _TreeMismatch(AssertionError):
+    """The resolved tree differs from the expected one (the only failure a
+    known gap may have)."""
+
+
 _KEY_RE = re.compile(r"[A-Za-z0-9_.\-]+")
 _INT_RE = re.compile(r"-?\d+")
 _FLOAT_RE = re.compile(r"-?\d+\.\d+")
@@ -450,6 +455,7 @@ def _validate_success(
         assert cfg.is_resolved() is expect["isResolved"], (
             f"{stem}: is_resolved() = {cfg.is_resolved()}, want {expect['isResolved']}"
         )
+    mismatch: _TreeMismatch | None = None
     if cfg.is_resolved():
         expected_file = _DR_EXPECTED / f"{stem}-expected.json"
         raw = (
@@ -458,10 +464,16 @@ def _validate_success(
             else expect.get("json")
         )
         if raw is not None:
-            got = json.loads(cfg._render_json_for_test())
-            assert _norm(got) == _norm(json.loads(raw)), f"{stem}: JSON tree mismatch"
+            got = _norm(json.loads(cfg._render_json_for_test()))
+            want = _norm(json.loads(raw))
+            if got != want:
+                mismatch = _TreeMismatch(f"{stem}: JSON tree mismatch\n got:  {got}\n want: {want}")
+    # Getters run before a tree mismatch is raised, so a known gap's getters
+    # are still checked.
     for g in expect.get("getter", []):
         _assert_getter(stem, cfg, g)
+    if mismatch is not None:
+        raise mismatch
 
 
 def _validate_error(
@@ -491,6 +503,22 @@ def _validate_error(
 
 # ─── test parametrization ──────────────────────────────────────────────────────
 
+# Known gaps: scenarios whose expected tree py.hocon does not produce yet. Each
+# is a strict xfail limited to the tree comparison (_TreeMismatch): an XPASS
+# (the gap closed) fails the run, and so does any other failure — a step error,
+# an isResolved mismatch, a getter, a crash. An entry whose scenario is not on
+# disk has no effect.
+_XX139 = (
+    "o3co/xx.hocon#139 (resolution-model §8.3): a cycle of optionals across a "
+    "nested withFallback nests both fields instead of keeping the nested value in "
+    "the receiver's field only — fixed by the resolution layer (o3co/xx.hocon#67 "
+    "window); py: o3co/py.hocon#67"
+)
+_KNOWN_GAPS: dict[str, str] = {
+    "dr31-nested-key-order-receiver-first": _XX139,
+    "dr32-nested-key-order-receiver-first-renamed": _XX139,
+}
+
 
 def _params() -> list[Any]:
     if not _DR_YAML.is_dir():
@@ -498,7 +526,12 @@ def _params() -> list[Any]:
     params: list[Any] = []
     for path in sorted(_DR_YAML.glob("*.yaml")):
         stem = path.stem  # e.g. "dr01-basic-fallback"
-        params.append(pytest.param(stem, _load_scenario(path), id=stem))
+        marks = []
+        if stem in _KNOWN_GAPS:
+            marks.append(
+                pytest.mark.xfail(strict=True, raises=_TreeMismatch, reason=_KNOWN_GAPS[stem])
+            )
+        params.append(pytest.param(stem, _load_scenario(path), id=stem, marks=marks))
     return params
 
 

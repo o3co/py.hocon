@@ -49,18 +49,20 @@ _CONF = _TESTDATA / "hocon"
 _JVM_XFAIL = {"test01", "test03"}
 
 
-def _load_known_gaps() -> dict[str, str]:
-    """Success-side known gaps, declared once in ``known_gaps.py``."""
+def _load_known_gaps() -> tuple[dict[str, str], dict[str, str]]:
+    """Success-side known gaps and pending-step-b skips, declared once in ``known_gaps.py``."""
     spec = importlib.util.spec_from_file_location("known_gaps", _HERE / "known_gaps.py")
     assert spec and spec.loader
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     gaps: dict[str, str] = mod.SUCCESS_KNOWN_GAPS
-    return gaps
+    pending: dict[str, str] = mod.PENDING_STEP_B
+    return gaps, pending
 
 
-# Known gaps (strict xfail — an XPASS fails the run for triage).
-_KNOWN_GAPS = _load_known_gaps()
+# Known gaps (strict xfail — an XPASS fails the run for triage) and
+# pending-step-b cases (skipped, per the xx.hocon runner contract).
+_KNOWN_GAPS, _PENDING_STEP_B = _load_known_gaps()
 
 pytestmark = pytest.mark.skipif(
     not _EXPECTED.is_dir() or not _CONF.is_dir(),
@@ -135,6 +137,8 @@ def _params() -> list:
             )
         if base in _KNOWN_GAPS:
             marks.append(pytest.mark.xfail(strict=True, reason=_KNOWN_GAPS[base]))
+        if base in _PENDING_STEP_B:
+            marks.append(pytest.mark.skip(reason=_PENDING_STEP_B[base]))
         params.append(pytest.param(base, conf, expected, id=base, marks=marks))
     return params
 
