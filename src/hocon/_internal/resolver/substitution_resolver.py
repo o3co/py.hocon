@@ -47,7 +47,7 @@ _PriorState = tuple[frozenset[str], frozenset[str], tuple[str, ...], frozenset[i
 # milliseconds before the guard (the recursion limit) ran for minutes after
 # it. Only inputs that have been cut are counted, so an acyclic config, however
 # large, is never limited. Interim, like the guard (o3co/xx.hocon#67 / #125).
-_SUBST_CALLS_AFTER_CUT = 200_000
+_SUBST_CALLS_AFTER_CUT = 100_000
 
 
 # Value nodes the resolver may cache per node of the document, once the prior
@@ -63,13 +63,21 @@ _SUBST_CALLS_AFTER_CUT = 200_000
 # costs the nodes of its value). Interim, like the guard (o3co/xx.hocon#67 /
 # #125).
 _VALUE_NODES_PER_SOURCE_NODE = 10_000
+# Upper bound on that budget, whatever the document's size: a 10,000-element
+# array or many saved priors inflated the node count until a 20 KB input could
+# spend 1–3 GB before failing. Matches rs and go.
+_VALUE_BUDGET_CAP = 2_000_000
 
 
 def _node_weight(v: HoconValue) -> int:
     """Weight of one resolved node for the value budget: 1, plus one per 16
-    bytes of scalar text (a string that doubles on every lap grows without
-    adding nodes). Matches rs."""
-    return 1 + len(v.raw) // 16 if isinstance(v, HoconScalar) else 1
+    bytes of scalar text or of object key text (a string or key that doubles on
+    every lap grows without adding nodes). Matches rs."""
+    if isinstance(v, HoconScalar):
+        return 1 + len(v.raw) // 16
+    if isinstance(v, HoconObject):
+        return 1 + sum(len(k) for k in v.fields) // 16
+    return 1
 
 
 def _source_nodes(root: ResObj) -> int:
@@ -144,7 +152,9 @@ class SubstitutionResolver:
         self.max_subst_len = _max_subst_len(root)
         # Value nodes resolution may still cache before it fails; see
         # _VALUE_NODES_PER_SOURCE_NODE.
-        self.value_budget = _source_nodes(root) * _VALUE_NODES_PER_SOURCE_NODE
+        self.value_budget = min(
+            _source_nodes(root) * _VALUE_NODES_PER_SOURCE_NODE, _VALUE_BUDGET_CAP
+        )
         # Times the prior re-entry guard refused a re-entry. The value budget
         # applies only once this is non-zero.
         self.cuts = 0
@@ -237,7 +247,9 @@ class SubstitutionResolver:
                 at = k
                 self.cache[k] = v
             if charge:
-                self._spend(at, entries * _node_weight(v))
+                # The node, once per entry on its path, plus the cache-key
+                # string this entry builds.
+                self._spend(at, entries * _node_weight(v) + (len(k) // 16 if k else 0))
             if isinstance(v, HoconObject):
                 for child_key, child in v.fields.items():
                     ck = f"{k}.{string_segments_to_key([child_key])}" if k is not None else None

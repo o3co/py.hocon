@@ -266,3 +266,45 @@ def test_former_fast_errors_still_fail() -> None:
         hocon.parse_string(_S16427, env={})
     with pytest.raises(hocon.ParseError, match="nested too deeply"):
         hocon.parse_string(_H04998, env={})
+
+
+def _wide_reference() -> str:
+    # w8: a two-key cycle written twice, each value referencing the other key
+    # eight times.
+    a = "a = " + "${?b}" * 8 + "\n"
+    b = "b = " + "${?a}" * 8 + "\n"
+    return (a + b) * 2
+
+
+def _dense_cycle() -> str:
+    # e6: six keys, written twice, each referencing all six.
+    refs = "".join(f"${{?k{j}}}" for j in range(1, 7))
+    return "".join(f"k{i} = {refs}\n" for i in range(1, 7)) * 2
+
+
+def _padded_object_ring() -> str:
+    # objring_64_p10000: a 10,000-element array inflates the document's node
+    # count (and so the uncapped value budget), next to a 16-key ring of
+    # objects with 64-byte keys, written twice.
+    pad = "pad = [" + ",".join(["1"] * 10_000) + "]\n"
+    x, y = "x" * 64, "y" * 64
+    ring = "".join(
+        f"a{i} = {{ {x} = ${{?a{(i + 1) % 16}}}, {y} = ${{?a{(i + 1) % 16}}} }}\n"
+        for i in range(16)
+    )
+    return pad + ring * 2
+
+
+@pytest.mark.parametrize(
+    "build",
+    [_wide_reference, _dense_cycle, _padded_object_ring],
+    ids=["wide-reference", "dense-cycle", "padded-object-ring"],
+)
+def test_post_cut_work_is_bounded(build: object) -> None:
+    # Review of the rs memory exhaustion: before the value budget was capped
+    # and counted key text, a 20 KB input could reach 1–3 GB; a cycle that
+    # keeps branching could run for seconds. Each must now fail with one of
+    # the two post-cut limits.
+    assert callable(build)
+    with pytest.raises(ResolveError, match="too complex to resolve|resolved value too large"):
+        hocon.parse_string(build(), env={})
