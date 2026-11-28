@@ -29,6 +29,7 @@ from .values import (
     Slot,
     Stack,
     Subst,
+    Unresolved,
     Val,
     carries_stack,
     field_resolved,
@@ -341,8 +342,10 @@ def join(
     it once resolved.
     """
     left = builder[-1]
-    if isinstance(left, (Subst, Concat)) or isinstance(right, (Subst, Concat)):
-        builder.append(right)
+    if isinstance(left, (Subst, Concat, Unresolved)) or isinstance(
+        right, (Subst, Concat, Unresolved)
+    ):
+        builder.append(right)  # not joinable yet: kept as its own piece
         return
     # Rule 0: an object next to a list is first converted to a list.
     if isinstance(left, Obj) and isinstance(right, Lst):

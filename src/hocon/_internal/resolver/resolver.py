@@ -17,7 +17,14 @@ import dataclasses
 
 from ...value import HoconObject, HoconScalar, HoconValue
 from ..parser.ast import AstNode
-from .convert import Placeholder, pending_view, to_hocon, tree_from_hocon, val_contains_placeholders
+from .convert import (
+    Placeholder,
+    pending_view,
+    same_marks,
+    to_hocon,
+    tree_from_hocon,
+    val_contains_placeholders,
+)
 from .include_loader import IncludeLoader
 from .merge import fallback
 from .structure_builder import StructureBuilder
@@ -125,4 +132,4 @@ def strip_placeholders(v: HoconObject) -> tuple[HoconObject, bool]:
             had = True
         else:
             fields[k] = val
-    return HoconObject(fields), had
+    return same_marks(v, HoconObject(fields)), had

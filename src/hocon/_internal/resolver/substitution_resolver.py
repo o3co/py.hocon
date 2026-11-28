@@ -234,6 +234,10 @@ class SubstitutionResolver:
             return self._resolve_subst(v, view, restrict)
         if isinstance(v, Concat):
             return self._resolve_concat(v, view)
+        if isinstance(v, Unresolved):
+            # allow_unresolved: a memoized object can hold one as a leaf;
+            # reading it again leaves it unresolved.
+            return v
         raise ResolveError(f"internal: cannot resolve {type(v).__name__}", "", 0, 0)
 
     def _resolve_obj(self, o: Obj, view: View, restrict: Path | None) -> Obj:
@@ -288,12 +292,12 @@ class SubstitutionResolver:
                 continue
             if isinstance(r, Unresolved):
                 # allow_unresolved: the concatenation stays unresolved, but the
-                # other pieces are still resolved, so a cycle in them aborts.
+                # other pieces are still resolved, so a cycle in them aborts,
+                # and they are still joined below, so a type error between two
+                # known pieces raises (Lightbend leaves the reference as an
+                # unjoinable piece and joins the rest).
                 unresolved = unresolved or r
-                continue
             resolved.append(r)
-        if unresolved is not None:
-            return unresolved
         result: Result = MISSING  # every piece omitted
         if resolved:
             # After a cycle break, check the joined size before joining: a
@@ -310,6 +314,8 @@ class SubstitutionResolver:
                     c.col,
                 )
             joined = consolidate(resolved, at_parse=False, line=c.line, col=c.col)
+            if unresolved is not None:
+                return unresolved
             if len(joined) != 1:
                 if self.allow_unresolved:
                     # An unresolved object next to a list cannot be joined

@@ -249,3 +249,82 @@ def test_resolved_question_builds_no_field_map() -> None:
     patch = Patch(unresolved_base, "k0", Slot("k0", [Scalar("x", "string", True)], ("k0",)))
     assert patch.is_resolved()
     assert patch._fields is None
+
+
+# --- review threads on #67 (each against Lightbend 1.4.10) ---
+
+
+@pytest.mark.parametrize(
+    "src",
+    ["a { x = ${missing} }\nb = ${a.x}", "b = ${a.x}\na { x = ${missing} }"],
+    ids=["reader-last", "reader-first"],
+)
+def test_allow_unresolved_reads_a_memoized_unresolved_leaf(src: str) -> None:
+    # Reading a.x after `a` was memoized with an unresolved leaf used to raise
+    # "internal: cannot resolve Unresolved" in one line order. Lightbend
+    # leaves both a.x and b unresolved.
+    cfg = parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)
+    assert not cfg.is_resolved()
+    with pytest.raises(NotResolvedError):
+        cfg.get("b")
+
+
+def test_allow_unresolved_still_rejects_a_known_concatenation_type_error() -> None:
+    # The object and the quoted string can never join, whatever ${missing}
+    # becomes: Lightbend raises WrongType here even under allowUnresolved.
+    src = 'a = ${missing}${obj}${text}\nobj = {p = 1}\ntext = "x"'
+    with pytest.raises(ResolveError, match="cannot concatenate"):
+        parse(src, resolve_substitutions=False).resolve(allow_unresolved=True)
+
+
+def test_deferred_merge_keeps_an_unquoted_whitespace_value() -> None:
+    # `x` resolves to unquoted whitespace, which a list drops (§1.3 rule 3).
+    # A resolved Config handed to with_fallback keeps it unquoted, as one
+    # parse of the same text does (Lightbend gives a = [1] both ways).
+    one_go = parse("a = [1]${x}\nx = ${?p} ${?q}", env={}).to_object()
+    fallback = parse("x = ${?p} ${?q}", env={})
+    deferred = (
+        parse("a = [1]${x}", resolve_substitutions=False)
+        .with_fallback(fallback)
+        .resolve(use_system_environment=False)
+        .to_object()
+    )
+    assert one_go == deferred == {"a": [1], "x": " "}
+
+
+def test_resolved_config_keeps_ignoring_fallbacks() -> None:
+    # `a = null` / `a = {x = 1}` makes `a` ignore fallbacks (F6). That holds
+    # for a resolved Config too, so a later with_fallback adds nothing to `a`
+    # (Lightbend: {a: {x: 1}} deferred or resolved first).
+    fb = from_map({"a": {"helper": 0}})
+    deferred = parse("a = null\na = {x = 1}", resolve_substitutions=False).with_fallback(fb)
+    resolved_first = parse("a = null\na = {x = 1}").with_fallback(fb)
+    assert deferred.resolve().to_object() == {"a": {"x": 1}}
+    assert resolved_first.resolve().to_object() == {"a": {"x": 1}}
+
+
+@pytest.mark.parametrize(
+    ("src", "want"),
+    [
+        ("d { x = [] }\nc = ${d}\nc { x += 1, x += 2 }", {"d": {"x": []}, "c": {"x": [1, 2]}}),
+        ("d { x = [0] }\nc = ${d}\nc { x += 1, x += 2 }", {"d": {"x": [0]}, "c": {"x": [0, 1, 2]}}),
+        # Keys renamed so that Lightbend's hash order is the document order.
+        ("a { x = [] }\nb = ${a}\nb { x += 1, x += 2 }", {"a": {"x": []}, "b": {"x": [1, 2]}}),
+    ],
+    ids=["pe013", "pe013-nonempty-base", "pe013-renamed"],
+)
+def test_look_back_through_a_merged_leaf(src: str, want: object) -> None:
+    # zig-hocon plus-equals-field-separator/013 (§3.5, J3; rv125 / rv126).
+    assert _resolve(src) == want
+
+
+@pytest.mark.parametrize(
+    "src",
+    ["a = { b: 1 } x", "a = [1] x", "x = s\nc = [1] ${x}"],
+    ids=["object-then-text", "list-then-text", "substituted-text"],
+)
+def test_text_after_a_list_or_object_is_an_error(src: str) -> None:
+    # §1.3 rule 3 / E5 option (B): only whitespace is dropped, at parse time
+    # and when resolving alike (Lightbend 1.4.10).
+    with pytest.raises(ResolveError, match="cannot concatenate"):
+        _resolve(src)

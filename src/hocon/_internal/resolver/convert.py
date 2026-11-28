@@ -9,10 +9,19 @@
 
 :class:`Placeholder` is the only thing of this package that reaches
 ``Config``: it marks "a value exists here but is not resolved".
+
+Two facts of a resolved value have no place in the public types but still
+matter when a resolved Config is merged again (``with_fallback``,
+``resolve_with``): whether a string was unquoted (§1.3 rule 3 drops unquoted
+whitespace after a list or an object) and whether an object ignores fallbacks
+(§2.1 F2). :func:`to_hocon` records both by identity, and :func:`from_hocon`
+reads them back, so a deferred merge of a resolved Config gives what one
+resolve of the same text gives, as in Lightbend.
 """
 
 from __future__ import annotations
 
+import weakref
 from typing import cast
 
 from ...value import HoconArray, HoconObject, HoconScalar, HoconValue
@@ -22,10 +31,17 @@ __all__ = [
     "Placeholder",
     "from_hocon",
     "pending_view",
+    "same_marks",
     "to_hocon",
     "tree_from_hocon",
     "val_contains_placeholders",
 ]
+
+
+# Public values made from an unquoted string, and from an object that ignores
+# fallbacks (see the module docstring).
+_UNQUOTED: weakref.WeakSet[HoconScalar] = weakref.WeakSet()
+_IGNORES_FALLBACKS: weakref.WeakSet[HoconObject] = weakref.WeakSet()
 
 
 class Placeholder:
@@ -39,13 +55,14 @@ class Placeholder:
 
 
 def from_hocon(v: HoconValue, path: Path) -> Val:
-    """A public value as a model value. Strings count as quoted, as in
-    Lightbend's ``fromAnyRef`` and ``.properties`` parsing."""
+    """A public value as a model value. A string counts as quoted, as in
+    Lightbend's ``fromAnyRef`` and ``.properties`` parsing, unless a resolve
+    made it from an unquoted one."""
     if isinstance(v, HoconObject):
         return tree_from_hocon(v, path)
     if isinstance(v, HoconArray):
         return Lst([from_hocon(i, path) for i in v.items])
-    return Scalar(v.raw, v.value_type, True)
+    return Scalar(v.raw, v.value_type, v not in _UNQUOTED)
 
 
 def tree_from_hocon(o: HoconObject, path: Path = ()) -> Obj:
@@ -53,14 +70,17 @@ def tree_from_hocon(o: HoconObject, path: Path = ()) -> Obj:
     for k, v in o.fields.items():
         p = (*path, k)
         fields[k] = Slot(k, [from_hocon(v, p)], p)
-    return Obj(fields)  # complete before it is frozen
+    return Obj(fields, o in _IGNORES_FALLBACKS)  # complete before it is frozen
 
 
 def to_hocon(v: Val) -> HoconValue:
     """A resolve result as public values. Under ``allow_unresolved`` the result
     may still hold unresolved parts; each becomes a :class:`Placeholder`."""
     if isinstance(v, Scalar):
-        return HoconScalar(v.raw, v.value_type)
+        scalar = HoconScalar(v.raw, v.value_type)
+        if v.is_unquoted_string():
+            _UNQUOTED.add(scalar)
+        return scalar
     if isinstance(v, Lst):
         return HoconArray([to_hocon(i) for i in v.items])
     if isinstance(v, Obj):
@@ -71,8 +91,19 @@ def to_hocon(v: Val) -> HoconValue:
                 if len(s.stack) == 1
                 else cast("HoconValue", Placeholder(s.stack))
             )
-        return HoconObject(fields)
+        obj = HoconObject(fields)
+        if v.flag:
+            _IGNORES_FALLBACKS.add(obj)
+        return obj
     return cast("HoconValue", Placeholder(v))
+
+
+def same_marks(old: HoconObject, new: HoconObject) -> HoconObject:
+    """``new``, a copy of ``old`` with fields dropped, keeps whether ``old``
+    ignores fallbacks."""
+    if old in _IGNORES_FALLBACKS:
+        _IGNORES_FALLBACKS.add(new)
+    return new
 
 
 def pending_view(o: Obj) -> HoconObject:
