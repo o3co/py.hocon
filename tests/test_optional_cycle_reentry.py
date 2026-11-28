@@ -54,10 +54,32 @@ def test_unbreakable_cycle_through_priors(src: str, want: object) -> None:
             "o = { y = ${?a} }\na = ${o.y}\no.x = 5\no.y += [3]\n",
             {"a": [[3]], "o": {"x": 5, "y": [[3]]}},
         ),
+        # The second pass through k's prior terminates because `o` has
+        # meanwhile entered the S13a.12 prefix-prior guard set: the guard's
+        # state must include that set, not only the in-progress keys.
+        (
+            "o = ${?k}z\no.y = ${?o.y}\nk = ${?o.x}\nk = ${k}z\n",
+            {"k": "z", "o": {}},
+        ),
+        (
+            "o = ${?k}z\no.y.z = ${?o.y.z}\nk = ${?o.x}\nk = ${k}z\n",
+            {"k": "z", "o": {"y": {}}},
+        ),
+        (
+            "o = { y = ${?k} }\nk = [${?o.y}]\nk = ${?m}\nm = ${?k}\no = ${?k}\n",
+            {"k": [[]], "m": [[]], "o": [[]]},
+        ),
         ("a = 1\na = ${a}x\na = ${a}y\nb = ${a}\n", {"a": "1xy", "b": "1xy"}),
         ("a = ${?b}\nb = ${?a}\na = ${?b}\n", {}),
     ],
-    ids=["legal-reentry", "self-ref-chain", "cycle-once"],
+    ids=[
+        "legal-reentry",
+        "prefix-prior",
+        "prefix-prior-deep",
+        "field-path",
+        "self-ref-chain",
+        "cycle-once",
+    ],
 )
 def test_legal_reentry_unchanged(src: str, want: object) -> None:
     assert _json(src) == want

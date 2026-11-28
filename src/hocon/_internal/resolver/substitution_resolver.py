@@ -35,6 +35,29 @@ from .utils import (
 
 __all__ = ["SubstitutionResolver"]
 
+# (in-progress set, S13a.12 prefix-prior guard set, truncated field path); see
+# the prior re-entry guard in SubstitutionResolver._resolve_subst.
+_PriorState = tuple[frozenset[str], frozenset[str], tuple[str, ...]]
+
+
+def _max_subst_len(root: ResObj) -> int:
+    """Longest substitution path (in segments) anywhere under *root*, priors
+    included. Iterative, so a deeply nested document cannot exhaust the stack."""
+    best = 0
+    stack: list[object] = [root]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, SubstPlaceholder):
+            best = max(best, len(v.segments))
+        elif isinstance(v, ConcatPlaceholder):
+            stack.extend(v.nodes)
+        elif isinstance(v, ResObj):
+            stack.extend(v.fields.values())
+            stack.extend(v.prior_values.values())
+        elif isinstance(v, HoconArray):
+            stack.extend(v.items)
+    return best
+
 
 class SubstitutionResolver:
     def __init__(self, root: ResObj, opts: ResolveOptions) -> None:
@@ -52,10 +75,16 @@ class SubstitutionResolver:
         # a shape the fold could not see through — report it as unresolvable
         # instead of recursing forever.
         self.resolving_prefix_priors: set[str] = set()
-        # In-progress sets seen when a key's saved prior started resolving in
+        # Resolver states seen when a key's saved prior started resolving in
         # the in-progress branch of _resolve_subst, one per enclosing
         # resolution of that prior. See the guard there.
-        self.prior_reentry: dict[str, list[frozenset[str]]] = {}
+        self.prior_reentry: dict[str, list[_PriorState]] = {}
+        # Longest substitution path (segments) in the document, priors
+        # included. Only that many leading elements of resolving_field_path can
+        # steer a resolution (the S13a.12 prefix branch needs len(rfp) <
+        # len(segments); the owner check compares the first len(segments)
+        # elements), so the guard records only those.
+        self.max_subst_len = _max_subst_len(root)
 
     def _origin_prefix(self) -> str:
         return f"{self.opts.origin_description}: " if self.opts.origin_description else ""
@@ -240,17 +269,30 @@ class SubstitutionResolver:
             # a cycle through nested objects adds a deeper cache key each lap.
             # py counterpart of go.hocon#218 / rs.hocon#199; interim guard, the
             # full fix is the resolver redesign in o3co/xx.hocon#67 / #125.
-            state = frozenset(self.resolving)
-            outer = self.prior_reentry.setdefault(key, [])
-            if prior is not None and state not in outer:
-                outer.append(state)
-                saved = self.resolving
-                self.resolving = set(saved)
-                try:
-                    return self._resolve_val(prior, scope)
-                finally:
-                    self.resolving = saved
-                    outer.pop()
+            #
+            # The state is everything that steers the branches a substitution
+            # takes here: the in-progress set, the S13a.12 prefix-prior guard
+            # set, and the field path up to the longest substitution path
+            # (deeper elements are never compared). Keying on the in-progress
+            # set alone changed loadable configs: a second pass can terminate
+            # because a key has meanwhile entered the prefix-prior guard set.
+            # There are finitely many such states, so the nesting is finite.
+            if prior is not None:
+                outer = self.prior_reentry.setdefault(key, [])
+                state: _PriorState = (
+                    frozenset(self.resolving),
+                    frozenset(self.resolving_prefix_priors),
+                    tuple(self.resolving_field_path[: self.max_subst_len]),
+                )
+                if state not in outer:
+                    outer.append(state)
+                    saved = self.resolving
+                    self.resolving = set(saved)
+                    try:
+                        return self._resolve_val(prior, scope)
+                    finally:
+                        self.resolving = saved
+                        outer.pop()
             if s.optional:
                 return None
             raise ResolveError(
